@@ -21,6 +21,8 @@ poses = splat.get_poses()
 tnow = time.time()
 output = splat.render(poses[0])
 print("Elapsed: ", time.time() - tnow)
+
+og_image = output['rgb'].cpu().numpy()
 # %%
 # Parses render output for the intermediate rasterization variables
 info = output["info"]
@@ -55,11 +57,93 @@ gs_ids, pixel_ids, camera_ids = rasterize_to_indices_in_range(
     info["flatten_ids"],
 )
 print('Elapsed: ', time.time() - tnow)
+
+means2d = info["means2d"]
+conics = info["conics"]
+opacities = info["opacities"]
+image_width = info["width"]
+image_height = info["height"]
+tile_size = info["tile_size"]
+isect_offsets = info["isect_offsets"]
+flatten_ids = info["flatten_ids"]
 #%%
 
-tnow = time.time()
-_, counts = torch.unique(pixel_ids, return_counts=True)
-print('Elapsed: ', time.time() - tnow)
-print(counts.max())
-print(counts.min())
+# tnow = time.time()
+# _, counts = torch.unique(pixel_ids, return_counts=True)
+# print('Elapsed: ', time.time() - tnow)
+# print(counts.max())
+# print(counts.min())
 # %%
+
+# split ordered list
+
+# tnow = time.time()
+# for i in range(pixel_ids.max()):
+
+#     intersect_ids = (pixel_ids == i)
+
+#     g_ids = gs_ids[intersect_ids]
+# print('Elapsed: ', time.time() - tnow)
+
+from nerfacc import accumulate_along_rays, render_weight_from_alpha
+
+C, N = means2d.shape[:2]
+
+pixel_ids_x = pixel_ids % image_width
+pixel_ids_y = pixel_ids // image_width
+pixel_coords = torch.stack([pixel_ids_x, pixel_ids_y], dim=-1) + 0.5  # [M, 2]
+deltas = pixel_coords - means2d[camera_ids, gs_ids]  # [M, 2]
+c = conics[camera_ids, gs_ids]  # [M, 3]
+sigmas = (
+    0.5 * (c[:, 0] * deltas[:, 0] ** 2 + c[:, 2] * deltas[:, 1] ** 2)
+    + c[:, 1] * deltas[:, 0] * deltas[:, 1]
+)  # [M]
+alphas = torch.clamp_max(
+    opacities[camera_ids, gs_ids] * torch.exp(-sigmas), 0.999
+)
+
+indices = camera_ids * image_height * image_width + pixel_ids
+total_pixels = C * image_height * image_width
+
+weights, trans = render_weight_from_alpha(
+    alphas, ray_indices=indices, n_rays=total_pixels
+)
+
+# renders = accumulate_along_rays(
+#         weights,
+#         None,
+#         ray_indices=indices,
+#         n_rays=total_pixels,
+#     ).reshape(C, image_height, image_width, 1)
+
+# src = weights[..., None]
+# outputs = torch.zeros(
+#             (total_pixels, src.shape[-1]), device=src.device, dtype=src.dtype
+#             )
+# outputs.index_add_(0, indices, src)
+# %%
+
+# Change colors of splats
+colors = splat.pipeline.model.colors
+
+new_color = colors[gs_ids]
+new_color = weights[..., None] * new_color
+
+colors[gs_ids] = new_color
+
+#%%
+splat.pipeline.model.features_dc = torch.nn.Parameter(colors)
+# %%
+
+import matplotlib.pyplot as plt
+
+tnow = time.time()
+output = splat.render(poses[0])
+print("Elapsed: ", time.time() - tnow)
+
+new_image = output["rgb"].cpu().numpy()
+
+fig, ax = plt.subplots(2)
+ax[0].imshow(og_image)
+ax[1].imshow(new_image)
+plt.show()
