@@ -6,6 +6,7 @@ import open3d as o3d
 from splat.utils import *
 from gsplat.cuda._torch_impl import _rasterize_to_pixels
 from gsplat.cuda._wrapper import rasterize_to_indices_in_range
+import matplotlib.pyplot as plt
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -109,13 +110,6 @@ weights, trans = render_weight_from_alpha(
     alphas, ray_indices=indices, n_rays=total_pixels
 )
 
-# renders = accumulate_along_rays(
-#         weights,
-#         None,
-#         ray_indices=indices,
-#         n_rays=total_pixels,
-#     ).reshape(C, image_height, image_width, 1)
-
 # src = weights[..., None]
 # outputs = torch.zeros(
 #             (total_pixels, src.shape[-1]), device=src.device, dtype=src.dtype
@@ -123,27 +117,64 @@ weights, trans = render_weight_from_alpha(
 # outputs.index_add_(0, indices, src)
 # %%
 
-# Change colors of splats
-colors = splat.pipeline.model.colors
+# # Change colors of splats
+# colors = splat.pipeline.model.gauss_params["features_dc"]
 
-new_color = colors[gs_ids]
-new_color = weights[..., None] * new_color
+# # colors.requires_grad_(False)
 
-colors[gs_ids] = new_color
+# new_color = colors[gs_ids]
+# new_color = weights[..., None] * new_color
 
-#%%
-splat.pipeline.model.features_dc = torch.nn.Parameter(colors)
+# colors[gs_ids] = new_color
+
+def shadow_fn(input):
+    new_weights = torch.ones(input.shape[0], device=input.device)
+    new_weights[gs_ids] = trans
+
+    if input.dim() == 3:
+        # new_color = new_weights[..., None, None] * torch.sigmoid(input)
+        # new_color = torch.logit(new_color)
+        new_color = input
+    else:
+        new_color = new_weights[..., None] * torch.sigmoid(input)
+        new_color = torch.logit(new_color)
+
+        # print('weights', (torch.log(new_weights[..., None])+1).min())
+        # print('inp max', input.max())
+        # print('inp min', input.min())
+        # print('out max', new_color.max())
+        # print('out min', new_color.min())
+    return new_color
+
 # %%
 
-import matplotlib.pyplot as plt
+for i in range(10):
+    tnow = time.time()
+    output = splat.render(poses[i], shadow_fn=shadow_fn)
+    og_output = splat.render(poses[i], shadow_fn=None)
+    print("Elapsed: ", time.time() - tnow)
 
-tnow = time.time()
-output = splat.render(poses[0])
-print("Elapsed: ", time.time() - tnow)
+    new_image = output["rgb"].cpu().numpy()
+    og_image = og_output["rgb"].cpu().numpy()
 
-new_image = output["rgb"].cpu().numpy()
+    fig, ax = plt.subplots(2)
+    ax[0].imshow(og_image)
+    ax[1].imshow(new_image)
+    plt.show()
+
+#%%
+
+renders = accumulate_along_rays(
+        weights,
+        splat.pipeline.model.colors,
+        ray_indices=indices,
+        n_rays=total_pixels,
+    ).reshape(C, image_height, image_width, 1)
+
+new_image = renders.cpu().numpy().squeeze()
 
 fig, ax = plt.subplots(2)
 ax[0].imshow(og_image)
 ax[1].imshow(new_image)
 plt.show()
+# %%

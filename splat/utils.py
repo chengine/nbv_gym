@@ -108,7 +108,7 @@ class NeRF():
         # return int(2*K[1, 2]), int(2*K[0, 2]), K
 
     def render(self, pose, debug_mode=False,
-               img_coords: torch.Tensor = None):
+               img_coords: torch.Tensor = None, shadow_fn = None):
         # Render from a single pose
         camera_to_world = pose[None,:3, ...]
 
@@ -126,49 +126,12 @@ class NeRF():
         cameras = cameras.to(self.device)
         
         # render outputs
-        if isinstance(self.pipeline.model, NerfactoModel):
-            aabb_box = None
-            if img_coords is None:
-                camera_ray_bundle = cameras.generate_rays(camera_indices=0, aabb_box=aabb_box)
+        obb_box = None
 
-                tnow = time.perf_counter()
-                with torch.no_grad():
-                    outputs = self.pipeline.model.get_outputs_for_camera_ray_bundle(camera_ray_bundle)
-            else:
-                camera_ray_bundle = cameras.generate_rays(camera_indices=0, aabb_box=aabb_box,
-                                                          coords=img_coords)
-
-                tnow = time.perf_counter()
-                
-                # get outputs
-                outputs = self.pipeline.model(camera_ray_bundle)
-
-            if debug_mode:
-                print('Rendering time: ', time.perf_counter() - tnow)
-
-            # insert ray bundles
-            outputs['ray_bundle'] = camera_ray_bundle
-        elif isinstance(self.pipeline.model, SplatfactoModel):
-            obb_box = None
-            
-            if img_coords is None:
-                tnow = time.perf_counter()
-                with torch.no_grad():
-                    outputs = self.pipeline.model.get_outputs_for_camera(cameras,
-                                                                         obb_box=obb_box,
-                                                                         )
-            else:
-                tnow = time.perf_counter()
-                
-                # get outputs
-                outputs = self.pipeline.model(cameras)
-                
-                outputs["rgb"] = outputs["rgb"][img_coords[:, 0], img_coords[:, 1]]
-                outputs["depth"] = outputs["depth"][img_coords[:, 0], img_coords[:, 1]]
-                
-            if debug_mode:
-                print('Rendering time: ', time.perf_counter() - tnow)
-
+        with torch.no_grad():
+            outputs = self.pipeline.model.get_outputs_for_camera(cameras,
+                                                                    obb_box=obb_box,
+                                                                    shadow_fn=shadow_fn)
         return outputs
     
     def generate_point_cloud(self,
