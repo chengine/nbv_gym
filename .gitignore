@@ -1,2 +1,6 @@
 data
 outputs
+*.png
+*.jpg
+*.gif
+*.zip
