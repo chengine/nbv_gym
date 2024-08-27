@@ -8,6 +8,7 @@ from gsplat.cuda._torch_impl import _rasterize_to_pixels
 from gsplat.cuda._wrapper import rasterize_to_indices_in_range
 import matplotlib.pyplot as plt
 from nerfacc import accumulate_along_rays, render_weight_from_alpha
+import cv2
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -91,13 +92,12 @@ pixel_ids_x = pixel_ids % image_width
 pixel_ids_y = pixel_ids // image_width
 pixel_coords = torch.stack([pixel_ids_x, pixel_ids_y], dim=-1) + 0.5  # [M, 2]
 deltas = pixel_coords - means2d[camera_ids, gs_ids]  # [M, 2]
+
 c = conics[camera_ids, gs_ids]  # [M, 3]
 sigmas = (
     0.5 * (c[:, 0] * deltas[:, 0] ** 2 + c[:, 2] * deltas[:, 1] ** 2)
     + c[:, 1] * deltas[:, 0] * deltas[:, 1]
 )  # [M]
-
-sigmas = torch.zeros_like(sigmas)
 
 alphas = torch.clamp_max(
     opacities[camera_ids, gs_ids] * torch.exp(-sigmas), 0.999
@@ -110,13 +110,13 @@ weights, trans = render_weight_from_alpha(
     alphas, ray_indices=indices, n_rays=total_pixels
 )
 
-sorted_list, sorted_ind = torch.sort(trans, descending=False)
+sorted_list, sorted_ind = torch.sort(weights, descending=False)
 # img_plane_gs = gs_ids[sorted_ind[: image_height * image_width]]
 img_plane_gs = gs_ids[sorted_ind]
 
 def shadow_fn(input):
     new_weights = torch.zeros(input.shape[0], device=input.device)
-    new_weights[img_plane_gs] = sorted_list**(1/2)
+    new_weights[img_plane_gs] = sorted_list**(1/2.2)
 
     if input.dim() == 3:
         new_color = input
@@ -137,11 +137,8 @@ for i in range(len(poses)):
     new_image = output["rgb"].cpu().numpy()
     og_image = og_output["rgb"].cpu().numpy()
 
-    fig, ax = plt.subplots(2)
-    ax[0].imshow(og_image)
-    ax[1].imshow(new_image)
-    # plt.show()
+    stacked_image = np.concatenate([og_image, new_image], axis=1)
+    cv2.imwrite(f'renders/r_{i}.png', cv2.cvtColor(stacked_image * 255, cv2.COLOR_BGR2RGB))
 
-    plt.savefig(f'renders/r_{i}.png')
 
 #%%
