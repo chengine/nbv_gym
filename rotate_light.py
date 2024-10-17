@@ -4,10 +4,9 @@ import torch
 import time
 import open3d as o3d 
 from splat.utils import *
-from gsplat.cuda._torch_impl import _rasterize_to_pixels
 from gsplat.cuda._wrapper import rasterize_to_indices_in_range
 import matplotlib.pyplot as plt
-from nerfacc import accumulate_along_rays, render_weight_from_alpha
+from nerfacc import render_weight_from_alpha
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -98,7 +97,7 @@ for i in range(len(poses)):
     sorted_list, sorted_ind = torch.sort(weights, descending=False)
     # img_plane_gs = gs_ids[sorted_ind[: image_height * image_width]]
     img_plane_gs = gs_ids[sorted_ind]
-
+    
     def shadow_fn(input):
         new_weights = torch.zeros(input.shape[0], device=input.device)
         new_weights[img_plane_gs] = sorted_list**(1/2.2)
