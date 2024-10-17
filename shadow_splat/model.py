@@ -45,6 +45,7 @@ from nerfstudio.engine.optimizers import Optimizers
 # need following import for background color override
 from nerfstudio.model_components import renderers
 from nerfstudio.models.base_model import Model, ModelConfig
+from nerfstudio.models.splatfacto import SplatfactoModelConfig, SplatfactoModel
 from nerfstudio.utils.colors import get_color
 from nerfstudio.utils.misc import torch_compile
 from nerfstudio.utils.rich_utils import CONSOLE
@@ -120,7 +121,7 @@ def get_viewmat(optimized_camera_to_world):
 
 
 @dataclass
-class SplatfactoModelConfig(ModelConfig):
+class ShadowSplatModelConfig(SplatfactoModelConfig):
     """Splatfacto Model Config, nerfstudio's implementation of Gaussian Splatting"""
 
     _target: Type = field(default_factory=lambda: SplatfactoModel)
@@ -188,7 +189,7 @@ class SplatfactoModelConfig(ModelConfig):
     """Config of the camera optimizer to use"""
 
 
-class SplatfactoModel(Model):
+class ShadowSplatModel(SplatfactoModel):
     """Nerfstudio's implementation of Gaussian Splatting
 
     Args:
@@ -272,6 +273,8 @@ class SplatfactoModel(Model):
             )  # This color is the same as the default background color in Viser. This would only affect the background color when rendering.
         else:
             self.background_color = get_color(self.config.background_color)
+
+        self.shadow_fn = None
 
     @property
     def colors(self):
@@ -649,7 +652,7 @@ class SplatfactoModel(Model):
         accumulation = background.new_zeros(*rgb.shape[:2], 1)
         return {"rgb": rgb, "depth": depth, "accumulation": accumulation, "background": background}
 
-    def get_outputs(self, camera: Cameras, shadow_fn = None) -> Dict[str, Union[torch.Tensor, List]]:
+    def get_outputs(self, camera: Cameras) -> Dict[str, Union[torch.Tensor, List]]:
         """Takes in a Ray Bundle and returns a dictionary of outputs.
 
         Args:
@@ -698,9 +701,9 @@ class SplatfactoModel(Model):
         self.last_size = (H, W)
 
         # Shadow the scene
-        if shadow_fn is not None:
-            features_dc = shadow_fn(self.features_dc)
-            features_rest = shadow_fn(self.features_rest)
+        if self.shadow_fn is not None:
+            features_dc = self.shadow_fn(self.features_dc)
+            features_rest = self.shadow_fn(self.features_rest)
         else:
             features_dc = self.features_dc
             features_rest = self.features_rest
@@ -866,7 +869,7 @@ class SplatfactoModel(Model):
         return loss_dict
 
     @torch.no_grad()
-    def get_outputs_for_camera(self, camera: Cameras, obb_box: Optional[OrientedBox] = None, shadow_fn = None) -> Dict[str, torch.Tensor]:
+    def get_outputs_for_camera(self, camera: Cameras, obb_box: Optional[OrientedBox] = None) -> Dict[str, torch.Tensor]:
         """Takes in a camera, generates the raybundle, and computes the output of the model.
         Overridden for a camera-based gaussian model.
 
@@ -875,7 +878,7 @@ class SplatfactoModel(Model):
         """
         assert camera is not None, "must provide camera to gaussian model"
         self.set_crop(obb_box)
-        outs = self.get_outputs(camera.to(self.device), shadow_fn)
+        outs = self.get_outputs(camera.to(self.device))
         return outs  # type: ignore
 
     def get_image_metrics_and_images(
