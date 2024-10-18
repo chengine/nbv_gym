@@ -4,3 +4,5 @@ outputs
 *.jpg
 *.gif
 *.zip
+scripts
+!scripts/*.py
