@@ -1,0 +1,12 @@
+LICENSE
+README.md
+pyproject.toml
+shadow_splat/config.py
+shadow_splat/model.py
+shadow_splat/slim_rasterization.py
+shadow_splat.egg-info/PKG-INFO
+shadow_splat.egg-info/SOURCES.txt
+shadow_splat.egg-info/dependency_links.txt
+shadow_splat.egg-info/entry_points.txt
+shadow_splat.egg-info/requires.txt
+shadow_splat.egg-info/top_level.txt

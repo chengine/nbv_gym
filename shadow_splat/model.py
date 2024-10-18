@@ -138,7 +138,7 @@ def get_viewmat(optimized_camera_to_world):
 class ShadowSplatModelConfig(SplatfactoModelConfig):
     """Splatfacto Model Config, nerfstudio's implementation of Gaussian Splatting"""
 
-    _target: Type = field(default_factory=lambda: SplatfactoModel)
+    _target: Type = field(default_factory=lambda: ShadowSplatModel)
     warmup_length: int = 500
     """period of steps where refinement is turned off"""
     refine_every: int = 100
@@ -210,7 +210,7 @@ class ShadowSplatModel(SplatfactoModel):
         config: Splatfacto configuration to instantiate model
     """
 
-    config: SplatfactoModelConfig
+    config: ShadowSplatModelConfig
 
     def __init__(
         self,
@@ -293,7 +293,7 @@ class ShadowSplatModel(SplatfactoModel):
         self.lighting_fn = lambda x: x**(1/2.2)
 
         # TODO: Learn this lighting_fn
-        
+
 
     # TODO: Apply a mask to the pixel ids to only render pixels with these mask ids
     def update_light_source(self, light_source, mask):

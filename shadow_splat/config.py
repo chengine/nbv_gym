@@ -13,9 +13,9 @@ from nerfstudio.data.datamanagers.full_images_datamanager import FullImageDatama
 
 from shadow_splat.model import ShadowSplatModelConfig
 
-gemsplat_method = MethodSpecification(
+shadow_splat = MethodSpecification(
     config=TrainerConfig(
-        method_name="terrain-splat",
+        method_name="shadow-splat",
         steps_per_eval_image=100,
         steps_per_eval_batch=0,
         steps_per_save=2000,

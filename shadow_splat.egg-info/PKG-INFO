@@ -1,0 +1,6 @@
+Metadata-Version: 2.1
+Name: shadow_splat
+Version: 0.1.0
+Summary: Shadow Gaussian Splatting
+License-File: LICENSE
+Requires-Dist: nerfstudio>=1.1.0

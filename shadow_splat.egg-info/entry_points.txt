@@ -1,0 +1,2 @@
+[nerfstudio.method_configs]
+shadow_splat = shadow_splat.config:shadow_splat
