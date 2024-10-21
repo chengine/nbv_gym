@@ -103,14 +103,12 @@ def resize_image(image: torch.Tensor, d: int):
     return tf.conv2d(image.permute(2, 0, 1)[:, None, ...], weight, stride=d).squeeze(1).permute(1, 2, 0)
 
         
-def shadow_fn(input, weights, gs_ids):
-    new_weights = torch.zeros(input.shape[0], device=input.device)
-    new_weights[gs_ids] = weights
+def shadow_fn(input, weights):
 
     if input.dim() == 3:
         new_color = input
     else:
-        new_color = new_weights[..., None] * SH2RGB(input)
+        new_color = weights * SH2RGB(input)
         new_color = RGB2SH(new_color)
 
     return new_color
@@ -296,7 +294,7 @@ class ShadowSplatModel(SplatfactoModel):
 
 
     # TODO: Apply a mask to the pixel ids to only render pixels with these mask ids
-    def update_light_source(self, light_source, mask):
+    def update_light_source(self, light_source, mask=None):
         # NOTE: Light source is a Camera object!!! #
 
         # Renders splat from a pose. We call this to get the intermediate variables from the rasterization function.
@@ -452,9 +450,29 @@ class ShadowSplatModel(SplatfactoModel):
         sorted_weights, sorted_weights_indices = torch.sort(weights, descending=False)
         img_plane_gs_ids = gs_ids[sorted_weights_indices]
 
-        lighting_weights = self.lighting_fn(sorted_weights)
+        if mask is not None:
+            if len(mask.shape) == 2:
+            # if mask is HxW image, just multiply the intensities with the gaussian weights
+                light_source_intensity = mask.reshape(-1)
+                light_source_intensity_weights = light_source_intensity[pixel_ids[sorted_weights_indices]]
+                sorted_weights = sorted_weights * light_source_intensity_weights
+            else:
+                assert mask.shape[-1] == 3, "Mask must have 3 channels"
+                # the mask has associated colors to it.
+                light_source_intensity = mask.reshape(-1, 3)
+                light_source_intensity_weights = light_source_intensity[pixel_ids[sorted_weights_indices]]
+                sorted_weights = sorted_weights[:, None] * light_source_intensity_weights
 
-        self.shadow_fn = lambda x: shadow_fn(x, lighting_weights, img_plane_gs_ids)
+        lighting_weights = self.lighting_fn(sorted_weights)
+        if len(lighting_weights.shape) == 2:
+            new_weights = torch.zeros((self.means.shape[0], 3), device=lighting_weights.device)
+            new_weights[img_plane_gs_ids] = lighting_weights
+        else:
+            new_weights = torch.zeros(self.means.shape[0], device=lighting_weights.device)
+            new_weights[img_plane_gs_ids] = lighting_weights
+            new_weights = new_weights.unsqueeze(-1)
+
+        self.shadow_fn = lambda x: shadow_fn(x, new_weights)
 
     @property
     def colors(self):
