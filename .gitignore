@@ -4,5 +4,7 @@ outputs
 *.jpg
 *.gif
 *.zip
+scripts
+!scripts/*.py
 *.mp4
 *.avi
