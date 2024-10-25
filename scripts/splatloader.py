@@ -145,7 +145,7 @@ class GaussianSplat():
             cy=self.cameras[0].cy,
             width=self.cameras[0].width,
             height=self.cameras[0].height,
-            camera_type=CameraType.PERSPECTIVE,
+            camera_type=CameraType.ORTHOPHOTO,
         )
         
         light_source = light_source.to(self.device)

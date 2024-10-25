@@ -20,7 +20,7 @@ def slim_rasterization(
     quats: Tensor,  # [N, 4]
     scales: Tensor,  # [N, 3]
     opacities: Tensor,  # [N]
-    colors: Tensor,  # [N, D] or [N, K, 3]
+    # colors: Tensor,  # [N, D] or [N, K, 3]
     viewmats: Tensor,  # [C, 4, 4]
     Ks: Tensor,  # [C, 3, 3]
     width: int,
@@ -29,92 +29,25 @@ def slim_rasterization(
     far_plane: float = 1e10,
     radius_clip: float = 0.0,
     eps2d: float = 0.3,
-    sh_degree: Optional[int] = None,
+    # sh_degree: Optional[int] = None,
     packed: bool = True,
     tile_size: int = 16,
-    backgrounds: Optional[Tensor] = None,
-    render_mode: Literal["RGB", "D", "ED", "RGB+D", "RGB+ED"] = "RGB",
+    # backgrounds: Optional[Tensor] = None,
+    # render_mode: Literal["RGB", "D", "ED", "RGB+D", "RGB+ED"] = "RGB",
     sparse_grad: bool = False,
-    absgrad: bool = False,
+    # absgrad: bool = False,
     rasterize_mode: Literal["classic", "antialiased"] = "classic",
 ) -> Tuple[Tensor, Tensor, Dict]:
     """Rasterize a set of 3D Gaussians (N) to a batch of image planes (C).
 
-    This function provides a handful features for 3D Gaussian rasterization, which
-    we detail in the following notes. A complete profiling of the these features
-    can be found in the :ref:`profiling` page.
-
-    .. note::
-        **Batch Rasterization**: This function allows for rasterizing a set of 3D Gaussians
-        to a batch of images in one go, by simplly providing the batched `viewmats` and `Ks`.
-
-    .. note::
-        **Support N-D Features**: If `sh_degree` is None,
-        the `colors` is expected to be with shape [N, D], in which D is the channel
-        of the features to be rendered, up to 32 at the moment. If
-        `sh_degree` is set, the `colors` is expected to be the SH coefficients with
-        shape [N, K, 3], where K is the number of SH bases. In this case, it is expected
-        that :math:`(\\textit{sh_degree} + 1) ^ 2 \\leq K`, where `sh_degree` controls the
-        activated bases in the SH coefficients.
-
-    .. note::
-        **Depth Rendering**: This function supports colors or/and depths via `render_mode`.
-        The supported modes are "RGB", "D", "ED", "RGB+D", and "RGB+ED". "RGB" renders the
-        colored image that respects the `colors` argument. "D" renders the accumulated z-depth
-        :math:`\\sum_i w_i z_i`. "ED" renders the expected z-depth
-        :math:`\\frac{\\sum_i w_i z_i}{\\sum_i w_i}`. "RGB+D" and "RGB+ED" render both
-        the colored image and the depth, in which the depth is the last channel of the output.
-
-    .. note::
-        **Memory-Speed Trade-off**: The `packed` argument provides a trade-off between
-        memory footprint and runtime. If `packed` is True, the intermediate results are
-        packed into sparse tensors, which is more memory efficient but might be slightly
-        slower. This is especially helpful when the scene is large and each camera sees only
-        a small portion of the scene. If `packed` is False, the intermediate results are
-        with shape [C, N, ...], which is faster but might consume more memory.
-
-    .. note::
-        **Sparse Gradients**: If `sparse_grad` is True, the gradients for {means, quats, scales}
-        will be stored in a `COO sparse layout <https://pytorch.org/docs/stable/generated/torch.sparse_coo_tensor.html>`_.
-        This can be helpful for saving memory
-        for training when the scene is large and each iteration only activates a small portion
-        of the Gaussians. Usually a sparse optimizer is required to work with sparse gradients,
-        such as `torch.optim.SparseAdam <https://pytorch.org/docs/stable/generated/torch.optim.SparseAdam.html#sparseadam>`_.
-        This argument is only effective when `packed` is True.
-
-    .. note::
-        **Speed-up for Large Scenes**: The `radius_clip` argument is extremely helpful for
-        speeding up large scale scenes or scenes with large depth of fields. Gaussians with
-        2D radius smaller or equal than this value (in pixel unit) will be skipped during rasterization.
-        This will skip all the far-away Gaussians that are too small to be seen in the image.
-        But be warned that if there are close-up Gaussians that are also below this threshold, they will
-        also get skipped (which is rarely happened in practice). This is by default disabled by setting
-        `radius_clip` to 0.0.
-
-    .. note::
-        **Antialiased Rendering**: If `rasterize_mode` is "antialiased", the function will
-        apply a view-dependent compensation factor
-        :math:`\\rho=\\sqrt{\\frac{Det(\\Sigma)}{Det(\\Sigma+ \\epsilon I)}}` to Gaussian
-        opacities, where :math:`\\Sigma` is the projected 2D covariance matrix and :math:`\\epsilon`
-        is the `eps2d`. This will make the rendered image more antialiased, as proposed in
-        the paper `Mip-Splatting: Alias-free 3D Gaussian Splatting <https://arxiv.org/pdf/2311.16493>`_.
-
-    .. note::
-        **AbsGrad**: If `absgrad` is True, the absolute gradients of the projected
-        2D means will be computed during the backward pass, which could be accessed by
-        `meta["means2d"].absgrad`. This is an implementation of the paper
-        `AbsGS: Recovering Fine Details for 3D Gaussian Splatting <https://arxiv.org/abs/2404.10484>`_,
-        which is shown to be more effective for splitting Gaussians during training.
-
-    .. warning::
-        This function is currently not differentiable w.r.t. the camera intrinsics `Ks`.
+    Modified version of the rasterization function from gsplat
+    
 
     Args:
         means: The 3D centers of the Gaussians. [N, 3]
         quats: The quaternions of the Gaussians. It's not required to be normalized. [N, 4]
         scales: The scales of the Gaussians. [N, 3]
         opacities: The opacities of the Gaussians. [N]
-        colors: The colors of the Gaussians. [N, D] or [N, K, 3] for SH coefficients.
         viewmats: The world-to-cam transformation of the cameras. [C, 4, 4]
         Ks: The camera intrinsics. [C, 3, 3]
         width: The width of the image.
@@ -127,22 +60,12 @@ def slim_rasterization(
         eps2d: An epsilon added to the egienvalues of projected 2D covariance matrices.
             This will prevents the projected GS to be too small. For example eps2d=0.3
             leads to minimal 3 pixel unit. Default is 0.3.
-        sh_degree: The SH degree to use, which can be smaller than the total
-            number of bands. If set, the `colors` should be [N, K, 3] SH coefficients,
-            else the `colors` should [N, D] per-Gaussian color values. Default is None.
         packed: Whether to use packed mode which is more memory efficient but might or
             might not be as fast. Default is True.
         tile_size: The size of the tiles for rasterization. Default is 16.
             (Note: other values are not tested)
-        backgrounds: The background colors. [C, D]. Default is None.
-        render_mode: The rendering mode. Supported modes are "RGB", "D", "ED", "RGB+D",
-            and "RGB+ED". "RGB" renders the colored image, "D" renders the accumulated depth, and
-            "ED" renders the expected depth. Default is "RGB".
         sparse_grad: If true, the gradients for {means, quats, scales} will be stored in
             a COO sparse layout. This can be helpful for saving memory. Default is False.
-        absgrad: If true, the absolute gradients of the projected 2D means
-            will be computed during the backward pass, which could be accessed by
-            `meta["means2d"].absgrad`. Default is False.
         rasterize_mode: The rasterization mode. Supported modes are "classic" and
             "antialiased". Default is "classic".
 
@@ -194,20 +117,19 @@ def slim_rasterization(
     assert opacities.shape == (N,), opacities.shape
     assert viewmats.shape == (C, 4, 4), viewmats.shape
     assert Ks.shape == (C, 3, 3), Ks.shape
-    assert render_mode in ["RGB", "D", "ED", "RGB+D", "RGB+ED"], render_mode
 
-    if sh_degree is None:
-        # treat colors as post-activation values
-        # colors should be in shape [N, D] or (C, N, D) (silently support)
-        assert (colors.dim() == 2 and colors.shape[0] == N) or (
-            colors.dim() == 3 and colors.shape[:2] == (C, N)
-        ), colors.shape
-    else:
-        # treat colors as SH coefficients. Allowing for activating partial SH bands
-        assert (
-            colors.dim() == 3 and colors.shape[0] == N and colors.shape[2] == 3
-        ), colors.shape
-        assert (sh_degree + 1) ** 2 <= colors.shape[1], colors.shape
+    # if sh_degree is None:
+    #     # treat colors as post-activation values
+    #     # colors should be in shape [N, D] or (C, N, D) (silently support)
+    #     assert (colors.dim() == 2 and colors.shape[0] == N) or (
+    #         colors.dim() == 3 and colors.shape[:2] == (C, N)
+    #     ), colors.shape
+    # else:
+    #     # treat colors as SH coefficients. Allowing for activating partial SH bands
+    #     assert (
+    #         colors.dim() == 3 and colors.shape[0] == N and colors.shape[2] == 3
+    #     ), colors.shape
+    #     assert (sh_degree + 1) ** 2 <= colors.shape[1], colors.shape
 
     # Project Gaussians to 2D. Directly pass in {quats, scales} is faster than precomputing covars.
     proj_results = fully_fused_projection(

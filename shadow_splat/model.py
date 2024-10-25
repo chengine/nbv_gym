@@ -45,6 +45,9 @@ from nerfstudio.utils.colors import get_color
 from nerfstudio.utils.misc import torch_compile
 from nerfstudio.utils.rich_utils import CONSOLE
 
+from gsplat.cuda._wrapper import rasterize_to_indices_in_range
+from nerfacc import render_weight_from_alpha
+
 from shadow_splat.slim_rasterization import slim_rasterization
 
 
@@ -318,7 +321,7 @@ class ShadowSplatModel(SplatfactoModel):
 
     # TODO: Apply a mask to the pixel ids to only render pixels with these mask ids
     def update_light_source(self, light_source: Cameras, mask=None):
-        # NOTE: Light source is a Camera object!!! #
+        """Update the light source, generating a new shadow function for the scene."""
 
         # Renders splat from a pose. We call this to get the intermediate variables from the rasterization function.
         if not isinstance(light_source, Cameras):
@@ -359,30 +362,30 @@ class ShadowSplatModel(SplatfactoModel):
         W, H = int(light_source.width[0] * camera_scale_fac), int(light_source.height[0] * camera_scale_fac)
         self.last_size = (H, W)
 
-        # Shadow the scene
-        features_dc = self.features_dc
-        features_rest = self.features_rest
+        # # Shadow the scene
+        # features_dc = self.features_dc
+        # features_rest = self.features_rest
 
         if crop_ids is not None:
             opacities_crop = self.opacities[crop_ids]
             means_crop = self.means[crop_ids]
-            features_dc_crop = features_dc[crop_ids]
-            features_rest_crop = features_rest[crop_ids]
+            # features_dc_crop = features_dc[crop_ids]
+            # features_rest_crop = features_rest[crop_ids]
             scales_crop = self.scales[crop_ids]
             quats_crop = self.quats[crop_ids]
         else:
             opacities_crop = self.opacities
             means_crop = self.means
-            features_dc_crop = features_dc
-            features_rest_crop = features_rest
+            # features_dc_crop = features_dc
+            # features_rest_crop = features_rest
             scales_crop = self.scales
             quats_crop = self.quats
 
-        colors_crop = torch.cat((features_dc_crop[:, None, :], features_rest_crop), dim=1)
+        # colors_crop = torch.cat((features_dc_crop[:, None, :], features_rest_crop), dim=1)
         BLOCK_WIDTH = 16  # this controls the tile size of rasterization, 16 is a good default
         K = light_source.get_intrinsics_matrices().cuda()
         K[:, :2, :] *= camera_scale_fac
-        # apply the compensation of screen space blurring to gaussians
+        # Apply the compensation of screen space blurring to gaussians
         if self.config.rasterize_mode not in ["antialiased", "classic"]:
             raise ValueError("Unknown rasterize_mode: %s", self.config.rasterize_mode)
 
@@ -391,11 +394,11 @@ class ShadowSplatModel(SplatfactoModel):
         else:
             render_mode = "RGB"
 
-        if self.config.sh_degree > 0:
-            sh_degree_to_use = min(self.step // self.config.sh_degree_interval, self.config.sh_degree)
-        else:
-            colors_crop = torch.sigmoid(colors_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
-            sh_degree_to_use = None
+        # if self.config.sh_degree > 0:
+        #     sh_degree_to_use = min(self.step // self.config.sh_degree_interval, self.config.sh_degree)
+        # else:
+        #     colors_crop = torch.sigmoid(colors_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
+        #     sh_degree_to_use = None
 
         # Calculates intermediate variables for rasterization
         meta = slim_rasterization(
@@ -403,7 +406,6 @@ class ShadowSplatModel(SplatfactoModel):
             quats=quats_crop / quats_crop.norm(dim=-1, keepdim=True),
             scales=torch.exp(scales_crop),
             opacities=torch.sigmoid(opacities_crop).squeeze(-1),
-            colors=colors_crop,
             viewmats=viewmat,  # [1, 4, 4]
             Ks=K,  # [1, 3, 3]
             width=W,
@@ -413,12 +415,10 @@ class ShadowSplatModel(SplatfactoModel):
             near_plane=0.01,
             far_plane=1e10,
             render_mode=render_mode,
-            sh_degree=sh_degree_to_use,
             sparse_grad=False,
             absgrad=True,
             rasterize_mode=self.config.rasterize_mode,
-            # set some threshold to disregrad small gaussians for faster rendering.
-            # radius_clip=3.0,
+            # radius_clip=3.0,  # set some threshold to disregrad small gaussians for faster rendering.
         )
 
         # pixel_ids/gaussian ids are sorted in order of depth of gaussians
