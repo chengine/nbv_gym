@@ -317,7 +317,7 @@ class ShadowSplatModel(SplatfactoModel):
 
 
     # TODO: Apply a mask to the pixel ids to only render pixels with these mask ids
-    def update_light_source(self, light_source, mask=None):
+    def update_light_source(self, light_source: Cameras, mask=None):
         # NOTE: Light source is a Camera object!!! #
 
         # Renders splat from a pose. We call this to get the intermediate variables from the rasterization function.
