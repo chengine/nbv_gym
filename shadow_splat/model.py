@@ -25,14 +25,10 @@ from typing import Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
 import torch
-from gsplat.cuda_legacy._torch_impl import quat_to_rotmat
-from gsplat.cuda._wrapper import rasterize_to_indices_in_range
-from nerfacc import render_weight_from_alpha
 try:
     from gsplat.rendering import rasterization
 except ImportError:
     print("Please install gsplat>=1.0.0")
-from gsplat.cuda_legacy._wrapper import num_sh_bases
 from pytorch_msssim import SSIM
 from torch.nn import Parameter
 from typing_extensions import Literal
@@ -42,9 +38,7 @@ from nerfstudio.cameras.cameras import Cameras
 from nerfstudio.data.scene_box import OrientedBox
 from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes, TrainingCallbackLocation
 from nerfstudio.engine.optimizers import Optimizers
-
-# need following import for background color override
-from nerfstudio.model_components import renderers
+from nerfstudio.model_components import renderers  # need following import for background color override
 from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.models.splatfacto import SplatfactoModelConfig, SplatfactoModel
 from nerfstudio.utils.colors import get_color
@@ -52,6 +46,35 @@ from nerfstudio.utils.misc import torch_compile
 from nerfstudio.utils.rich_utils import CONSOLE
 
 from shadow_splat.slim_rasterization import slim_rasterization
+
+
+def num_sh_bases(degree: int) -> int:
+    """
+    Returns the number of spherical harmonic bases for a given degree.
+    """
+    assert degree <= 4, "We don't support degree greater than 4."
+    return (degree + 1) ** 2
+
+
+def quat_to_rotmat(quat):
+    assert quat.shape[-1] == 4, quat.shape
+    w, x, y, z = torch.unbind(quat, dim=-1)
+    mat = torch.stack(
+        [
+            1 - 2 * (y**2 + z**2),
+            2 * (x * y - w * z),
+            2 * (x * z + w * y),
+            2 * (x * y + w * z),
+            1 - 2 * (x**2 + z**2),
+            2 * (y * z - w * x),
+            2 * (x * z - w * y),
+            2 * (y * z + w * x),
+            1 - 2 * (x**2 + y**2),
+        ],
+        dim=-1,
+    )
+    return mat.reshape(quat.shape[:-1] + (3, 3))
+
 
 def random_quat_tensor(N):
     """
