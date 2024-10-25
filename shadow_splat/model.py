@@ -389,10 +389,10 @@ class ShadowSplatModel(SplatfactoModel):
         if self.config.rasterize_mode not in ["antialiased", "classic"]:
             raise ValueError("Unknown rasterize_mode: %s", self.config.rasterize_mode)
 
-        if self.config.output_depth_during_training or not self.training:
-            render_mode = "RGB+ED"
-        else:
-            render_mode = "RGB"
+        # if self.config.output_depth_during_training or not self.training:
+        #     render_mode = "RGB+ED"
+        # else:
+        #     render_mode = "RGB"
 
         # if self.config.sh_degree > 0:
         #     sh_degree_to_use = min(self.step // self.config.sh_degree_interval, self.config.sh_degree)
@@ -413,10 +413,10 @@ class ShadowSplatModel(SplatfactoModel):
             tile_size=BLOCK_WIDTH,
             packed=False,
             near_plane=0.01,
-            far_plane=1e10,
-            render_mode=render_mode,
+            far_plane=1e2,
+            # render_mode=render_mode,
             sparse_grad=False,
-            absgrad=True,
+            # absgrad=True,
             rasterize_mode=self.config.rasterize_mode,
             # radius_clip=3.0,  # set some threshold to disregrad small gaussians for faster rendering.
         )

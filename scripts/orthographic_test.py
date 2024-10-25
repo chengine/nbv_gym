@@ -12,6 +12,9 @@ import os
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+# Reset peak memory stats at the start
+torch.cuda.reset_peak_memory_stats()
+
 def look_at(location, target, up):
     z = (location - target)
     z /= torch.norm(z)
@@ -24,6 +27,7 @@ def look_at(location, target, up):
     return R
 
 config_path = Path('outputs/moon_spiral_2_masked/shadow-splat/2024-10-25_133148/config.yml')
+# config_path = Path('outputs/poster/shadow-splat/2024-10-25_153801/config.yml')
 
 splat = GaussianSplat(config_path, dataset_mode='train', device=device, res_factor=0.25)
 
@@ -41,13 +45,13 @@ pixel_coordinates = torch.stack(pixel_coordinates, dim=-1).to(device)
 center = torch.tensor([H, W], device=device) / 2
 
 # Arcing light source trajectory
-N = 100  # number of light source poses
+N = 10  # number of light source poses
 t = torch.linspace(0, np.pi, N)
 light_source_poses = torch.stack([torch.cos(t), torch.zeros(N), torch.sin(t)], dim=-1).to(device)
-fig = go.Figure(data=[go.Scatter3d(x=light_source_poses[:, 0].cpu().numpy(), 
-                                   y=light_source_poses[:, 1].cpu().numpy(), 
-                                   z=light_source_poses[:, 2].cpu().numpy(), mode='markers')])
-fig.show()
+# fig = go.Figure(data=[go.Scatter3d(x=light_source_poses[:, 0].cpu().numpy(), 
+#                                    y=light_source_poses[:, 1].cpu().numpy(), 
+#                                    z=light_source_poses[:, 2].cpu().numpy(), mode='markers')])
+# fig.show()
 
 # light_source_poses[:, :2] = light_source_poses[:, :2] * (1-torch.linspace(0, 1, N, device=device)[:, None])
 
@@ -76,4 +80,5 @@ for i in range(N):
 
     cv2.imwrite(f'{render_output_path}/r_{i}.png', cv2.cvtColor(pov_image * 255, cv2.COLOR_BGR2RGB))
 
-#%%
+peak_memory = torch.cuda.max_memory_allocated()
+print(f"Peak memory usage: {peak_memory / (1024 ** 2):.2f} MB")
