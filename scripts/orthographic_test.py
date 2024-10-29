@@ -10,6 +10,8 @@ from pathlib import Path
 import cv2
 import os
 
+from nerfstudio.cameras.cameras import Cameras, CameraType
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Reset peak memory stats at the start
@@ -26,8 +28,9 @@ def look_at(location, target, up):
     R = torch.stack([x, y, z], dim=1)
     return R
 
-config_path = Path('outputs/moon_spiral_2_masked/shadow-splat/2024-10-25_133148/config.yml')
+# config_path = Path('outputs/moon_spiral_2_masked/shadow-splat/2024-10-25_133148/config.yml')
 # config_path = Path('outputs/poster/shadow-splat/2024-10-25_153801/config.yml')
+config_path = Path('outputs/rains_chair/shadow-splat/2024-10-29_115808/config.yml')
 
 splat = GaussianSplat(config_path, dataset_mode='train', device=device, res_factor=0.25)
 
@@ -41,6 +44,18 @@ poses = splat.get_poses()
 H, W, K = splat.get_camera_intrinsics()
 pixel_coordinates = torch.meshgrid([torch.arange(H.item()), torch.arange(W.item())])
 pixel_coordinates = torch.stack(pixel_coordinates, dim=-1).to(device)
+
+# Render camera
+render_camera = Cameras(
+                camera_to_worlds=poses[0],
+                fx=1650.0,
+                fy=1650.0,
+                cx=950.0,
+                cy=550.0,
+                width=1920,
+                height=1080,
+                camera_type=CameraType.PERSPECTIVE,
+            )
 
 center = torch.tensor([H, W], device=device) / 2
 
@@ -66,13 +81,15 @@ for i in range(N):
     light_source_pose = torch.eye(4, device=device)
     light_source_pose[:3, 3] = light_source_poses[i]
     light_source_pose[:3, :3] = look_at(light_source_poses[i], torch.tensor([0., 0., 0.], device=device), torch.tensor([0., 0., 1.], device=device)+1e-6*torch.randn(3, device=device))
+    print(light_source_pose)
+    raise
     splat.update_light_source(light_source_pose)
     torch.cuda.synchronize()
     print("Time to update light source: ", time.time() - tnow)
 
     tnow = time.time()
     torch.cuda.synchronize()
-    pov_output = splat.render(poses[0])
+    pov_output = splat.render(poses[0], camera=render_camera)
     torch.cuda.synchronize()
     print("Time to render: ", time.time() - tnow)
 
