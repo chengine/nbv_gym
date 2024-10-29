@@ -62,7 +62,7 @@ center = torch.tensor([H, W], device=device) / 2
 # Arcing light source trajectory
 N = 10  # number of light source poses
 t = torch.linspace(0, np.pi, N)
-light_source_poses = torch.stack([torch.cos(t), torch.zeros(N), torch.sin(t)], dim=-1).to(device)
+light_source_positions = torch.stack([torch.cos(t), torch.zeros(N), torch.sin(t)], dim=-1).to(device)
 # fig = go.Figure(data=[go.Scatter3d(x=light_source_poses[:, 0].cpu().numpy(), 
 #                                    y=light_source_poses[:, 1].cpu().numpy(), 
 #                                    z=light_source_poses[:, 2].cpu().numpy(), mode='markers')])
@@ -79,10 +79,8 @@ for i in range(N):
     # Update light source
     # Point the light source to the center of the scene
     light_source_pose = torch.eye(4, device=device)
-    light_source_pose[:3, 3] = light_source_poses[i]
-    light_source_pose[:3, :3] = look_at(light_source_poses[i], torch.tensor([0., 0., 0.], device=device), torch.tensor([0., 0., 1.], device=device)+1e-6*torch.randn(3, device=device))
-    print(light_source_pose)
-    raise
+    light_source_pose[:3, 3] = light_source_positions[i]
+    light_source_pose[:3, :3] = look_at(light_source_positions[i], torch.tensor([0., 0., 0.], device=device), torch.tensor([0., 0., 1.], device=device)+1e-6*torch.randn(3, device=device))
     splat.update_light_source(light_source_pose)
     torch.cuda.synchronize()
     print("Time to update light source: ", time.time() - tnow)
