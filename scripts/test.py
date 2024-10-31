@@ -3,11 +3,12 @@ import numpy as np
 import torch
 import time
 import open3d as o3d 
-from splatloader import GaussianSplat
 import matplotlib.pyplot as plt
 from pathlib import Path
 import cv2
 import os
+
+from shadow_splat.splatloader import GaussianSplat
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
