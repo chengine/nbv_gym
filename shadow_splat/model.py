@@ -131,9 +131,9 @@ def resize_image(image: torch.Tensor, d: int):
         
 def shadow_fn(input, weights):
 
-    if input.dim() == 3:
+    if input.dim() == 3:  # higher order spherical harmonics
         new_color = input
-    else:
+    else:  # direct color
         new_color = weights * SH2RGB(input)
         new_color = RGB2SH(new_color)
 
@@ -436,64 +436,76 @@ class ShadowSplatModel(SplatfactoModel):
             meta["flatten_ids"],
         )
     
-        means2d = meta["means2d"]
-        conics = meta["conics"]
-        opacities = meta["opacities"]
-        image_width = meta["width"]
-        image_height = meta["height"]
+        # means2d = meta["means2d"]
+        # conics = meta["conics"]
+        # opacities = meta["opacities"]
+        # image_width = meta["width"]
+        # image_height = meta["height"]
 
-        C, N = means2d.shape[:2]
+        # C, N = means2d.shape[:2]
 
-        pixel_ids_x = pixel_ids % image_width
-        pixel_ids_y = pixel_ids // image_width
-        pixel_coords = torch.stack([pixel_ids_x, pixel_ids_y], dim=-1) + 0.5  # [M, 2]
-        deltas = pixel_coords - means2d[camera_ids, gs_ids]  # [M, 2]
+        # pixel_ids_x = pixel_ids % image_width
+        # pixel_ids_y = pixel_ids // image_width
+        # pixel_coords = torch.stack([pixel_ids_x, pixel_ids_y], dim=-1) + 0.5  # [M, 2]
+        # deltas = pixel_coords - means2d[camera_ids, gs_ids]  # [M, 2]
 
-        c = conics[camera_ids, gs_ids]  # [M, 3]
-        sigmas = (
-            0.5 * (c[:, 0] * deltas[:, 0] ** 2 + c[:, 2] * deltas[:, 1] ** 2)
-            + c[:, 1] * deltas[:, 0] * deltas[:, 1]
-        )  # [M]
+        # c = conics[camera_ids, gs_ids]  # [M, 3]
+        # sigmas = (
+        #     0.5 * (c[:, 0] * deltas[:, 0] ** 2 + c[:, 2] * deltas[:, 1] ** 2)
+        #     + c[:, 1] * deltas[:, 0] * deltas[:, 1]
+        # )  # [M]
 
-        alphas = torch.clamp_max(
-            opacities[camera_ids, gs_ids] * torch.exp(-sigmas), 0.999
-        )
+        # alphas = torch.clamp_max(
+        #     opacities[camera_ids, gs_ids] * torch.exp(-sigmas), 0.999
+        # )
 
-        indices = camera_ids * image_height * image_width + pixel_ids
-        total_pixels = C * image_height * image_width
+        # indices = camera_ids * image_height * image_width + pixel_ids
+        # total_pixels = C * image_height * image_width
 
-        weights, trans = render_weight_from_alpha(
-            alphas, ray_indices=indices, n_rays=total_pixels
-        )
+        # weights, trans = render_weight_from_alpha(
+        #     alphas, ray_indices=indices, n_rays=total_pixels
+        # )
 
         ### NOTE: We sort the weights and indices here because we are indexing into a tensor
         # that has fewer elements than the indexing list. Specifically, say we are setting
         # tensor[ [1, 1] ] = [0.1, 0.2], we want to take largest weight of a particular gaussian
         # across all pixels it intersects with as its weight.
-        sorted_weights, sorted_weights_indices = torch.sort(weights, descending=False)
-        img_plane_gs_ids = gs_ids[sorted_weights_indices]
+        # sorted_weights, sorted_weights_indices = torch.sort(weights, descending=False)
+        # img_plane_gs_ids = gs_ids[sorted_weights_indices]
+        img_plane_gs_ids = gs_ids
 
-        if mask is not None:
-            if len(mask.shape) == 2:
-            # if mask is HxW image, just multiply the intensities with the gaussian weights
-                light_source_intensity = mask.reshape(-1)
-                light_source_intensity_weights = light_source_intensity[pixel_ids[sorted_weights_indices]]
-                sorted_weights = sorted_weights * light_source_intensity_weights
-            else:
-                assert mask.shape[-1] == 3, "Mask must have 3 channels"
-                # the mask has associated colors to it.
-                light_source_intensity = mask.reshape(-1, 3)
-                light_source_intensity_weights = light_source_intensity[pixel_ids[sorted_weights_indices]]
-                sorted_weights = sorted_weights[:, None] * light_source_intensity_weights
+        # Determine the gaussians in the lighting frustum
+        means2d = meta["means2d"].squeeze(0)
+        in_frustum_mask = (torch.abs(means2d[:, 0] - W/2) < W/2) & (torch.abs(means2d[:, 1] - H/2) < H/2) & (meta["depths"].squeeze() > 0)
 
-        lighting_weights = self.lighting_fn(sorted_weights)
-        if len(lighting_weights.shape) == 2:
-            new_weights = torch.zeros((self.means.shape[0], 3), device=lighting_weights.device)
-            new_weights[img_plane_gs_ids] = lighting_weights
-        else:
-            new_weights = torch.zeros(self.means.shape[0], device=lighting_weights.device)
-            new_weights[img_plane_gs_ids] = lighting_weights
-            new_weights = new_weights.unsqueeze(-1)
+        # gaussian_weights = torch.zeros()
+
+        # if mask is not None:
+        #     if len(mask.shape) == 2:
+        #     # if mask is HxW image, just multiply the intensities with the gaussian weights
+        #         light_source_intensity = mask.reshape(-1)
+        #         light_source_intensity_weights = light_source_intensity[pixel_ids[sorted_weights_indices]]
+        #         sorted_weights = sorted_weights * light_source_intensity_weights
+        #     else:
+        #         assert mask.shape[-1] == 3, "Mask must have 3 channels"
+        #         # the mask has associated colors to it.
+        #         light_source_intensity = mask.reshape(-1, 3)
+        #         light_source_intensity_weights = light_source_intensity[pixel_ids[sorted_weights_indices]]
+        #         sorted_weights = sorted_weights[:, None] * light_source_intensity_weights
+
+        # lighting_weights = self.lighting_fn(sorted_weights)
+        # lighting_weights = weights
+        # if len(lighting_weights.shape) == 2:
+        #     new_weights = torch.zeros((self.means.shape[0], 3), device=lighting_weights.device)
+        #     new_weights[img_plane_gs_ids] = 1.0 #lighting_weights
+        # else:
+        #     new_weights = torch.zeros(self.means.shape[0], device=lighting_weights.device)
+        #     new_weights[img_plane_gs_ids] = 1.0 #lighting_weights
+        #     new_weights = new_weights.unsqueeze(-1)
+        new_weights = 0.0 * torch.ones(self.means.shape[0], device=self.device)
+        new_weights[~in_frustum_mask] = 1.0
+        new_weights[img_plane_gs_ids] = 1.0 
+        new_weights = new_weights.unsqueeze(-1)
 
         self.shadow_fn = lambda x: shadow_fn(x, new_weights)
 

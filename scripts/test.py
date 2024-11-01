@@ -23,7 +23,8 @@ def look_at(location, target, up):
     R = torch.stack([x, y, z], dim=1)
     return R
 
-config_path = Path('outputs/moon_spiral_2_masked/shadow-splat/2024-10-25_133148/config.yml')
+# config_path = Path('outputs/moon_spiral_2_masked/shadow-splat/2024-10-25_133148/config.yml')
+config_path = Path('outputs/rains_chair/shadow-splat/2024-10-29_115808/config.yml')
 
 splat = GaussianSplat(config_path, dataset_mode='train', device=device, res_factor=0.5)
 
