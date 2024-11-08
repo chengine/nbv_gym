@@ -314,12 +314,10 @@ class ShadowSplatModel(SplatfactoModel):
 
         self.shadow_fn = None
 
+        # TODO: Learn this lighting_fn
         self.lighting_fn = lambda x: x**(1/2.2)
 
-        # TODO: Learn this lighting_fn
 
-
-    # TODO: Apply a mask to the pixel ids to only render pixels with these mask ids
     def update_light_source(self, light_source: Cameras, mask=None):
         """Update the light source, generating a new shadow function for the scene."""
 
@@ -475,8 +473,7 @@ class ShadowSplatModel(SplatfactoModel):
         img_plane_gs_ids = gs_ids
 
         # Determine the gaussians in the lighting frustum
-        means2d = meta["means2d"].squeeze(0)
-        in_frustum_mask = (torch.abs(means2d[:, 0] - W/2) < W/2) & (torch.abs(means2d[:, 1] - H/2) < H/2) & (meta["depths"].squeeze() > 0)
+        outside_frustum_mask = (meta["radii"].squeeze(0) == 0)
 
         # gaussian_weights = torch.zeros()
 
@@ -503,7 +500,7 @@ class ShadowSplatModel(SplatfactoModel):
         #     new_weights[img_plane_gs_ids] = 1.0 #lighting_weights
         #     new_weights = new_weights.unsqueeze(-1)
         new_weights = 0.0 * torch.ones(self.means.shape[0], device=self.device)
-        new_weights[~in_frustum_mask] = 1.0
+        new_weights[outside_frustum_mask] = 1.0
         new_weights[img_plane_gs_ids] = 1.0 
         new_weights = new_weights.unsqueeze(-1)
 

@@ -135,7 +135,13 @@ class GaussianSplat():
             outputs = self.pipeline.model.get_outputs_for_camera(camera,obb_box=obb_box)
         return outputs
     
-    def update_light_source(self, light_source_pose, mask=None):
+    def update_light_source(self, light_source: Cameras, mask=None):
+        """Update light source from cameras object"""
+        light_source = light_source.to(self.device)
+        self.pipeline.model.update_light_source(light_source, mask)
+    
+    def update_light_source_pose(self, light_source_pose, mask=None):
+        """Update light source pose, using dataset camera intrinsics"""
         light_source_pose = light_source_pose[None,:3, ...]
 
         light_source = Cameras(
@@ -149,8 +155,7 @@ class GaussianSplat():
             camera_type=CameraType.ORTHOPHOTO,
         )
         
-        light_source = light_source.to(self.device)
-        self.pipeline.model.update_light_source(light_source, mask)
+        self.update_light_source(light_source, mask)
 
         return light_source
     
