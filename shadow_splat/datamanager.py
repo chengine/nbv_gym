@@ -71,12 +71,10 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
         # print(self.train_dataparser_outputs.lights)
         
 
-    def next_train(self, step: int) -> Tuple[Cameras, Dict]:
+    def next_train(self, step: int) -> Tuple[Cameras, Dict, Cameras]:
         """Returns the next training batch
 
         Returns a Camera instead of raybundle"""
-        # TODO: output corresponding light info
-
         image_idx = self.train_unseen_cameras.pop(random.randint(0, len(self.train_unseen_cameras) - 1))
         # Make sure to re-populate the unseen cameras list if we have exhausted it
         if len(self.train_unseen_cameras) == 0:
@@ -92,5 +90,7 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
             camera.metadata = {}
             
         camera.metadata["cam_idx"] = image_idx
+
+        light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
         
-        return camera, data
+        return camera, data, light

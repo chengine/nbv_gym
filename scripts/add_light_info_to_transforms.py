@@ -8,7 +8,7 @@ import os
 import numpy as np
 from pathlib import Path
 
-data_path = Path(os.path.expanduser("~/NeRF/nerfstudio/data/Shadow/rains_chair/"))
+data_path = Path(os.path.expanduser("~/NeRF/nerfstudio/data/rains_chair/"))
 transforms_path = data_path / "transforms.json"
 
 with open(transforms_path, "r") as f:

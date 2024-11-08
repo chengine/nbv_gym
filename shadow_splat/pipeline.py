@@ -1,20 +1,18 @@
-import typing
+"""Custom pipeline for Shadow Splat"""
+
 from dataclasses import dataclass, field
 from typing import Literal, Type, Optional
 
-import torch.distributed as dist
 from torch.cuda.amp.grad_scaler import GradScaler
-from torch.nn.parallel import DistributedDataParallel as DDP
 
-from nerfstudio.configs import base_config as cfg
 from nerfstudio.models.base_model import ModelConfig
 from nerfstudio.pipelines.base_pipeline import (
     VanillaPipeline,
     VanillaPipelineConfig,
 )
-from nerfstudio.data.datamanagers.full_images_datamanager import FullImageDatamanagerConfig
 from nerfstudio.utils import profiler
 
+from shadow_splat.datamanager import ShadowSplatDataManagerConfig
 from shadow_splat.model import ShadowSplatModelConfig
 
 
@@ -24,7 +22,7 @@ class ShadowSplatPipelineConfig(VanillaPipelineConfig):
 
     _target: Type = field(default_factory=lambda: ShadowSplatPipeline)
     """target class to instantiate"""
-    datamanager: FullImageDatamanagerConfig = FullImageDatamanagerConfig()
+    datamanager: ShadowSplatDataManagerConfig = ShadowSplatDataManagerConfig()
     """specifies the datamanager config"""
     model: ModelConfig = ShadowSplatModelConfig()
     """specifies the model config"""
@@ -56,12 +54,12 @@ class ShadowSplatPipeline(VanillaPipeline):
         Args:
             step: current iteration step to update sampler if using DDP (distributed)
         """
-        ray_bundle, batch = self.datamanager.next_train(step)
+        camera, data, light = self.datamanager.next_train(step)
         
-        # self._model.update_light_source()
+        self._model.update_light_source(light)
 
-        model_outputs = self._model(ray_bundle)  # train distributed data parallel model if world_size > 1
-        metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
-        loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
+        model_outputs = self._model(camera)  # train distributed data parallel model if world_size > 1
+        metrics_dict = self.model.get_metrics_dict(model_outputs, data)
+        loss_dict = self.model.get_loss_dict(model_outputs, data, metrics_dict)
 
         return model_outputs, loss_dict, metrics_dict

@@ -3,17 +3,15 @@ Shadow Splat configuration file.
 """
 
 from nerfstudio.configs.base_config import ViewerConfig
-from nerfstudio.data.dataparsers.nerfstudio_dataparser import NerfstudioDataParserConfig
-from nerfstudio.engine.optimizers import AdamOptimizerConfig, RAdamOptimizerConfig
+from nerfstudio.engine.optimizers import AdamOptimizerConfig
 from nerfstudio.engine.schedulers import ExponentialDecaySchedulerConfig
 from nerfstudio.engine.trainer import TrainerConfig
 from nerfstudio.plugins.types import MethodSpecification
-from nerfstudio.pipelines.base_pipeline import VanillaPipelineConfig
-from nerfstudio.data.datamanagers.full_images_datamanager import FullImageDatamanagerConfig
 
 from shadow_splat.model import ShadowSplatModelConfig
 from shadow_splat.dataparser import ShadowSplatDataParserConfig
 from shadow_splat.datamanager import ShadowSplatDataManagerConfig
+from shadow_splat.pipeline import ShadowSplatPipelineConfig
 
 shadow_splat = MethodSpecification(
     config=TrainerConfig(
@@ -24,7 +22,7 @@ shadow_splat = MethodSpecification(
         steps_per_eval_all_images=1000,
         max_num_iterations=56000,
         mixed_precision=False,
-        pipeline=VanillaPipelineConfig(
+        pipeline=ShadowSplatPipelineConfig(
             datamanager=ShadowSplatDataManagerConfig(
                 dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
                 cache_images_type="uint8",
