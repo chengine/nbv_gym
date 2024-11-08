@@ -1,5 +1,5 @@
 """
-TerrainSplat configuration file.
+Shadow Splat configuration file.
 """
 
 from nerfstudio.configs.base_config import ViewerConfig
@@ -12,6 +12,7 @@ from nerfstudio.pipelines.base_pipeline import VanillaPipelineConfig
 from nerfstudio.data.datamanagers.full_images_datamanager import FullImageDatamanagerConfig
 
 from shadow_splat.model import ShadowSplatModelConfig
+from shadow_splat.dataparser import ShadowSplatDataParserConfig
 
 shadow_splat = MethodSpecification(
     config=TrainerConfig(
@@ -24,7 +25,7 @@ shadow_splat = MethodSpecification(
         mixed_precision=False,
         pipeline=VanillaPipelineConfig(
             datamanager=FullImageDatamanagerConfig(
-                dataparser=NerfstudioDataParserConfig(load_3D_points=True),
+                dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
                 cache_images_type="uint8",
             ),
             model=ShadowSplatModelConfig(),
