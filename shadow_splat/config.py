@@ -13,6 +13,7 @@ from nerfstudio.data.datamanagers.full_images_datamanager import FullImageDatama
 
 from shadow_splat.model import ShadowSplatModelConfig
 from shadow_splat.dataparser import ShadowSplatDataParserConfig
+from shadow_splat.datamanager import ShadowSplatDataManagerConfig
 
 shadow_splat = MethodSpecification(
     config=TrainerConfig(
@@ -24,7 +25,7 @@ shadow_splat = MethodSpecification(
         max_num_iterations=56000,
         mixed_precision=False,
         pipeline=VanillaPipelineConfig(
-            datamanager=FullImageDatamanagerConfig(
+            datamanager=ShadowSplatDataManagerConfig(
                 dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
                 cache_images_type="uint8",
             ),

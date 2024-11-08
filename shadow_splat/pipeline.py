@@ -12,8 +12,8 @@ from nerfstudio.pipelines.base_pipeline import (
     VanillaPipeline,
     VanillaPipelineConfig,
 )
-
 from nerfstudio.data.datamanagers.full_images_datamanager import FullImageDatamanagerConfig
+from nerfstudio.utils import profiler
 
 from shadow_splat.model import ShadowSplatModelConfig
 
@@ -46,3 +46,22 @@ class ShadowSplatPipeline(VanillaPipeline):
                          world_size=world_size, 
                          local_rank=local_rank, 
                          grad_scaler=grad_scaler)
+        
+    @profiler.time_function
+    def get_train_loss_dict(self, step: int):
+        """This function gets your training loss dict. This will be responsible for
+        getting the next batch of data from the DataManager and interfacing with the
+        Model class, feeding the data to the model's forward function.
+
+        Args:
+            step: current iteration step to update sampler if using DDP (distributed)
+        """
+        ray_bundle, batch = self.datamanager.next_train(step)
+        
+        # self._model.update_light_source()
+
+        model_outputs = self._model(ray_bundle)  # train distributed data parallel model if world_size > 1
+        metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
+        loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
+
+        return model_outputs, loss_dict, metrics_dict
