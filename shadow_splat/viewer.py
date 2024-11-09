@@ -17,10 +17,9 @@ class CustomViewer(Viewer):
         
         tabs = self.viser_server.gui.add_tab_group()
         lighting_tab = tabs.add_tab("Light", viser.Icon.SUN)
-        # Add the light source position slider
+        
         with lighting_tab:
             self._add_light_source_slider()
-        # self._add_light_source_slider()
 
     def _add_light_source_slider(self):
         """Add a slider to the control panel for adjusting the light source position."""
@@ -41,61 +40,100 @@ class CustomViewer(Viewer):
         self.radius_slider = self.viser_server.gui.add_slider(
             label="Radius",
             min=0.0,  
-            max=2.0,
+            max=5.0,
             step=0.1,
             initial_value=1.0 
         )
-        # Set the callback for the slider
+        self.dim_slider = self.viser_server.gui.add_slider(
+            label="Dimension",
+            min=0.0,  
+            max=2000.0,
+            step=1.0,
+            initial_value=1200 
+        )
+        self.focal_length_slider = self.viser_server.gui.add_slider(
+            label="Focal length",
+            min=0.0,  
+            max=3000.0,
+            step=1.0,
+            initial_value=1650 
+        )
+        self.origin_input = self.viser_server.gui.add_vector3(
+            label="Origin",
+            min=(-2.0, -2.0, -2.0),  
+            max=(2.0, 2.0, 2.0),
+            step=1.0,
+            initial_value=(0.0, 0.0, 0.0) 
+        )
+        self.camera_type_select = self.viser_server.gui.add_dropdown(
+            label="Camera Type",
+            options=["Perspective", "Orthographic", "Fisheye"],
+            initial_value="Orthographic"
+        )
+        # Set the callbacks
         self.az_slider.on_update(self.update_light_source_pose)
         self.el_slider.on_update(self.update_light_source_pose)
         self.radius_slider.on_update(self.update_light_source_pose)
+        self.dim_slider.on_update(self.update_light_source_pose)
+        self.focal_length_slider.on_update(self.update_light_source_pose)
+        self.origin_input.on_update(self.update_light_source_pose)
+        self.camera_type_select.on_update(self.update_light_source_pose)
 
     def update_light_source_pose(self, event):
         """Update the light source pose based on slider input."""
-        # Extract the actual value from the event
+        # Extract GUI values
         az_rad = torch.deg2rad(torch.tensor(self.az_slider.value))
         el_rad = torch.deg2rad(torch.tensor(self.el_slider.value))
         radius = self.radius_slider.value
+        dimension = self.dim_slider.value
+        focal_length = self.focal_length_slider.value
+        origin = torch.tensor(self.origin_input.value)
 
-        # Define the new pose matrix based on the slider value
-        new_pose = camera_to_world_transform(az_rad, el_rad, radius).to(self.pipeline.device)
+        if self.camera_type_select.value == "Perspective":
+            camera_type = CameraType.PERSPECTIVE
+        elif self.camera_type_select.value == "Orthographic":
+            camera_type = CameraType.ORTHOPHOTO
+        elif self.camera_type_select.value == "Fisheye":
+            camera_type = CameraType.FISHEYE
+
+        # Light source pose pointing to the origin
+        new_pose = camera_to_world_transform(az_rad, el_rad, origin, radius).to(self.pipeline.device)
         print("New light source pose:\n", new_pose)
         
         light_source = Cameras(
                 camera_to_worlds=new_pose[None,:3, ...],
-                fx=1650.0,
-                fy=1650.0,
-                cx=250.0,
-                cy=250.0,
-                width=500,
-                height=500,
-                # camera_type=CameraType.PERSPECTIVE,
-                camera_type=CameraType.ORTHOPHOTO,
+                fx=focal_length,
+                fy=focal_length,
+                cx=dimension / 2.0,
+                cy=dimension / 2.0,
+                width=int(dimension),
+                height=int(dimension),
+                camera_type=camera_type,
             )
 
-        # Update the light source in the pipeline model
         self.pipeline.model.update_light_source(light_source)
-        
-        # Trigger a rerender if necessary
         self._trigger_rerender()
 
 
-def camera_to_world_transform(azimuth_rad, elevation_rad, radius):
+def camera_to_world_transform(azimuth_rad, elevation_rad, origin, radius):
     # Compute the camera position in Cartesian coordinates
     x = radius * torch.cos(elevation_rad) * torch.cos(azimuth_rad)
     y = radius * torch.cos(elevation_rad) * torch.sin(azimuth_rad)
     z = radius * torch.sin(elevation_rad)
     camera_position = torch.tensor([x, y, z])
 
-    # Compute the forward, right, and up vectors
-    forward = -camera_position / torch.norm(camera_position)  # Normalize
-    up = torch.tensor([0.0, 0.0, 1.0])
-    right = torch.cross(up, forward)
-    right = right / torch.norm(right)  # Normalize
-    up = torch.cross(forward, right)  # Re-compute the up vector to ensure orthogonality
+    # # Compute the forward, right, and up vectors
+    # forward = -camera_position / torch.norm(camera_position)  # Normalize
+    # up = torch.tensor([0.0, 0.0, 1.0])
+    # right = torch.cross(up, forward)
+    # right = right / torch.norm(right)  # Normalize
+    # up = torch.cross(forward, right)  # Re-compute the up vector to ensure orthogonality
 
-    # Construct the rotation matrix
-    rotation_matrix = torch.stack([right, up, -forward], dim=1)  # 3x3 rotation matrix
+    # # Construct the rotation matrix
+    # rotation_matrix = torch.stack([right, up, -forward], dim=1)  # 3x3 rotation matrix
+
+    up = torch.tensor([0.0, 0.0, 1.0])
+    rotation_matrix = look_at(camera_position, origin, up)
 
     # Construct the 4x4 camera-to-world transformation matrix
     transform_matrix = torch.eye(4)

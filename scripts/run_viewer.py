@@ -63,26 +63,26 @@ class RunViewer:
         config.viewer = self.viewer.as_viewer_config()
         config.viewer.num_rays_per_chunk = num_rays_per_chunk
 
-        # Update light source
-        import torch
-        from nerfstudio.cameras.cameras import Cameras, CameraType
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        pose = torch.tensor([[-0.9573, -0.1335,  0.2564,  0.5127],
-                [-0.2890,  0.4420, -0.8492, -1.6983],
-                [ 0.0000,  0.8870,  0.4617,  0.9235],
-                [ 0.0000,  0.0000,  0.0000,  1.0000]]
-        ).to(device)
-        light_source = Cameras(
-                camera_to_worlds=pose[None,:3, ...],
-                fx=1650.0,
-                fy=1650.0,
-                cx=360.0,
-                cy=360.0,
-                width=720,
-                height=720,
-                camera_type=CameraType.ORTHOPHOTO,
-            )
-        pipeline.model.update_light_source(light_source)
+        # Set initial light source
+        # import torch
+        # from nerfstudio.cameras.cameras import Cameras, CameraType
+        # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # pose = torch.tensor([[-0.9573, -0.1335,  0.2564,  0.5127],
+        #         [-0.2890,  0.4420, -0.8492, -1.6983],
+        #         [ 0.0000,  0.8870,  0.4617,  0.9235],
+        #         [ 0.0000,  0.0000,  0.0000,  1.0000]]
+        # ).to(device)
+        # light_source = Cameras(
+        #         camera_to_worlds=pose[None,:3, ...],
+        #         fx=1650.0,
+        #         fy=1650.0,
+        #         cx=360.0,
+        #         cy=360.0,
+        #         width=720,
+        #         height=720,
+        #         camera_type=CameraType.ORTHOPHOTO,
+        #     )
+        # pipeline.model.update_light_source(light_source)
 
         _start_viewer(config, pipeline, step)
 

@@ -487,8 +487,10 @@ class ShadowSplatModel(SplatfactoModel):
         img_plane_gs_ids = gs_ids
 
         # Determine the gaussians in the lighting frustum
+        # Gaussians within the image dimensions
         means2d = meta["means2d"].squeeze(0)
         in_frustum_mask = (torch.abs(means2d[:, 0] - W/2) < W/2) & (torch.abs(means2d[:, 1] - H/2) < H/2)
+        # Gaussians outside the frustum as determined by rasterization
         outside_frustum_mask = (meta["radii"].squeeze(0) == 0) | ~in_frustum_mask
 
         # gaussian_weights = torch.zeros()
@@ -515,7 +517,7 @@ class ShadowSplatModel(SplatfactoModel):
         #     new_weights = torch.zeros(self.means.shape[0], device=lighting_weights.device)
         #     new_weights[img_plane_gs_ids] = 1.0 #lighting_weights
         #     new_weights = new_weights.unsqueeze(-1)
-        new_weights = 0.1 * torch.ones(self.means.shape[0], device=self.device)
+        new_weights = 0.7 * torch.ones(self.means.shape[0], device=self.device)
         new_weights[outside_frustum_mask] = 1.0  # relight all gaussians outside frustum
         new_weights[img_plane_gs_ids] = 1.0     # relight all gaussians inside frustum hit by rasterization (not in shadow)
         new_weights = new_weights.unsqueeze(-1)

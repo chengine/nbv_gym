@@ -15,22 +15,23 @@ with open(transforms_path, "r") as f:
     transforms = json.load(f)
 
 # Add light intrinsics
+W, H = 1200, 1200
 transforms["light_intrinsics"] = {
-    "w": 720,
-    "h": 720,
+    "w": W,
+    "h": H,
     "fl_x": 1650.0,
     "fl_y": 1650.0,
-    "cx": 360.0,
-    "cy": 360.0,
+    "cx": W / 2.0,
+    "cy": H / 2.0,
 }
 
 # Add light pose to each frame
 for frame in transforms["frames"]:
     # frame["light_pose"] = np.eye(4).tolist()
-    frame["light_pose"] = [[-0.9573, -0.1335,  0.2564,  0.5127],
-                            [-0.2890,  0.4420, -0.8492, -1.6983],
-                            [ 0.0000,  0.8870,  0.4617,  0.9235],
-                            [ 0.0000,  0.0000,  0.0000,  1.0000]]
+    frame["light_pose"] = [[ 0.9455, -0.1578,  0.2847,  0.2847],
+        [ 0.3256,  0.4584, -0.8270, -0.8270],
+        [-0.0000,  0.8746,  0.4848,  0.4848],
+        [ 0.0000,  0.0000,  0.0000,  1.0000]]
 
 # Save updated transforms
 with open(data_path / "transforms_with_light.json", "w") as f:
