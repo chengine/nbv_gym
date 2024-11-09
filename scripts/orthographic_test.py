@@ -31,7 +31,7 @@ def look_at(location, target, up):
 
 # config_path = Path('outputs/moon_spiral_2_masked/shadow-splat/2024-10-25_133148/config.yml')
 # config_path = Path('outputs/poster/shadow-splat/2024-10-25_153801/config.yml')
-config_path = Path('outputs/rains_chair/shadow-splat/2024-10-29_115808/config.yml')
+config_path = Path('outputs/rains_chair/shadow-splat/2024-11-08_143929/config.yml')
 
 splat = GaussianSplat(config_path, dataset_mode='train', device=device, res_factor=0.5)
 
@@ -65,13 +65,14 @@ light = Cameras(
     cy=1000.0,
     width=2000,
     height=2000,
-    camera_type=CameraType.PERSPECTIVE,
+    # camera_type=CameraType.PERSPECTIVE,
+    camera_type=CameraType.ORTHOPHOTO,
 )
 
 center = torch.tensor([H, W], device=device) / 2
 
 # Arcing light source trajectory
-N = 100  # number of light source poses
+N = 10  # number of light source poses
 t = torch.linspace(0, np.pi, N)
 light_source_positions = torch.stack([torch.cos(t), torch.zeros(N), torch.sin(t)], dim=-1).to(device)
 # fig = go.Figure(data=[go.Scatter3d(x=light_source_poses[:, 0].cpu().numpy(), 

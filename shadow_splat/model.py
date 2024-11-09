@@ -34,7 +34,7 @@ from torch.nn import Parameter
 from typing_extensions import Literal
 
 from nerfstudio.cameras.camera_optimizers import CameraOptimizer, CameraOptimizerConfig
-from nerfstudio.cameras.cameras import Cameras
+from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.data.scene_box import OrientedBox
 from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes, TrainingCallbackLocation
 from nerfstudio.engine.optimizers import Optimizers
@@ -49,6 +49,10 @@ from gsplat.cuda._wrapper import rasterize_to_indices_in_range
 from nerfacc import render_weight_from_alpha
 
 from shadow_splat.slim_rasterization import slim_rasterization
+
+
+# @dataclass(init=False)
+# class CamerasWithLight(TensorDataclass):
 
 
 def num_sh_bases(degree: int) -> int:
@@ -398,6 +402,15 @@ class ShadowSplatModel(SplatfactoModel):
         #     colors_crop = torch.sigmoid(colors_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
         #     sh_degree_to_use = None
 
+        if light_source.camera_type == CameraType.PERSPECTIVE.value:
+            camera_model = "pinhole"
+        elif light_source.camera_type == CameraType.ORTHOPHOTO.value:
+            camera_model = "ortho"
+        elif light_source.camera_type == CameraType.FISHEYE.value:
+            camera_model = "fisheye"
+        else:
+            raise ValueError("Unknown camera type: %s", light_source.camera_type)
+
         # Calculates intermediate variables for rasterization
         meta = slim_rasterization(
             means=means_crop,
@@ -417,6 +430,7 @@ class ShadowSplatModel(SplatfactoModel):
             # absgrad=True,
             rasterize_mode=self.config.rasterize_mode,
             # radius_clip=3.0,  # set some threshold to disregrad small gaussians for faster rendering.
+            camera_model=camera_model,
         )
 
         # pixel_ids/gaussian ids are sorted in order of depth of gaussians
@@ -473,7 +487,9 @@ class ShadowSplatModel(SplatfactoModel):
         img_plane_gs_ids = gs_ids
 
         # Determine the gaussians in the lighting frustum
-        outside_frustum_mask = (meta["radii"].squeeze(0) == 0)
+        means2d = meta["means2d"].squeeze(0)
+        in_frustum_mask = (torch.abs(means2d[:, 0] - W/2) < W/2) & (torch.abs(means2d[:, 1] - H/2) < H/2)
+        outside_frustum_mask = (meta["radii"].squeeze(0) == 0) | ~in_frustum_mask
 
         # gaussian_weights = torch.zeros()
 
@@ -499,9 +515,9 @@ class ShadowSplatModel(SplatfactoModel):
         #     new_weights = torch.zeros(self.means.shape[0], device=lighting_weights.device)
         #     new_weights[img_plane_gs_ids] = 1.0 #lighting_weights
         #     new_weights = new_weights.unsqueeze(-1)
-        new_weights = 0.0 * torch.ones(self.means.shape[0], device=self.device)
-        new_weights[outside_frustum_mask] = 1.0
-        new_weights[img_plane_gs_ids] = 1.0 
+        new_weights = 0.1 * torch.ones(self.means.shape[0], device=self.device)
+        new_weights[outside_frustum_mask] = 1.0  # relight all gaussians outside frustum
+        new_weights[img_plane_gs_ids] = 1.0     # relight all gaussians inside frustum hit by rasterization (not in shadow)
         new_weights = new_weights.unsqueeze(-1)
 
         self.shadow_fn = lambda x: shadow_fn(x, new_weights)

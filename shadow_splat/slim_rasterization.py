@@ -37,6 +37,7 @@ def slim_rasterization(
     sparse_grad: bool = False,
     # absgrad: bool = False,
     rasterize_mode: Literal["classic", "antialiased"] = "classic",
+    camera_model: Literal["pinhole", "ortho", "fisheye"] = "pinhole",
 ) -> Tuple[Tensor, Tensor, Dict]:
     """Rasterize a set of 3D Gaussians (N) to a batch of image planes (C).
 
@@ -148,6 +149,7 @@ def slim_rasterization(
         radius_clip=radius_clip,
         sparse_grad=sparse_grad,
         calc_compensations=(rasterize_mode == "antialiased"),
+        camera_model=camera_model,
     )
 
     if packed:

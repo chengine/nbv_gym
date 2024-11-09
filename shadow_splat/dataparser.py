@@ -43,7 +43,7 @@ class ShadowSplatDataParser(Nerfstudio):
 
     config: ShadowSplatDataParserConfig
 
-    def _generate_dataparser_outputs(self, split="train"):
+    def _generate_dataparser_outputs(self, split="train") -> ShadowSplatDataparserOutputs:
         # Call parent method
         dataparser_outputs = ShadowSplatDataparserOutputs.from_parent(super()._generate_dataparser_outputs(split))
 

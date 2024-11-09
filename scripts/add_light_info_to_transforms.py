@@ -8,7 +8,7 @@ import os
 import numpy as np
 from pathlib import Path
 
-data_path = Path(os.path.expanduser("~/NeRF/nerfstudio/data/rains_chair/"))
+data_path = Path(os.path.expanduser("~/NeRF/nerfstudio/data/Shadow/rains_chair/"))
 transforms_path = data_path / "transforms.json"
 
 with open(transforms_path, "r") as f:
@@ -26,7 +26,11 @@ transforms["light_intrinsics"] = {
 
 # Add light pose to each frame
 for frame in transforms["frames"]:
-    frame["light_pose"] = np.eye(4).tolist()
+    # frame["light_pose"] = np.eye(4).tolist()
+    frame["light_pose"] = [[-0.9573, -0.1335,  0.2564,  0.5127],
+                            [-0.2890,  0.4420, -0.8492, -1.6983],
+                            [ 0.0000,  0.8870,  0.4617,  0.9235],
+                            [ 0.0000,  0.0000,  0.0000,  1.0000]]
 
 # Save updated transforms
 with open(data_path / "transforms_with_light.json", "w") as f:
