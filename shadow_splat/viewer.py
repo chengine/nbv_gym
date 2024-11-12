@@ -1,9 +1,10 @@
 """Custom viewer for Shadow Splat
 
 """
-
+import numpy as np
 import torch
 import viser
+import viser.transforms as tf
 from nerfstudio.viewer.viewer import Viewer  
 from nerfstudio.cameras.cameras import Cameras, CameraType
 
@@ -79,6 +80,19 @@ class CustomViewer(Viewer):
         self.origin_input.on_update(self.update_light_source_pose)
         self.camera_type_select.on_update(self.update_light_source_pose)
 
+
+        # Add light source camera
+        self.light_source_visualizer = self.viser_server.add_camera_frustum(
+            name="/light",
+            fov=90.0,
+            aspect=1.,
+            scale =1.,
+            color=(1.0, 1.0, 0.0),
+            wxyz=tf.SO3.from_x_radians(0.).wxyz,
+            position=(0., 0., 0.),
+            visible=False
+        )
+
     def update_light_source_pose(self, event):
         """Update the light source pose based on slider input."""
         # Extract GUI values
@@ -112,8 +126,25 @@ class CustomViewer(Viewer):
             )
 
         self.pipeline.model.update_light_source(light_source)
-        self._trigger_rerender()
 
+        cv_to_gl = torch.tensor([
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, -1.0, 0.0, 0.0],
+                    [0.0, 0.0, -1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0]
+                ]).to(self.pipeline.device)
+        
+        light_source_pose_cv = new_pose @ cv_to_gl
+
+        # Update the light source camera frustum
+        self.light_source_visualizer.fov = 2* np.arctan2(dimension, (2*focal_length))
+        self.light_source_visualizer.position = light_source_pose_cv[:3, 3].cpu().numpy()
+
+        # Convert the opengl light source rotation into the opencv viser format
+        self.light_source_visualizer.wxyz = tf.SO3.from_matrix(light_source_pose_cv[:3, :3].cpu().numpy()).wxyz
+        self.light_source_visualizer.visible = True
+
+        self._trigger_rerender()
 
 def camera_to_world_transform(azimuth_rad, elevation_rad, origin, radius):
     # Compute the camera position in Cartesian coordinates
