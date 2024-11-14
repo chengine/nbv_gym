@@ -517,7 +517,7 @@ class ShadowSplatModel(SplatfactoModel):
         #     new_weights = torch.zeros(self.means.shape[0], device=lighting_weights.device)
         #     new_weights[img_plane_gs_ids] = 1.0 #lighting_weights
         #     new_weights = new_weights.unsqueeze(-1)
-        new_weights = 0.7 * torch.ones(self.means.shape[0], device=self.device)
+        new_weights = 0.5 * torch.ones(self.means.shape[0], device=self.device)
         new_weights[outside_frustum_mask] = 1.0  # relight all gaussians outside frustum
         new_weights[img_plane_gs_ids] = 1.0     # relight all gaussians inside frustum hit by rasterization (not in shadow)
         new_weights = new_weights.unsqueeze(-1)
