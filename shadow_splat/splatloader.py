@@ -107,34 +107,41 @@ class GaussianSplat():
         return H, W, K
         # return int(2*K[1, 2]), int(2*K[0, 2]), K
 
-    def render(self, pose, debug_mode=False,
+    def render(self, pose, camera=None, debug_mode=False,
                img_coords: torch.Tensor = None, shadow_fn = None):
         # Render from a single pose
         camera_to_world = pose[None,:3, ...]
 
-        cameras = Cameras(
-            camera_to_worlds=camera_to_world,
-            fx=self.cameras[0].fx,
-            fy=self.cameras[0].fy,
-            cx=self.cameras[0].cx,
-            cy=self.cameras[0].cy,
-            width=self.cameras[0].width,
-            height=self.cameras[0].height,
-            camera_type=CameraType.PERSPECTIVE,
-        )
+        if camera is None:
+            camera = Cameras(
+                camera_to_worlds=camera_to_world,
+                fx=self.cameras[0].fx,
+                fy=self.cameras[0].fy,
+                cx=self.cameras[0].cx,
+                cy=self.cameras[0].cy,
+                width=self.cameras[0].width,
+                height=self.cameras[0].height,
+                camera_type=CameraType.PERSPECTIVE,
+            )
+        else:
+            camera.camera_to_worlds = camera_to_world
         
-        cameras = cameras.to(self.device)
+        camera = camera.to(self.device)
         
         # render outputs
         obb_box = None
 
         with torch.no_grad():
-            outputs = self.pipeline.model.get_outputs_for_camera(cameras,
-                                                                    obb_box=obb_box,
-                                                                    )
+            outputs = self.pipeline.model.get_outputs_for_camera(camera,obb_box=obb_box)
         return outputs
     
-    def update_light_source(self, light_source_pose, mask=None):
+    def update_light_source(self, light_source: Cameras, mask=None):
+        """Update light source from cameras object"""
+        light_source = light_source.to(self.device)
+        self.pipeline.model.update_light_source(light_source, mask)
+    
+    def update_light_source_pose(self, light_source_pose, mask=None):
+        """Update light source pose, using dataset camera intrinsics"""
         light_source_pose = light_source_pose[None,:3, ...]
 
         light_source = Cameras(
@@ -145,11 +152,10 @@ class GaussianSplat():
             cy=self.cameras[0].cy,
             width=self.cameras[0].width,
             height=self.cameras[0].height,
-            camera_type=CameraType.PERSPECTIVE,
+            camera_type=CameraType.ORTHOPHOTO,
         )
         
-        light_source = light_source.to(self.device)
-        self.pipeline.model.update_light_source(light_source, mask)
+        self.update_light_source(light_source, mask)
 
         return light_source
     

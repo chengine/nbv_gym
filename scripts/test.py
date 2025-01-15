@@ -3,10 +3,12 @@ import numpy as np
 import torch
 import time
 import open3d as o3d 
-from splatloader import GaussianSplat
 import matplotlib.pyplot as plt
 from pathlib import Path
 import cv2
+import os
+
+from shadow_splat.splatloader import GaussianSplat
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -21,9 +23,13 @@ def look_at(location, target, up):
     R = torch.stack([x, y, z], dim=1)
     return R
 
-config_path = Path('outputs/moon_spiral_2/shadow-splat/2024-10-18_135934/config.yml')
+# config_path = Path('outputs/moon_spiral_2_masked/shadow-splat/2024-10-25_133148/config.yml')
+config_path = Path('outputs/rains_chair/shadow-splat/2024-10-29_115808/config.yml')
 
 splat = GaussianSplat(config_path, dataset_mode='train', device=device, res_factor=0.5)
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+render_output_path = os.path.join(script_dir, '..', 'renders')
 
 #%%
 # Recovers dataset poses
@@ -81,6 +87,6 @@ for i in range(len(poses)):
 
     pov_image = pov_output["rgb"].cpu().numpy()
 
-    cv2.imwrite(f'renders/r_{i}.png', cv2.cvtColor(pov_image * 255, cv2.COLOR_BGR2RGB))
+    cv2.imwrite(f'{render_output_path}/r_{i}.png', cv2.cvtColor(pov_image * 255, cv2.COLOR_BGR2RGB))
 
 #%%
