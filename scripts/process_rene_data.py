@@ -158,4 +158,4 @@ for folder in scene_path.iterdir():
     # fig = go.Figure(pose_traces([light_pose]))
     fig.update_layout(height=900, width=1600, scene=dict(aspectmode="data"))
     fig.show()
-    raise
+    
