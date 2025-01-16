@@ -35,9 +35,18 @@ from torch.nn import Parameter
 from nerfstudio.cameras.camera_optimizers import CameraOptimizer, CameraOptimizerConfig
 from nerfstudio.cameras.cameras import Cameras
 from nerfstudio.data.scene_box import OrientedBox
-from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes, TrainingCallbackLocation
+from nerfstudio.engine.callbacks import (
+    TrainingCallback,
+    TrainingCallbackAttributes,
+    TrainingCallbackLocation,
+)
 from nerfstudio.engine.optimizers import Optimizers
-from nerfstudio.model_components.lib_bilagrid import BilateralGrid, color_correct, slice, total_variation_loss
+from nerfstudio.model_components.lib_bilagrid import (
+    BilateralGrid,
+    color_correct,
+    slice,
+    total_variation_loss,
+)
 from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.models.splatfacto import SplatfactoModelConfig, SplatfactoModel
 from nerfstudio.utils.colors import get_color
@@ -51,8 +60,8 @@ from nerfacc import render_weight_from_alpha
 
 from shadow_splat.slim_rasterization import slim_rasterization
 
-def shadow_fn(input, weights):
 
+def shadow_fn(input, weights):
     if input.dim() == 3:  # higher order spherical harmonics
         new_color = input
     else:  # direct color
@@ -60,6 +69,7 @@ def shadow_fn(input, weights):
         new_color = RGB2SH(new_color)
 
     return new_color
+
 
 def resize_image(image: torch.Tensor, d: int):
     """
@@ -74,7 +84,11 @@ def resize_image(image: torch.Tensor, d: int):
 
     image = image.to(torch.float32)
     weight = (1.0 / (d * d)) * torch.ones((1, 1, d, d), dtype=torch.float32, device=image.device)
-    return tf.conv2d(image.permute(2, 0, 1)[:, None, ...], weight, stride=d).squeeze(1).permute(1, 2, 0)
+    return (
+        tf.conv2d(image.permute(2, 0, 1)[:, None, ...], weight, stride=d)
+        .squeeze(1)
+        .permute(1, 2, 0)
+    )
 
 
 @torch_compile()
@@ -97,7 +111,7 @@ def get_viewmat(optimized_camera_to_world):
 
 
 @dataclass
-class ShadowSplatModelConfig(SplatfactoModelConfig):
+class ShadowSplatModelConfig(ModelConfig):
     """Splatfacto Model Config, nerfstudio's implementation of Gaussian Splatting"""
 
     _target: Type = field(default_factory=lambda: ShadowSplatModel)
@@ -163,7 +177,9 @@ class ShadowSplatModelConfig(SplatfactoModelConfig):
     However, PLY exported with antialiased rasterize mode is not compatible with classic mode. Thus many web viewers that
     were implemented for classic mode can not render antialiased mode PLY properly without modifications.
     """
-    camera_optimizer: CameraOptimizerConfig = field(default_factory=lambda: CameraOptimizerConfig(mode="off"))
+    camera_optimizer: CameraOptimizerConfig = field(
+        default_factory=lambda: CameraOptimizerConfig(mode="off")
+    )
     """Config of the camera optimizer to use"""
     use_bilateral_grid: bool = False
     """If True, use bilateral grid to handle the ISP changes in the image space. This technique was introduced in the paper 'Bilateral Guided Radiance Field Processing' (https://bilarfpro.github.io/)."""
@@ -183,7 +199,7 @@ class ShadowSplatModelConfig(SplatfactoModelConfig):
     """Regularization term for scale in MCMC strategy. Only enabled when using MCMC strategy"""
 
 
-class ShadowSplatModel(SplatfactoModel):
+class ShadowSplatModel(Model):
     """Nerfstudio's implementation of Shadow Splatting
 
     Args:
@@ -205,7 +221,9 @@ class ShadowSplatModel(SplatfactoModel):
         if self.seed_points is not None and not self.config.random_init:
             means = torch.nn.Parameter(self.seed_points[0])  # (Location, Color)
         else:
-            means = torch.nn.Parameter((torch.rand((self.config.num_random, 3)) - 0.5) * self.config.random_scale)
+            means = torch.nn.Parameter(
+                (torch.rand((self.config.num_random, 3)) - 0.5) * self.config.random_scale
+            )
         distances, _ = k_nearest_sklearn(means.data, 3)
         # find the average of the three nearest neighbors for each point and use that as the scale
         avg_dist = distances.mean(dim=-1, keepdim=True)
@@ -309,13 +327,12 @@ class ShadowSplatModel(SplatfactoModel):
             raise ValueError(f"""Splatfacto does not support strategy {self.config.strategy} 
                              Currently, the supported strategies include default and mcmc.""")
 
-
         self.shadow_fn = None
 
         # TODO: Learn this lighting_fn
-        #self.lighting_fn = lambda x: x**(1/2.2)
+        # self.lighting_fn = lambda x: x**(1/2.2)
 
-    #def update_light_source(self, light_source: Cameras, mask=None):
+        # def update_light_source(self, light_source: Cameras, mask=None):
         """Update the light source, generating a new shadow function for the scene."""
 
         # # Renders splat from a pose. We call this to get the intermediate variables from the rasterization function.
@@ -440,7 +457,7 @@ class ShadowSplatModel(SplatfactoModel):
         #     meta["isect_offsets"],
         #     meta["flatten_ids"],
         # )
-    
+
         # # means2d = meta["means2d"]
         # # conics = meta["conics"]
         # # opacities = meta["opacities"]
@@ -515,7 +532,7 @@ class ShadowSplatModel(SplatfactoModel):
         # new_weights[img_plane_gs_ids] = 1.0     # relight all gaussians inside frustum hit by rasterization (not in shadow)
         # new_weights = new_weights.unsqueeze(-1)
 
-        #self.shadow_fn = None #lambda x: shadow_fn(x, new_weights)
+        # self.shadow_fn = None #lambda x: shadow_fn(x, new_weights)
 
     @property
     def colors(self):
@@ -603,7 +620,9 @@ class ShadowSplatModel(SplatfactoModel):
                 state=self.strategy_state,
                 step=step,
                 info=self.info,
-                lr=self.schedulers["means"].get_last_lr()[0],  # the learning rate for the "means" attribute of the GS
+                lr=self.schedulers["means"].get_last_lr()[
+                    0
+                ],  # the learning rate for the "means" attribute of the GS
             )
         else:
             raise ValueError(f"Unknown strategy {self.strategy}")
@@ -668,7 +687,9 @@ class ShadowSplatModel(SplatfactoModel):
         return image
 
     @staticmethod
-    def get_empty_outputs(width: int, height: int, background: torch.Tensor) -> Dict[str, Union[torch.Tensor, List]]:
+    def get_empty_outputs(
+        width: int, height: int, background: torch.Tensor
+    ) -> Dict[str, Union[torch.Tensor, List]]:
         rgb = background.repeat(height, width, 1)
         depth = background.new_ones(*rgb.shape[:2], 1) * 10
         accumulation = background.new_zeros(*rgb.shape[:2], 1)
@@ -688,7 +709,9 @@ class ShadowSplatModel(SplatfactoModel):
             raise ValueError(f"Unknown background color {self.config.background_color}")
         return background
 
-    def _apply_bilateral_grid(self, rgb: torch.Tensor, cam_idx: int, H: int, W: int) -> torch.Tensor:
+    def _apply_bilateral_grid(
+        self, rgb: torch.Tensor, cam_idx: int, H: int, W: int
+    ) -> torch.Tensor:
         # make xy grid
         grid_y, grid_x = torch.meshgrid(
             torch.linspace(0, 1.0, H, device=self.device),
@@ -778,7 +801,9 @@ class ShadowSplatModel(SplatfactoModel):
             render_mode = "RGB"
 
         if self.config.sh_degree > 0:
-            sh_degree_to_use = min(self.step // self.config.sh_degree_interval, self.config.sh_degree)
+            sh_degree_to_use = min(
+                self.step // self.config.sh_degree_interval, self.config.sh_degree
+            )
         else:
             colors_crop = torch.sigmoid(colors_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
             sh_degree_to_use = None
@@ -866,7 +891,9 @@ class ShadowSplatModel(SplatfactoModel):
             outputs: the output to compute loss dict to
             batch: ground truth batch corresponding to outputs
         """
-        gt_rgb = self.composite_with_background(self.get_gt_img(batch["image"]), outputs["background"])
+        gt_rgb = self.composite_with_background(
+            self.get_gt_img(batch["image"]), outputs["background"]
+        )
         metrics_dict = {}
         predicted_rgb = outputs["rgb"]
 
@@ -888,7 +915,9 @@ class ShadowSplatModel(SplatfactoModel):
             batch: ground truth batch corresponding to outputs
             metrics_dict: dictionary of metrics, some of which we can use for loss
         """
-        gt_img = self.composite_with_background(self.get_gt_img(batch["image"]), outputs["background"])
+        gt_img = self.composite_with_background(
+            self.get_gt_img(batch["image"]), outputs["background"]
+        )
         pred_img = outputs["rgb"]
 
         # Set masked part of both ground-truth and rendered image to black.
@@ -902,7 +931,9 @@ class ShadowSplatModel(SplatfactoModel):
             pred_img = pred_img * mask
 
         Ll1 = torch.abs(gt_img - pred_img).mean()
-        simloss = 1 - self.ssim(gt_img.permute(2, 0, 1)[None, ...], pred_img.permute(2, 0, 1)[None, ...])
+        simloss = 1 - self.ssim(
+            gt_img.permute(2, 0, 1)[None, ...], pred_img.permute(2, 0, 1)[None, ...]
+        )
         if self.config.use_scale_regularization and self.step % 10 == 0:
             scale_exp = torch.exp(self.scales)
             scale_reg = (
@@ -925,11 +956,15 @@ class ShadowSplatModel(SplatfactoModel):
         if self.config.strategy == "mcmc":
             if self.config.mcmc_opacity_reg > 0.0:
                 mcmc_opacity_reg = (
-                    self.config.mcmc_opacity_reg * torch.abs(torch.sigmoid(self.gauss_params["opacities"])).mean()
+                    self.config.mcmc_opacity_reg
+                    * torch.abs(torch.sigmoid(self.gauss_params["opacities"])).mean()
                 )
                 loss_dict["mcmc_opacity_reg"] = mcmc_opacity_reg
             if self.config.mcmc_scale_reg > 0.0:
-                mcmc_scale_reg = self.config.mcmc_scale_reg * torch.abs(torch.exp(self.gauss_params["scales"])).mean()
+                mcmc_scale_reg = (
+                    self.config.mcmc_scale_reg
+                    * torch.abs(torch.exp(self.gauss_params["scales"])).mean()
+                )
                 loss_dict["mcmc_scale_reg"] = mcmc_scale_reg
 
         if self.training:
@@ -941,7 +976,9 @@ class ShadowSplatModel(SplatfactoModel):
         return loss_dict
 
     @torch.no_grad()
-    def get_outputs_for_camera(self, camera: Cameras, obb_box: Optional[OrientedBox] = None) -> Dict[str, torch.Tensor]:
+    def get_outputs_for_camera(
+        self, camera: Cameras, obb_box: Optional[OrientedBox] = None
+    ) -> Dict[str, torch.Tensor]:
         """Takes in a camera, generates the raybundle, and computes the output of the model.
         Overridden for a camera-based gaussian model.
 
@@ -967,7 +1004,9 @@ class ShadowSplatModel(SplatfactoModel):
         Returns:
             A dictionary of metrics.
         """
-        gt_rgb = self.composite_with_background(self.get_gt_img(batch["image"]), outputs["background"])
+        gt_rgb = self.composite_with_background(
+            self.get_gt_img(batch["image"]), outputs["background"]
+        )
         predicted_rgb = outputs["rgb"]
         cc_rgb = None
 
