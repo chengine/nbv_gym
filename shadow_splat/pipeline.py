@@ -56,7 +56,7 @@ class ShadowSplatPipeline(VanillaPipeline):
         """
         camera, data, light = self.datamanager.next_train(step)
         
-        self._model.update_light_source(light)
+        #self._model.update_light_source(light)
 
         model_outputs = self._model(camera)  # train distributed data parallel model if world_size > 1
         metrics_dict = self.model.get_metrics_dict(model_outputs, data)

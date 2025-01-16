@@ -47,7 +47,7 @@ class ShadowSplatDataParser(Nerfstudio):
         # Call parent method
         dataparser_outputs = ShadowSplatDataparserOutputs.from_parent(super()._generate_dataparser_outputs(split))
 
-        meta = load_from_json(self.config.data / "transforms_with_light.json")
+        meta = load_from_json(self.config.data / "transforms.json")
         data_dir = self.config.data
 
         # sort the frames by fname
