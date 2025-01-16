@@ -27,7 +27,6 @@ from nerfstudio.viewer_legacy.server.viewer_state import ViewerLegacyState
 
 from shadow_splat.viewer import CustomViewer as ViewerState
 
-
 @dataclass
 class ViewerConfigWithoutNumRays(ViewerConfig):
     """Configuration for viewer instantiation"""

@@ -20,7 +20,6 @@ def slim_rasterization(
     quats: Tensor,  # [N, 4]
     scales: Tensor,  # [N, 3]
     opacities: Tensor,  # [N]
-    # colors: Tensor,  # [N, D] or [N, K, 3]
     viewmats: Tensor,  # [C, 4, 4]
     Ks: Tensor,  # [C, 3, 3]
     width: int,
@@ -29,13 +28,10 @@ def slim_rasterization(
     far_plane: float = 1e10,
     radius_clip: float = 0.0,
     eps2d: float = 0.3,
-    # sh_degree: Optional[int] = None,
     packed: bool = True,
     tile_size: int = 16,
     # backgrounds: Optional[Tensor] = None,
-    # render_mode: Literal["RGB", "D", "ED", "RGB+D", "RGB+ED"] = "RGB",
     sparse_grad: bool = False,
-    # absgrad: bool = False,
     rasterize_mode: Literal["classic", "antialiased"] = "classic",
     camera_model: Literal["pinhole", "ortho", "fisheye"] = "pinhole",
 ) -> Tuple[Tensor, Tensor, Dict]:
@@ -118,19 +114,6 @@ def slim_rasterization(
     assert opacities.shape == (N,), opacities.shape
     assert viewmats.shape == (C, 4, 4), viewmats.shape
     assert Ks.shape == (C, 3, 3), Ks.shape
-
-    # if sh_degree is None:
-    #     # treat colors as post-activation values
-    #     # colors should be in shape [N, D] or (C, N, D) (silently support)
-    #     assert (colors.dim() == 2 and colors.shape[0] == N) or (
-    #         colors.dim() == 3 and colors.shape[:2] == (C, N)
-    #     ), colors.shape
-    # else:
-    #     # treat colors as SH coefficients. Allowing for activating partial SH bands
-    #     assert (
-    #         colors.dim() == 3 and colors.shape[0] == N and colors.shape[2] == 3
-    #     ), colors.shape
-    #     assert (sh_degree + 1) ** 2 <= colors.shape[1], colors.shape
 
     # Project Gaussians to 2D. Directly pass in {quats, scales} is faster than precomputing covars.
     proj_results = fully_fused_projection(

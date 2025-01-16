@@ -33,7 +33,8 @@ from pytorch_msssim import SSIM
 from torch.nn import Parameter
 
 from nerfstudio.cameras.camera_optimizers import CameraOptimizer, CameraOptimizerConfig
-from nerfstudio.cameras.cameras import Cameras
+from nerfstudio.cameras.cameras import Cameras, CameraType
+
 from nerfstudio.data.scene_box import OrientedBox
 from nerfstudio.engine.callbacks import (
     TrainingCallback,
@@ -48,7 +49,6 @@ from nerfstudio.model_components.lib_bilagrid import (
     total_variation_loss,
 )
 from nerfstudio.models.base_model import Model, ModelConfig
-from nerfstudio.models.splatfacto import SplatfactoModelConfig, SplatfactoModel
 from nerfstudio.utils.colors import get_color
 from nerfstudio.utils.math import k_nearest_sklearn, random_quat_tensor
 from nerfstudio.utils.misc import torch_compile
@@ -89,7 +89,6 @@ def resize_image(image: torch.Tensor, d: int):
         .squeeze(1)
         .permute(1, 2, 0)
     )
-
 
 @torch_compile()
 def get_viewmat(optimized_camera_to_world):
@@ -332,207 +331,170 @@ class ShadowSplatModel(Model):
         # TODO: Learn this lighting_fn
         # self.lighting_fn = lambda x: x**(1/2.2)
 
-        # def update_light_source(self, light_source: Cameras, mask=None):
+    def update_light_source(self, light_source: Cameras, mask=None):
         """Update the light source, generating a new shadow function for the scene."""
 
-        # # Renders splat from a pose. We call this to get the intermediate variables from the rasterization function.
-        # if not isinstance(light_source, Cameras):
-        #     raise ValueError("input must be an instance of Cameras")
+        if not isinstance(light_source, Cameras):
+            print("Called get_outputs with not a camera")
+            return {}
 
-        # optimized_camera_to_world = self.camera_optimizer.apply_to_camera(light_source)[0, ...]
+        if self.training:
+            assert light_source.shape[0] == 1, "Only one camera at a time"
+            optimized_light_to_world = self.camera_optimizer.apply_to_camera(light_source)
+        else:
+            optimized_light_to_world = light_source.camera_to_worlds
 
-        # # get the background color
-        # if self.training:
-        #     assert light_source.shape[0] == 1, "Only one camera at a time"
-        #     optimized_camera_to_world = self.camera_optimizer.apply_to_camera(light_source)
+        # cropping
+        if self.crop_box is not None and not self.training:
+            crop_ids = self.crop_box.within(self.means).squeeze()
+            if crop_ids.sum() == 0:
+                return self.get_empty_outputs(
+                    int(light_source.width.item()), int(light_source.height.item()), self.background_color
+                )
+        else:
+            crop_ids = None
 
-        #     if self.config.background_color == "random":
-        #         background = torch.rand(3, device=self.device)
-        #     elif self.config.background_color == "white":
-        #         background = torch.ones(3, device=self.device)
-        #     elif self.config.background_color == "black":
-        #         background = torch.zeros(3, device=self.device)
-        #     else:
-        #         background = self.background_color.to(self.device)
-        # else:
-        #     optimized_camera_to_world = light_source.camera_to_worlds
+        if crop_ids is not None:
+            opacities_crop = self.opacities[crop_ids]
+            means_crop = self.means[crop_ids]
+            scales_crop = self.scales[crop_ids]
+            quats_crop = self.quats[crop_ids]
+        else:
+            opacities_crop = self.opacities
+            means_crop = self.means
+            scales_crop = self.scales
+            quats_crop = self.quats
 
-        #     if renderers.BACKGROUND_COLOR_OVERRIDE is not None:
-        #         background = renderers.BACKGROUND_COLOR_OVERRIDE.to(self.device)
-        #     else:
-        #         background = self.background_color.to(self.device)
+        camera_scale_fac = self._get_downscale_factor()
+        light_source.rescale_output_resolution(1 / camera_scale_fac)
+        viewmat = get_viewmat(optimized_light_to_world)
+        K = light_source.get_intrinsics_matrices().cuda()
+        W, H = int(light_source.width.item()), int(light_source.height.item())
+        self.last_size = (H, W)
+        light_source.rescale_output_resolution(camera_scale_fac)  # type: ignore
 
-        # if self.crop_box is not None and not self.training:
-        #     crop_ids = self.crop_box.within(self.means).squeeze()
-        #     if crop_ids.sum() == 0:
-        #         return self.get_empty_outputs(int(light_source.width.item()), int(light_source.height.item()), background)
-        # else:
-        #     crop_ids = None
+        # apply the compensation of screen space blurring to gaussians
+        if self.config.rasterize_mode not in ["antialiased", "classic"]:
+            raise ValueError("Unknown rasterize_mode: %s", self.config.rasterize_mode)
 
-        # camera_scale_fac = 1.0 / self._get_downscale_factor()
-        # viewmat = get_viewmat(optimized_camera_to_world)
-        # W, H = int(light_source.width[0] * camera_scale_fac), int(light_source.height[0] * camera_scale_fac)
-        # self.last_size = (H, W)
+        if light_source.camera_type == CameraType.PERSPECTIVE.value:
+            camera_model = "pinhole"
+        elif light_source.camera_type == CameraType.ORTHOPHOTO.value:
+            camera_model = "ortho"
+        elif light_source.camera_type == CameraType.FISHEYE.value:
+            camera_model = "fisheye"
+        else:
+            raise ValueError("Unknown camera type: %s", light_source.camera_type)
 
-        # # # Shadow the scene
-        # # features_dc = self.features_dc
-        # # features_rest = self.features_rest
+        # Calculates intermediate variables for rasterization
+        meta = slim_rasterization(
+            means=means_crop,
+            quats=quats_crop / quats_crop.norm(dim=-1, keepdim=True),
+            scales=torch.exp(scales_crop),
+            opacities=torch.sigmoid(opacities_crop).squeeze(-1),
+            viewmats=viewmat,  # [1, 4, 4]
+            Ks=K,  # [1, 3, 3]
+            width=W,
+            height=H,
+            packed=False,
+            near_plane=0.01,
+            far_plane=1e10,
+            sparse_grad=False,
+            rasterize_mode=self.config.rasterize_mode,
+            # radius_clip=3.0,  # set some threshold to disregrad small gaussians for faster rendering.
+            camera_model=camera_model,
+        )
 
-        # if crop_ids is not None:
-        #     opacities_crop = self.opacities[crop_ids]
-        #     means_crop = self.means[crop_ids]
-        #     # features_dc_crop = features_dc[crop_ids]
-        #     # features_rest_crop = features_rest[crop_ids]
-        #     scales_crop = self.scales[crop_ids]
-        #     quats_crop = self.quats[crop_ids]
-        # else:
-        #     opacities_crop = self.opacities
-        #     means_crop = self.means
-        #     # features_dc_crop = features_dc
-        #     # features_rest_crop = features_rest
-        #     scales_crop = self.scales
-        #     quats_crop = self.quats
+        # pixel_ids/gaussian ids are sorted in order of depth of gaussians
+        gs_ids, pixel_ids, camera_ids = rasterize_to_indices_in_range(
+            0,
+            1000,
+            torch.ones(1, meta["height"], meta["width"], device=self.device),
+            meta["means2d"],
+            meta["conics"],
+            meta["opacities"],
+            meta["width"],
+            meta["height"],
+            meta["tile_size"],
+            meta["isect_offsets"],
+            meta["flatten_ids"],
+        )
 
-        # # colors_crop = torch.cat((features_dc_crop[:, None, :], features_rest_crop), dim=1)
-        # BLOCK_WIDTH = 16  # this controls the tile size of rasterization, 16 is a good default
-        # K = light_source.get_intrinsics_matrices().cuda()
-        # K[:, :2, :] *= camera_scale_fac
-        # # Apply the compensation of screen space blurring to gaussians
-        # if self.config.rasterize_mode not in ["antialiased", "classic"]:
-        #     raise ValueError("Unknown rasterize_mode: %s", self.config.rasterize_mode)
+        # means2d = meta["means2d"]
+        # conics = meta["conics"]
+        # opacities = meta["opacities"]
+        # image_width = meta["width"]
+        # image_height = meta["height"]
 
-        # # if self.config.output_depth_during_training or not self.training:
-        # #     render_mode = "RGB+ED"
-        # # else:
-        # #     render_mode = "RGB"
+        # C, N = means2d.shape[:2]
 
-        # # if self.config.sh_degree > 0:
-        # #     sh_degree_to_use = min(self.step // self.config.sh_degree_interval, self.config.sh_degree)
-        # # else:
-        # #     colors_crop = torch.sigmoid(colors_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
-        # #     sh_degree_to_use = None
+        # pixel_ids_x = pixel_ids % image_width
+        # pixel_ids_y = pixel_ids // image_width
+        # pixel_coords = torch.stack([pixel_ids_x, pixel_ids_y], dim=-1) + 0.5  # [M, 2]
+        # deltas = pixel_coords - means2d[camera_ids, gs_ids]  # [M, 2]
 
-        # if light_source.camera_type == CameraType.PERSPECTIVE.value:
-        #     camera_model = "pinhole"
-        # elif light_source.camera_type == CameraType.ORTHOPHOTO.value:
-        #     camera_model = "ortho"
-        # elif light_source.camera_type == CameraType.FISHEYE.value:
-        #     camera_model = "fisheye"
-        # else:
-        #     raise ValueError("Unknown camera type: %s", light_source.camera_type)
+        # c = conics[camera_ids, gs_ids]  # [M, 3]
+        # sigmas = (
+        #     0.5 * (c[:, 0] * deltas[:, 0] ** 2 + c[:, 2] * deltas[:, 1] ** 2)
+        #     + c[:, 1] * deltas[:, 0] * deltas[:, 1]
+        # )  # [M]
 
-        # # Calculates intermediate variables for rasterization
-        # meta = slim_rasterization(
-        #     means=means_crop,
-        #     quats=quats_crop / quats_crop.norm(dim=-1, keepdim=True),
-        #     scales=torch.exp(scales_crop),
-        #     opacities=torch.sigmoid(opacities_crop).squeeze(-1),
-        #     viewmats=viewmat,  # [1, 4, 4]
-        #     Ks=K,  # [1, 3, 3]
-        #     width=W,
-        #     height=H,
-        #     tile_size=BLOCK_WIDTH,
-        #     packed=False,
-        #     near_plane=0.01,
-        #     far_plane=1e2,
-        #     # render_mode=render_mode,
-        #     sparse_grad=False,
-        #     # absgrad=True,
-        #     rasterize_mode=self.config.rasterize_mode,
-        #     # radius_clip=3.0,  # set some threshold to disregrad small gaussians for faster rendering.
-        #     camera_model=camera_model,
+        # alphas = torch.clamp_max(
+        #     opacities[camera_ids, gs_ids] * torch.exp(-sigmas), 0.999
         # )
 
-        # # pixel_ids/gaussian ids are sorted in order of depth of gaussians
-        # gs_ids, pixel_ids, camera_ids = rasterize_to_indices_in_range(
-        #     0,
-        #     1000,
-        #     torch.ones(1, meta["height"], meta["width"], device=self.device),
-        #     meta["means2d"],
-        #     meta["conics"],
-        #     meta["opacities"],
-        #     meta["width"],
-        #     meta["height"],
-        #     meta["tile_size"],
-        #     meta["isect_offsets"],
-        #     meta["flatten_ids"],
+        # indices = camera_ids * image_height * image_width + pixel_ids
+        # total_pixels = C * image_height * image_width
+
+        # weights, trans = render_weight_from_alpha(
+        #     alphas, ray_indices=indices, n_rays=total_pixels
         # )
 
-        # # means2d = meta["means2d"]
-        # # conics = meta["conics"]
-        # # opacities = meta["opacities"]
-        # # image_width = meta["width"]
-        # # image_height = meta["height"]
+        ### NOTE: We sort the weights and indices here because we are indexing into a tensor
+        # that has fewer elements than the indexing list. Specifically, say we are setting
+        # tensor[ [1, 1] ] = [0.1, 0.2], we want to take largest weight of a particular gaussian
+        # across all pixels it intersects with as its weight.
+        # sorted_weights, sorted_weights_indices = torch.sort(weights, descending=False)
+        # img_plane_gs_ids = gs_ids[sorted_weights_indices]
+        img_plane_gs_ids = gs_ids
 
-        # # C, N = means2d.shape[:2]
+        # Determine the gaussians in the lighting frustum
+        # Gaussians within the image dimensions
+        means2d = meta["means2d"].squeeze(0)
+        in_frustum_mask = (torch.abs(means2d[:, 0] - W/2) < W/2) & (torch.abs(means2d[:, 1] - H/2) < H/2)
+        # Gaussians outside the frustum as determined by rasterization
+        outside_frustum_mask = (meta["radii"].squeeze(0) == 0) | ~in_frustum_mask
 
-        # # pixel_ids_x = pixel_ids % image_width
-        # # pixel_ids_y = pixel_ids // image_width
-        # # pixel_coords = torch.stack([pixel_ids_x, pixel_ids_y], dim=-1) + 0.5  # [M, 2]
-        # # deltas = pixel_coords - means2d[camera_ids, gs_ids]  # [M, 2]
+        # gaussian_weights = torch.zeros()
 
-        # # c = conics[camera_ids, gs_ids]  # [M, 3]
-        # # sigmas = (
-        # #     0.5 * (c[:, 0] * deltas[:, 0] ** 2 + c[:, 2] * deltas[:, 1] ** 2)
-        # #     + c[:, 1] * deltas[:, 0] * deltas[:, 1]
-        # # )  # [M]
+        # if mask is not None:
+        #     if len(mask.shape) == 2:
+        #     # if mask is HxW image, just multiply the intensities with the gaussian weights
+        #         light_source_intensity = mask.reshape(-1)
+        #         light_source_intensity_weights = light_source_intensity[pixel_ids[sorted_weights_indices]]
+        #         sorted_weights = sorted_weights * light_source_intensity_weights
+        #     else:
+        #         assert mask.shape[-1] == 3, "Mask must have 3 channels"
+        #         # the mask has associated colors to it.
+        #         light_source_intensity = mask.reshape(-1, 3)
+        #         light_source_intensity_weights = light_source_intensity[pixel_ids[sorted_weights_indices]]
+        #         sorted_weights = sorted_weights[:, None] * light_source_intensity_weights
 
-        # # alphas = torch.clamp_max(
-        # #     opacities[camera_ids, gs_ids] * torch.exp(-sigmas), 0.999
-        # # )
+        # lighting_weights = self.lighting_fn(sorted_weights)
+        # lighting_weights = weights
+        # if len(lighting_weights.shape) == 2:
+        #     new_weights = torch.zeros((self.means.shape[0], 3), device=lighting_weights.device)
+        #     new_weights[img_plane_gs_ids] = 1.0 #lighting_weights
+        # else:
+        #     new_weights = torch.zeros(self.means.shape[0], device=lighting_weights.device)
+        #     new_weights[img_plane_gs_ids] = 1.0 #lighting_weights
+        #     new_weights = new_weights.unsqueeze(-1)
+        new_weights = 0.1 * torch.ones(self.means.shape[0], device=self.device)
+        new_weights[outside_frustum_mask] = 1.0  # relight all gaussians outside frustum
+        new_weights[img_plane_gs_ids] = 1.0     # relight all gaussians inside frustum hit by rasterization (not in shadow)
+        new_weights = new_weights.unsqueeze(-1)
 
-        # # indices = camera_ids * image_height * image_width + pixel_ids
-        # # total_pixels = C * image_height * image_width
-
-        # # weights, trans = render_weight_from_alpha(
-        # #     alphas, ray_indices=indices, n_rays=total_pixels
-        # # )
-
-        # ### NOTE: We sort the weights and indices here because we are indexing into a tensor
-        # # that has fewer elements than the indexing list. Specifically, say we are setting
-        # # tensor[ [1, 1] ] = [0.1, 0.2], we want to take largest weight of a particular gaussian
-        # # across all pixels it intersects with as its weight.
-        # # sorted_weights, sorted_weights_indices = torch.sort(weights, descending=False)
-        # # img_plane_gs_ids = gs_ids[sorted_weights_indices]
-        # img_plane_gs_ids = gs_ids
-
-        # # Determine the gaussians in the lighting frustum
-        # # Gaussians within the image dimensions
-        # means2d = meta["means2d"].squeeze(0)
-        # in_frustum_mask = (torch.abs(means2d[:, 0] - W/2) < W/2) & (torch.abs(means2d[:, 1] - H/2) < H/2)
-        # # Gaussians outside the frustum as determined by rasterization
-        # outside_frustum_mask = (meta["radii"].squeeze(0) == 0) | ~in_frustum_mask
-
-        # # gaussian_weights = torch.zeros()
-
-        # # if mask is not None:
-        # #     if len(mask.shape) == 2:
-        # #     # if mask is HxW image, just multiply the intensities with the gaussian weights
-        # #         light_source_intensity = mask.reshape(-1)
-        # #         light_source_intensity_weights = light_source_intensity[pixel_ids[sorted_weights_indices]]
-        # #         sorted_weights = sorted_weights * light_source_intensity_weights
-        # #     else:
-        # #         assert mask.shape[-1] == 3, "Mask must have 3 channels"
-        # #         # the mask has associated colors to it.
-        # #         light_source_intensity = mask.reshape(-1, 3)
-        # #         light_source_intensity_weights = light_source_intensity[pixel_ids[sorted_weights_indices]]
-        # #         sorted_weights = sorted_weights[:, None] * light_source_intensity_weights
-
-        # # lighting_weights = self.lighting_fn(sorted_weights)
-        # # lighting_weights = weights
-        # # if len(lighting_weights.shape) == 2:
-        # #     new_weights = torch.zeros((self.means.shape[0], 3), device=lighting_weights.device)
-        # #     new_weights[img_plane_gs_ids] = 1.0 #lighting_weights
-        # # else:
-        # #     new_weights = torch.zeros(self.means.shape[0], device=lighting_weights.device)
-        # #     new_weights[img_plane_gs_ids] = 1.0 #lighting_weights
-        # #     new_weights = new_weights.unsqueeze(-1)
-        # new_weights = 0.5 * torch.ones(self.means.shape[0], device=self.device)
-        # new_weights[outside_frustum_mask] = 1.0  # relight all gaussians outside frustum
-        # new_weights[img_plane_gs_ids] = 1.0     # relight all gaussians inside frustum hit by rasterization (not in shadow)
-        # new_weights = new_weights.unsqueeze(-1)
-
-        # self.shadow_fn = None #lambda x: shadow_fn(x, new_weights)
+        self.shadow_fn = lambda x: shadow_fn(x, new_weights)
 
     @property
     def colors(self):
@@ -759,25 +721,25 @@ class ShadowSplatModel(Model):
             crop_ids = None
 
         # Shadow the scene
-        # if self.shadow_fn is not None:
-        #     features_dc = self.shadow_fn(self.features_dc)
-        #     features_rest = self.shadow_fn(self.features_rest)
-        # else:
-        #     features_dc = self.features_dc
-        #     features_rest = self.features_rest
+        if self.shadow_fn is not None:
+            features_dc = self.shadow_fn(self.features_dc)
+            features_rest = self.shadow_fn(self.features_rest)
+        else:
+            features_dc = self.features_dc
+            features_rest = self.features_rest
 
         if crop_ids is not None:
             opacities_crop = self.opacities[crop_ids]
             means_crop = self.means[crop_ids]
-            features_dc_crop = self.features_dc[crop_ids]
-            features_rest_crop = self.features_rest[crop_ids]
+            features_dc_crop = features_dc[crop_ids]
+            features_rest_crop = features_rest[crop_ids]
             scales_crop = self.scales[crop_ids]
             quats_crop = self.quats[crop_ids]
         else:
             opacities_crop = self.opacities
             means_crop = self.means
-            features_dc_crop = self.features_dc
-            features_rest_crop = self.features_rest
+            features_dc_crop = features_dc
+            features_rest_crop = features_rest
             scales_crop = self.scales
             quats_crop = self.quats
 
