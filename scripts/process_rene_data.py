@@ -154,8 +154,11 @@ for folder in scene_path.iterdir():
         # Save image, pose, and light pose
         print(image_path, pose, light_pose)
 
+    print("Saving transforms.json ...")
+    with open(f"{output_folder.parent}/transforms.json", "w", encoding="utf-8") as f:
+        json.dump(transforms_dict, f, indent=4)
+
     fig = go.Figure(pose_traces(poses + [light_pose]))
     # fig = go.Figure(pose_traces([light_pose]))
     fig.update_layout(height=900, width=1600, scene=dict(aspectmode="data"))
     fig.show()
-    

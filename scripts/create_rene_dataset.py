@@ -12,7 +12,7 @@ import json
 import shutil
 import numpy as np
 from pathlib import Path
-#import plotly.graph_objects as go
+import plotly.graph_objects as go
 
 # %%
 
@@ -86,6 +86,7 @@ def pose_traces(pose_list):
 
     return all_traces
 
+
 def get_number_at_end(string):
     number = ""
     for char in reversed(string):
@@ -95,12 +96,13 @@ def get_number_at_end(string):
             break
     return int(number) if number else 0
 
+
 # %%
 
 light_id_skips = [2, 21, 34]
 camera_id_skips = [4, 8, 15, 25, 42, 47]
 
-dataset_path = data_path = Path(os.path.expanduser("rene_dataset"))
+dataset_path = data_path = Path(os.path.expanduser("~/Data/rene_dataset"))
 
 for k, scene in enumerate(dataset_path.iterdir()):
     scene_name = scene.name
@@ -163,7 +165,7 @@ for k, scene in enumerate(dataset_path.iterdir()):
         # Negate Y and Z axis
         light_pose[:, 1] *= -1
         light_pose[:, 2] *= -1
-        
+
         # Load images and camera poses
         num_images = len(list((folder / "data").iterdir())) // 2
         frames = []
@@ -172,7 +174,7 @@ for k, scene in enumerate(dataset_path.iterdir()):
         for i in range(num_images):
             if i in camera_id_skips:
                 continue
-            
+
             image_path = os.path.join(folder.name, "data", f"{i:02d}_image.png")
             pose_path = folder / "data" / f"{i:02d}_pose.txt"
 
@@ -195,7 +197,7 @@ for k, scene in enumerate(dataset_path.iterdir()):
             # shutil.copy(image_path, output_folder / f"{i:02d}_image.png")
 
             # Save image, pose, and light pose
-            #print(image_path, pose, light_pose)
+            # print(image_path, pose, light_pose)
             print("Scene:", scene_name, "Light id:", j, "Camera id:", i)
 
         # fig = go.Figure(pose_traces(poses + [light_pose]))
@@ -204,6 +206,17 @@ for k, scene in enumerate(dataset_path.iterdir()):
         # fig.show()
 
         transforms_dict["frames"] = frames
-        
+
+    # NOTE: guessing light intrinsics for now
+    W, H = 600, 600
+    transforms_dict["light_intrinsics"] = {
+        "w": W,
+        "h": H,
+        "fl_x": 1650.0,
+        "fl_y": 1650.0,
+        "cx": W / 2.0,
+        "cy": H / 2.0,
+    }
+
     with open(scene_path / "transforms.json", "w") as f:
         json.dump(transforms_dict, f, indent=4)
