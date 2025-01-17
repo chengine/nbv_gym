@@ -38,13 +38,15 @@ class ShadowSplatPipeline(VanillaPipeline):
         local_rank: int = 0,
         grad_scaler: Optional[GradScaler] = None,
     ):
-        super().__init__(config=config, 
-                         device=device, 
-                         test_mode=test_mode, 
-                         world_size=world_size, 
-                         local_rank=local_rank, 
-                         grad_scaler=grad_scaler)
-        
+        super().__init__(
+            config=config,
+            device=device,
+            test_mode=test_mode,
+            world_size=world_size,
+            local_rank=local_rank,
+            grad_scaler=grad_scaler,
+        )
+
     @profiler.time_function
     def get_train_loss_dict(self, step: int):
         """This function gets your training loss dict. This will be responsible for
@@ -54,12 +56,28 @@ class ShadowSplatPipeline(VanillaPipeline):
         Args:
             step: current iteration step to update sampler if using DDP (distributed)
         """
-        camera, data, light = self.datamanager.next_train(step)
-        
-        self._model.update_light_source(light)
+        cameras, batch, light = self.datamanager.next_train(step)
+        self._model.update_light_source(light)  # added
+        model_outputs = self._model(
+            cameras
+        )  # train distributed data parallel model if world_size > 1
+        metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
+        loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
 
-        model_outputs = self._model(camera)  # train distributed data parallel model if world_size > 1
-        metrics_dict = self.model.get_metrics_dict(model_outputs, data)
-        loss_dict = self.model.get_loss_dict(model_outputs, data, metrics_dict)
+        return model_outputs, loss_dict, metrics_dict
 
+    @profiler.time_function
+    def get_eval_loss_dict(self, step: int):
+        """This function gets your evaluation loss dict. It needs to get the data
+        from the DataManager and feed it to the model's forward function
+
+        Args:
+            step: current iteration step
+        """
+        self.eval()
+        ray_bundle, batch = self.datamanager.next_eval(step)
+        model_outputs = self.model(ray_bundle)
+        metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
+        loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
+        self.train()
         return model_outputs, loss_dict, metrics_dict

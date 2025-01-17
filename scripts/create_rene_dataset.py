@@ -104,12 +104,14 @@ camera_id_skips = [4, 8, 15, 25, 42, 47]
 
 dataset_path = data_path = Path(os.path.expanduser("~/Data/rene_dataset"))
 
+# Process each scene into a nerfstudio dataset
 for k, scene in enumerate(dataset_path.iterdir()):
     scene_name = scene.name
 
     scene_path = dataset_path / scene_name
 
     transforms_dict = {}
+    frames = []
 
     folders = []
     for folder in scene_path.iterdir():
@@ -168,7 +170,6 @@ for k, scene in enumerate(dataset_path.iterdir()):
 
         # Load images and camera poses
         num_images = len(list((folder / "data").iterdir())) // 2
-        frames = []
 
         poses = []
         for i in range(num_images):
@@ -205,7 +206,7 @@ for k, scene in enumerate(dataset_path.iterdir()):
         # fig.update_layout(height=900, width=1600, scene=dict(aspectmode="data"))
         # fig.show()
 
-        transforms_dict["frames"] = frames
+    transforms_dict["frames"] = frames
 
     # NOTE: guessing light intrinsics for now
     W, H = 600, 600

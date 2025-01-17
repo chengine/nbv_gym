@@ -13,12 +13,15 @@ from nerfstudio.data.dataparsers.nerfstudio_dataparser import Nerfstudio, Nerfst
 
 from nerfstudio.utils.io import load_from_json
 
+
 @dataclass
 class ShadowSplatDataParserConfig(NerfstudioDataParserConfig):
     """Dataset config"""
+
     _target: Type = field(default_factory=lambda: ShadowSplatDataParser)
     # TODO: add more fields here
     pass
+
 
 @dataclass
 class ShadowSplatDataparserOutputs(DataparserOutputs):
@@ -30,10 +33,10 @@ class ShadowSplatDataparserOutputs(DataparserOutputs):
     def from_parent(cls, parent: DataparserOutputs):
         # Extract field names from the parent class
         parent_field_names = {f.name for f in fields(DataparserOutputs)}
-        
+
         # Filter the parent instance's __dict__ to only include parent fields
         parent_data = {name: getattr(parent, name) for name in parent_field_names}
-        
+
         # Initialize the child with parent fields; new fields will remain uninitialized
         return cls(**parent_data)
 
@@ -45,7 +48,9 @@ class ShadowSplatDataParser(Nerfstudio):
 
     def _generate_dataparser_outputs(self, split="train") -> ShadowSplatDataparserOutputs:
         # Call parent method
-        dataparser_outputs = ShadowSplatDataparserOutputs.from_parent(super()._generate_dataparser_outputs(split))
+        dataparser_outputs = ShadowSplatDataparserOutputs.from_parent(
+            super()._generate_dataparser_outputs(split)
+        )
 
         meta = load_from_json(self.config.data / "transforms.json")
         data_dir = self.config.data
@@ -58,6 +63,8 @@ class ShadowSplatDataParser(Nerfstudio):
             fnames.append(fname)
         inds = np.argsort(fnames)
         frames = [meta["frames"][ind] for ind in inds]
+
+        print("dataparser | num frames", len(frames))
 
         light_poses = []
         for frame in frames:
@@ -79,6 +86,6 @@ class ShadowSplatDataParser(Nerfstudio):
             camera_to_worlds=light_poses[:, :3, :4],
             camera_type=CameraType.ORTHOPHOTO,
         )
-        dataparser_outputs.lights = lights 
+        dataparser_outputs.lights = lights
 
         return dataparser_outputs

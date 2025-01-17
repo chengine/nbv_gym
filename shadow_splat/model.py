@@ -90,6 +90,7 @@ def resize_image(image: torch.Tensor, d: int):
         .permute(1, 2, 0)
     )
 
+
 @torch_compile()
 def get_viewmat(optimized_camera_to_world):
     """
@@ -349,7 +350,9 @@ class ShadowSplatModel(Model):
             crop_ids = self.crop_box.within(self.means).squeeze()
             if crop_ids.sum() == 0:
                 return self.get_empty_outputs(
-                    int(light_source.width.item()), int(light_source.height.item()), self.background_color
+                    int(light_source.width.item()),
+                    int(light_source.height.item()),
+                    self.background_color,
                 )
         else:
             crop_ids = None
@@ -461,7 +464,9 @@ class ShadowSplatModel(Model):
         # Determine the gaussians in the lighting frustum
         # Gaussians within the image dimensions
         means2d = meta["means2d"].squeeze(0)
-        in_frustum_mask = (torch.abs(means2d[:, 0] - W/2) < W/2) & (torch.abs(means2d[:, 1] - H/2) < H/2)
+        in_frustum_mask = (torch.abs(means2d[:, 0] - W / 2) < W / 2) & (
+            torch.abs(means2d[:, 1] - H / 2) < H / 2
+        )
         # Gaussians outside the frustum as determined by rasterization
         outside_frustum_mask = (meta["radii"].squeeze(0) == 0) | ~in_frustum_mask
 
@@ -491,7 +496,9 @@ class ShadowSplatModel(Model):
         #     new_weights = new_weights.unsqueeze(-1)
         new_weights = 0.1 * torch.ones(self.means.shape[0], device=self.device)
         new_weights[outside_frustum_mask] = 1.0  # relight all gaussians outside frustum
-        new_weights[img_plane_gs_ids] = 1.0     # relight all gaussians inside frustum hit by rasterization (not in shadow)
+        new_weights[img_plane_gs_ids] = (
+            1.0  # relight all gaussians inside frustum hit by rasterization (not in shadow)
+        )
         new_weights = new_weights.unsqueeze(-1)
 
         self.shadow_fn = lambda x: shadow_fn(x, new_weights)
