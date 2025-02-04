@@ -102,7 +102,7 @@ def get_number_at_end(string):
 light_id_skips = [2, 21, 34]
 camera_id_skips = [4, 8, 15, 25, 42, 47]
 
-dataset_path = data_path = Path(os.path.expanduser("~/Data/rene_dataset"))
+dataset_path = data_path = Path(os.path.expanduser("~/Datasets/rene_dataset"))
 
 # Process each scene into a nerfstudio dataset
 for k, scene in enumerate(dataset_path.iterdir()):
@@ -209,12 +209,12 @@ for k, scene in enumerate(dataset_path.iterdir()):
     transforms_dict["frames"] = frames
 
     # NOTE: guessing light intrinsics for now
-    W, H = 600, 600
+    W, H = 300, 300
     transforms_dict["light_intrinsics"] = {
         "w": W,
         "h": H,
-        "fl_x": 1650.0,
-        "fl_y": 1650.0,
+        "fl_x": 450.0,
+        "fl_y": 450.0,
         "cx": W / 2.0,
         "cy": H / 2.0,
     }
