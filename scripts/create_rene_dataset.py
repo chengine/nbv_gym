@@ -102,7 +102,7 @@ def get_number_at_end(string):
 light_id_skips = [2, 21, 34]
 camera_id_skips = [4, 8, 15, 25, 42, 47]
 
-dataset_path = data_path = Path(os.path.expanduser("~/Datasets/rene_dataset"))
+dataset_path = data_path = Path(os.path.expanduser("~/Research/data/rene_dataset"))
 
 # Process each scene into a nerfstudio dataset
 for k, scene in enumerate(dataset_path.iterdir()):

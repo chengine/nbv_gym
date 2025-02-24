@@ -89,12 +89,12 @@ def pose_traces(pose_list):
 
 # %%
 
-dataset_path = data_path = Path(os.path.expanduser("~/Data/rene_dataset"))
+dataset_path = data_path = Path(os.path.expanduser("~/Research/data/rene_dataset"))
 scene_name = "apple"
 
 scene_path = dataset_path / scene_name
 
-output_path = Path(os.path.expanduser("~/NeRF/nerfstudio/data/ShadowSplat/ReNe")) / scene_name
+output_path = Path(os.path.expanduser("~/Research/data/ReNe")) / scene_name
 
 # Loop through folders in scene path
 for folder in scene_path.iterdir():

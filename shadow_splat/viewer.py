@@ -105,7 +105,8 @@ class CustomViewer(Viewer):
             camera_type=camera_type,
         )
 
-        self.pipeline.model.update_light_source(light_source)
+        with torch.no_grad():
+            self.pipeline.model.update_light_source(light_source)
 
         cv_to_gl = torch.tensor(
             [
