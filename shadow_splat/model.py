@@ -507,13 +507,14 @@ class ShadowSplatModel(Model):
             packed=True,
             near_plane=0.01,
             far_plane=1e10,
-            render_mode="D",
+            render_mode="ED",
             sh_degree=sh_degree_to_use,
             sparse_grad=False,
             absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
             rasterize_mode=self.config.rasterize_mode,
             # set some threshold to disregrad small gaussians for faster rendering.
             # radius_clip=3.0,
+            # TODO: Remember to pass in light source model [pinhole, ortho, fisheye] here
         )
 
         meta["means2d"] = meta["means2d"].unsqueeze(0)
@@ -557,8 +558,13 @@ class ShadowSplatModel(Model):
         # raise
 
         # Calculate the distance of rasterized Gaussians to the light source to get logistic parameters
-        diff = means_crop[gs_ids] - light_source.camera_to_worlds[0, :3, 3]
-        distances = torch.norm(diff, dim=-1)
+        means_rasterized = means_crop[gs_ids]
+        w2c = torch.eye(4, device = light_source.camera_to_worlds[0].device)
+        w2c[:3] = light_source.camera_to_worlds[0, :3]
+        w2c = torch.linalg.inv(w2c)
+
+        means_rasterized_camera = (w2c[:3, :3] @ means_rasterized.T).T + w2c[:3, 3][None]
+        distances = -means_rasterized_camera[:, 2] # torch.norm(diff, dim=-1)
 
         # Use the weights to calculate the variance of the fitted logistic function for each ray
         depth_flattened = depth.reshape(-1)[pixel_ids]
@@ -568,7 +574,7 @@ class ShadowSplatModel(Model):
         variance = torch.zeros(total_pixels, device=self.device)
         variance.scatter_add_(0, pixel_ids, weights * centered_distances_squared)
 
-        s = torch.sqrt(3.0 / (math.pi)**2  * variance )     # n_pixels
+        s = torch.sqrt(0.1/ (math.pi)**2  * variance )     # n_pixels
 
         # Apply the logistic function CDF weighting to all projected Gaussians
         xy = meta["means2d"].squeeze()         # shape [nnz, 2], in pixel coordinates
@@ -578,15 +584,28 @@ class ShadowSplatModel(Model):
         projected_pixel_ids = pixel_y * W + pixel_x  # shape [nnz]
         projected_gs_ids = meta["gaussian_ids"].squeeze()
 
-        projected_gs_distances = torch.norm( means_crop[projected_gs_ids], dim=-1)
-
+        means_projected = means_crop[projected_gs_ids]
+        means_projected_camera = (w2c[:3, :3] @ means_projected.T).T + w2c[:3, 3][None]
+        projected_gs_distances = -means_projected_camera[:, 2]
+     
         sigmoid_argument = ( projected_gs_distances - depth.reshape(-1)[projected_pixel_ids]) / s[projected_pixel_ids]
 
         sigmoid_weights = 1. - torch.sigmoid(sigmoid_argument)
 
+        # in_front = (projected_gs_distances - depth.reshape(-1)[projected_pixel_ids]) < 0.0
+        # sigmoid_weights[in_front] = 1.0
+
+        # light_source_upper_pixel = (projected_pixel_ids == 0)
+        # light_source_projected_gs_distances = projected_gs_distances[light_source_upper_pixel]
+
+        # print("Light Source Projected GS Distances: ", light_source_projected_gs_distances)
+        # print("Weights: ", sigmoid_weights[light_source_upper_pixel])
+        # print("Depth: ", depth.reshape(-1)[0])
+
         # Way to reduce sigmoid weights into n_gaussians
         weights_ = torch.ones(self.means.shape[0], device=self.device)  # TODO: IF WE SET THE DEFAULT TO 1, THEN GAUSSIANS NOT IN THE FRUSTUM ARE WELL-LIT
-        weights_.scatter_reduce_(0, projected_gs_ids, sigmoid_weights, reduce="amin", include_self=False)
+        # weights_.scatter_reduce_(0, projected_gs_ids, sigmoid_weights, reduce="amax", include_self=False)
+        weights_[projected_gs_ids] = sigmoid_weights
         lighting_weights = weights_.unsqueeze(-1)
 
         self.shadow_fn = lambda x: apply_weight_to_RGB(x, lighting_weights)
