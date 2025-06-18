@@ -558,8 +558,6 @@ class ShadowSplatModel(Model):
         # raise
 
         # Calculate the distance of rasterized Gaussians to the light source to get logistic parameters
-
-
         means_rasterized = means_crop[gs_ids]
         w2c = torch.eye(4, device = light_source.camera_to_worlds[0].device)
         w2c[:3] = light_source.camera_to_worlds[0, :3]
@@ -589,22 +587,20 @@ class ShadowSplatModel(Model):
         means_projected = means_crop[projected_gs_ids]
         means_projected_camera = (w2c[:3, :3] @ means_projected.T).T + w2c[:3, 3][None]
         projected_gs_distances = -means_projected_camera[:, 2]
-        # projected_gs_distances = means_rasterized_camera[:, 2]
-        # projected_gs_distances = torch.norm( means_crop[projected_gs_ids]  - light_source.camera_to_worlds[0, :3, 3], dim=-1)
-
+     
         sigmoid_argument = ( projected_gs_distances - depth.reshape(-1)[projected_pixel_ids]) / s[projected_pixel_ids]
 
         sigmoid_weights = 1. - torch.sigmoid(sigmoid_argument)
 
-        in_front = (projected_gs_distances - depth.reshape(-1)[projected_pixel_ids]) < 0.0
-        sigmoid_weights[in_front] = 1.0
+        # in_front = (projected_gs_distances - depth.reshape(-1)[projected_pixel_ids]) < 0.0
+        # sigmoid_weights[in_front] = 1.0
 
-        light_source_upper_pixel = (projected_pixel_ids == 0)
-        light_source_projected_gs_distances = projected_gs_distances[light_source_upper_pixel]
+        # light_source_upper_pixel = (projected_pixel_ids == 0)
+        # light_source_projected_gs_distances = projected_gs_distances[light_source_upper_pixel]
 
-        print("Light Source Projected GS Distances: ", light_source_projected_gs_distances)
-        print("Weights: ", sigmoid_weights[light_source_upper_pixel])
-        print("Depth: ", depth.reshape(-1)[0])
+        # print("Light Source Projected GS Distances: ", light_source_projected_gs_distances)
+        # print("Weights: ", sigmoid_weights[light_source_upper_pixel])
+        # print("Depth: ", depth.reshape(-1)[0])
 
         # Way to reduce sigmoid weights into n_gaussians
         weights_ = torch.ones(self.means.shape[0], device=self.device)  # TODO: IF WE SET THE DEFAULT TO 1, THEN GAUSSIANS NOT IN THE FRUSTUM ARE WELL-LIT
