@@ -65,12 +65,23 @@ from shadow_splat.slim_rasterization import slim_rasterization
 
 
 @torch.compile
-def apply_weight_to_RGB(input, weights):
+def apply_weight_to_RGB(input, weights, intensity):
     ### TODO: How to handle spherical harmonics???
     if input.dim() == 3:  # higher order spherical harmonics
         new_color = input
     else:  # direct color
-        new_color = weights * SH2RGB(input)
+        new_color = weights * SH2RGB(input)  # NOTE: THIS IS THE ORIGINAL LINEAR WEIGHTING
+        update_color_mask = weights.squeeze(-1) < 1.0
+
+        updated_color = new_color[update_color_mask]
+
+        # Apply tonemapping to the color
+        updated_color[:, 0] *= intensity[0]
+        updated_color[:, 1] *= intensity[1]
+        updated_color[:, 2] *= intensity[2]
+
+        updated_color = updated_color / (updated_color + 1.0)
+        new_color[update_color_mask] = updated_color
         new_color = RGB2SH(new_color)
 
     return new_color
@@ -421,6 +432,8 @@ class ShadowSplatModel(Model):
         light_source: Cameras,
         mask: Optional[torch.Tensor] = None,
         reduce: Optional[Literal["mean", "amax", "amin"]] = "amax",
+        variance_factor: Optional[float] = 0.1,
+        intensity: Optional[List[float]] = [1.0, 1.0, 1.0],
     ):
         """Update the light source, generating a new shadow function for the scene."""
 
@@ -554,14 +567,6 @@ class ShadowSplatModel(Model):
 
         ### TODO: FIND ALL GAUSSIAN PIXEL INTERSECTIONS IN THE PROJECTION STEP (NOT THE RASTERIZATION STEP)
 
-        # gaussian_ids = meta["gaussian_ids"]
-        # image_ids = meta["batch_ids"] * meta["n_cameras"] + meta["camera_ids"]
-        # print(gaussian_ids)
-        # print(image_ids)
-        # print(meta["camera_ids"])
-        # print(meta["gaussian_ids"])
-        # raise
-
         # Calculate the distance of rasterized Gaussians to the light source to get logistic parameters
         means_rasterized = means_crop[gs_ids]
         w2c = torch.eye(4, device=light_source.camera_to_worlds[0].device)
@@ -579,7 +584,7 @@ class ShadowSplatModel(Model):
         variance = torch.zeros(total_pixels, device=self.device)
         variance.scatter_add_(0, pixel_ids, weights * centered_distances_squared)
 
-        s = torch.sqrt(0.1 / (math.pi) ** 2 * variance)  # n_pixels
+        s = torch.sqrt(variance_factor / (math.pi) ** 2 * variance)  # n_pixels
 
         # Apply the logistic function CDF weighting to all projected Gaussians
         xy = meta["means2d"].squeeze()  # shape [nnz, 2], in pixel coordinates
@@ -599,27 +604,17 @@ class ShadowSplatModel(Model):
 
         sigmoid_weights = 1.0 - torch.sigmoid(sigmoid_argument)
 
-        print(f"depth shape: {depth.shape}")
-
-        in_front = (projected_gs_distances - depth.reshape(-1)[projected_pixel_ids]) < 0.0
-        sigmoid_weights[in_front] = 1.0
-
-        # light_source_upper_pixel = (projected_pixel_ids == 0)
-        # light_source_projected_gs_distances = projected_gs_distances[light_source_upper_pixel]
-
-        # print("Light Source Projected GS Distances: ", light_source_projected_gs_distances)
-        # print("Weights: ", sigmoid_weights[light_source_upper_pixel])
-        # print("Depth: ", depth.reshape(-1)[0])
-
         # Way to reduce sigmoid weights into n_gaussians
         weights_ = torch.ones(
             self.means.shape[0], device=self.device
         )  # TODO: IF WE SET THE DEFAULT TO 1, THEN GAUSSIANS NOT IN THE FRUSTUM ARE WELL-LIT
+        # TODO: Might need this if we find that only applying weighting to projected gaussians based only on their means is not sufficient
+        # for accuracy
         # weights_.scatter_reduce_(0, projected_gs_ids, sigmoid_weights, reduce="amax", include_self=False)
         weights_[projected_gs_ids] = sigmoid_weights
         lighting_weights = weights_.unsqueeze(-1)
 
-        self.shadow_fn = lambda x: apply_weight_to_RGB(x, lighting_weights)
+        self.shadow_fn = lambda x: apply_weight_to_RGB(x, lighting_weights, intensity)
 
     @property
     def colors(self):
