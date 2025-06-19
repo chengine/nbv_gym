@@ -599,8 +599,10 @@ class ShadowSplatModel(Model):
 
         sigmoid_weights = 1.0 - torch.sigmoid(sigmoid_argument)
 
-        # in_front = (projected_gs_distances - depth.reshape(-1)[projected_pixel_ids]) < 0.0
-        # sigmoid_weights[in_front] = 1.0
+        print(f"depth shape: {depth.shape}")
+
+        in_front = (projected_gs_distances - depth.reshape(-1)[projected_pixel_ids]) < 0.0
+        sigmoid_weights[in_front] = 1.0
 
         # light_source_upper_pixel = (projected_pixel_ids == 0)
         # light_source_projected_gs_distances = projected_gs_distances[light_source_upper_pixel]
