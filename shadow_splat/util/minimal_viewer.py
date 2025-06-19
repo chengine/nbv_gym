@@ -3,23 +3,76 @@
 import numpy as np
 import torch
 import viser
-import viser.transforms as tf
-from nerfstudio.viewer.viewer import Viewer
+import viser.transforms as vtf
+import nerfview
 from nerfstudio.cameras.cameras import Cameras, CameraType
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-class CustomViewer(Viewer):
-    """Custom viewer with an additional slider for adjusting the light source position dynamically."""
 
-    def __init__(self, *args, **kwargs):
-        # Initialize the parent Viewer class
-        super().__init__(*args, **kwargs)
+class MinimalViewer:
+    """viewer using nerfview."""
+
+    def __init__(self, model):
+        self.model = model
+
+        self.viser_server = viser.ViserServer(port=7007)
+        self.viser_server.gui.configure_theme(dark_mode=True)
 
         tabs = self.viser_server.gui.add_tab_group()
         lighting_tab = tabs.add_tab("Light", viser.Icon.SUN)
 
         with lighting_tab:
             self._add_light_source_slider()
+
+        self.viewer = nerfview.Viewer(
+            server=self.viser_server, render_fn=self.render_fn, mode="rendering"
+        )
+
+    def render_fn(
+        self, camera_state: nerfview.CameraState, render_tab_state: nerfview.RenderTabState
+    ) -> np.ndarray:
+        # Parse camera state for camera-to-world matrix (c2w) and intrinsic (K) as
+        # float64 numpy arrays.
+        if render_tab_state.preview_render:
+            width = render_tab_state.render_width
+            height = render_tab_state.render_height
+        else:
+            width = render_tab_state.viewer_width
+            height = render_tab_state.viewer_height
+
+        c2w = camera_state.c2w
+        R = vtf.SO3.from_matrix(c2w[:3, :3])
+        R = R @ vtf.SO3.from_x_radians(np.pi)
+        c2w[:3, :3] = R.as_matrix()
+
+        K = camera_state.get_K([width, height])
+
+        # Convert camera parameters to Cameras object
+        camera_to_worlds = torch.from_numpy(c2w).float().unsqueeze(0)
+        fx = K[0, 0]
+        fy = K[1, 1]
+        cx = K[0, 2]
+        cy = K[1, 2]
+
+        cameras = Cameras(
+            camera_to_worlds=camera_to_worlds,
+            fx=fx,
+            fy=fy,
+            cx=cx,
+            cy=cy,
+            width=width,
+            height=height,
+            camera_type=CameraType.PERSPECTIVE,
+        ).to(device)
+
+        # Render using the model
+        outputs = self.model.get_outputs_for_camera(cameras)
+        img = outputs["rgb"].cpu().numpy()
+
+        # Convert to uint8
+        img = (img * 255).astype(np.uint8)
+        return img
 
     def _add_light_source_slider(self):
         """Add a slider to the control panel for adjusting the light source position."""
@@ -64,7 +117,7 @@ class CustomViewer(Viewer):
             aspect=1.0,
             scale=1.0,
             color=(1.0, 1.0, 0.0),
-            wxyz=tf.SO3.from_x_radians(0.0).wxyz,
+            wxyz=vtf.SO3.from_x_radians(0.0).wxyz,
             position=(0.0, 0.0, 0.0),
             visible=False,
         )
@@ -87,9 +140,7 @@ class CustomViewer(Viewer):
             camera_type = CameraType.FISHEYE
 
         # Light source pose pointing to the origin
-        new_pose = camera_to_world_transform(az_rad, el_rad, origin, radius).to(
-            self.pipeline.device
-        )
+        new_pose = camera_to_world_transform(az_rad, el_rad, origin, radius).to(self.model.device)
         print("New light source pose:\n", new_pose)
 
         light_source = Cameras(
@@ -104,7 +155,7 @@ class CustomViewer(Viewer):
         )
 
         with torch.no_grad():
-            self.pipeline.model.update_light_source(light_source)
+            self.model.update_light_source(light_source)
 
         cv_to_gl = torch.tensor(
             [
@@ -113,7 +164,7 @@ class CustomViewer(Viewer):
                 [0.0, 0.0, -1.0, 0.0],
                 [0.0, 0.0, 0.0, 1.0],
             ]
-        ).to(self.pipeline.device)
+        ).to(self.model.device)
 
         light_source_pose_cv = new_pose @ cv_to_gl
 
@@ -122,12 +173,13 @@ class CustomViewer(Viewer):
         self.light_source_visualizer.position = light_source_pose_cv[:3, 3].cpu().numpy()
 
         # Convert the opengl light source rotation into the opencv viser format
-        self.light_source_visualizer.wxyz = tf.SO3.from_matrix(
+        self.light_source_visualizer.wxyz = vtf.SO3.from_matrix(
             light_source_pose_cv[:3, :3].cpu().numpy()
         ).wxyz
         self.light_source_visualizer.visible = True
 
-        self._trigger_rerender()
+        # self._trigger_rerender()
+        self.viewer.rerender(None)
 
 
 def camera_to_world_transform(azimuth_rad, elevation_rad, origin, radius):
