@@ -65,7 +65,9 @@ from shadow_splat.slim_rasterization import slim_rasterization
 
 
 @torch.compile
-def apply_weight_to_RGB(input, weights, intensity):
+def apply_weight_to_RGB(input, weights, intensity, 
+                        tonemapping_type: Optional[Literal["linear","reinhard", "luminance"]] = "linear",
+                        gamma_correction: Optional[bool] = True):
     ### TODO: How to handle spherical harmonics???
     if input.dim() == 3:  # higher order spherical harmonics
         new_color = input
@@ -80,7 +82,23 @@ def apply_weight_to_RGB(input, weights, intensity):
         updated_color[:, 1] *= intensity[1]
         updated_color[:, 2] *= intensity[2]
 
-        updated_color = updated_color / (updated_color + 1.0)
+        # Does Reinhard tonemapping
+        if tonemapping_type == "reinhard":
+            updated_color /= (updated_color + 1.0)
+
+        # Does luminance tonemapping
+        elif tonemapping_type == "luminance":
+            luminance = 0.2126*updated_color[:, 0] + 0.7152*updated_color[:, 1] + 0.0722*updated_color[:, 2]
+            updated_color /= (luminance + 1.0)[:, None]
+
+        # Does linear tonemapping
+        elif tonemapping_type == "linear":
+            updated_color = torch.clamp(updated_color, min=0.0, max=1.0)
+
+        # Does gamma correction
+        if gamma_correction:
+            updated_color = updated_color ** (1.0 / 2.2)
+
         new_color[update_color_mask] = updated_color
         new_color = RGB2SH(new_color)
 
