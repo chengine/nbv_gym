@@ -129,7 +129,11 @@ class CustomViewer(Viewer):
         )
 
         with torch.no_grad():
-            self.pipeline.model.update_light_source(light_source, variance_factor=variance_factor, intensity=[red_intensity, green_intensity, blue_intensity])
+            self.pipeline.model.update_light_source(
+                light_source,
+                variance_factor=variance_factor,
+                intensity=[red_intensity, green_intensity, blue_intensity],
+            )
 
         cv_to_gl = torch.tensor(
             [
@@ -153,6 +157,7 @@ class CustomViewer(Viewer):
         self.light_source_visualizer.visible = True
 
         self._trigger_rerender()
+
 
 def camera_to_world_transform(azimuth_rad, elevation_rad, origin, radius):
     # Compute the camera position in Cartesian coordinates
@@ -185,9 +190,9 @@ def camera_to_world_transform(azimuth_rad, elevation_rad, origin, radius):
 def look_at(location, target, up):
     z = location - target
     z /= torch.norm(z)
-    x = torch.cross(up, z)
+    x = torch.cross(up, z, dim=0)
     x /= torch.norm(x)
-    y = torch.cross(z, x)
+    y = torch.cross(z, x, dim=0)
     y /= torch.norm(y)
 
     R = torch.stack([x, y, z], dim=1)

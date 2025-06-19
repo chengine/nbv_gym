@@ -157,7 +157,8 @@ class MinimalViewer:
         )
 
         with torch.no_grad():
-            self.model.update_light_source(light_source)
+            shadow_meta = self.model.update_light_source(light_source)
+            # TODO: visualize outputs
 
         cv_to_gl = torch.tensor(
             [

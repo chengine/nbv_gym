@@ -64,10 +64,14 @@ from nerfacc import render_weight_from_alpha
 from shadow_splat.slim_rasterization import slim_rasterization
 
 
-@torch.compile
-def apply_weight_to_RGB(input, weights, intensity, 
-                        tonemapping_type: Optional[Literal["linear","reinhard", "luminance"]] = "linear",
-                        gamma_correction: Optional[bool] = True):
+# @torch.compile
+def apply_weight_to_RGB(
+    input,
+    weights,
+    intensity,
+    tonemapping_type: Optional[Literal["linear", "reinhard", "luminance"]] = "linear",
+    gamma_correction: Optional[bool] = True,
+):
     ### TODO: How to handle spherical harmonics???
     if input.dim() == 3:  # higher order spherical harmonics
         new_color = input
@@ -84,11 +88,15 @@ def apply_weight_to_RGB(input, weights, intensity,
 
         # Does Reinhard tonemapping
         if tonemapping_type == "reinhard":
-            updated_color /= (updated_color + 1.0)
+            updated_color /= updated_color + 1.0
 
         # Does luminance tonemapping
         elif tonemapping_type == "luminance":
-            luminance = 0.2126*updated_color[:, 0] + 0.7152*updated_color[:, 1] + 0.0722*updated_color[:, 2]
+            luminance = (
+                0.2126 * updated_color[:, 0]
+                + 0.7152 * updated_color[:, 1]
+                + 0.0722 * updated_color[:, 2]
+            )
             updated_color /= (luminance + 1.0)[:, None]
 
         # Does linear tonemapping
@@ -555,6 +563,14 @@ class ShadowSplatModel(Model):
             camera_model=camera_model,
         )
 
+        # Compute 3D camera space coordinates once and reuse them
+        w2c = torch.eye(4, device=light_source.camera_to_worlds[0].device)
+        w2c[:3] = light_source.camera_to_worlds[0, :3]
+        w2c = torch.linalg.inv(w2c)
+
+        # Transform all means to camera space
+        means_camera_space = (w2c[:3, :3] @ means_crop.T).T + w2c[:3, 3][None]
+
         meta["means2d"] = meta["means2d"].unsqueeze(0)
         meta["conics"] = meta["conics"].unsqueeze(0)
         meta["opacities"] = meta["opacities"].unsqueeze(0)
@@ -586,12 +602,7 @@ class ShadowSplatModel(Model):
         ### TODO: FIND ALL GAUSSIAN PIXEL INTERSECTIONS IN THE PROJECTION STEP (NOT THE RASTERIZATION STEP)
 
         # Calculate the distance of rasterized Gaussians to the light source to get logistic parameters
-        means_rasterized = means_crop[gs_ids]
-        w2c = torch.eye(4, device=light_source.camera_to_worlds[0].device)
-        w2c[:3] = light_source.camera_to_worlds[0, :3]
-        w2c = torch.linalg.inv(w2c)
-
-        means_rasterized_camera = (w2c[:3, :3] @ means_rasterized.T).T + w2c[:3, 3][None]
+        means_rasterized_camera = means_camera_space[gs_ids]
         distances = -means_rasterized_camera[:, 2]  # torch.norm(diff, dim=-1)
 
         # Use the weights to calculate the variance of the fitted logistic function for each ray
@@ -612,8 +623,7 @@ class ShadowSplatModel(Model):
         projected_pixel_ids = pixel_y * W + pixel_x  # shape [nnz]
         projected_gs_ids = meta["gaussian_ids"].squeeze()
 
-        means_projected = means_crop[projected_gs_ids]
-        means_projected_camera = (w2c[:3, :3] @ means_projected.T).T + w2c[:3, 3][None]
+        means_projected_camera = means_camera_space[projected_gs_ids]
         projected_gs_distances = -means_projected_camera[:, 2]
 
         sigmoid_argument = (projected_gs_distances - depth.reshape(-1)[projected_pixel_ids]) / s[
@@ -633,6 +643,11 @@ class ShadowSplatModel(Model):
         lighting_weights = weights_.unsqueeze(-1)
 
         self.shadow_fn = lambda x: apply_weight_to_RGB(x, lighting_weights, intensity)
+
+        shadow_meta = {
+            "depth": depth,
+        }
+        return shadow_meta
 
     @property
     def colors(self):
