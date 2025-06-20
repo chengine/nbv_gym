@@ -539,6 +539,8 @@ class ShadowSplatModel(Model):
             colors_crop = torch.sigmoid(colors_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
             sh_degree_to_use = None
 
+        torch.cuda.synchronize()
+        start_time = time.time()
         depth, alphas, meta = rasterization(
             means=means_crop,
             quats=quats_crop,  # rasterization does normalization internally
@@ -562,6 +564,8 @@ class ShadowSplatModel(Model):
             # TODO: Remember to pass in light source model [pinhole, ortho, fisheye] here
             camera_model=camera_model,
         )
+        end_time = time.time()
+        print(f"    Time taken to rasterize: {end_time - start_time} seconds")
 
         # Compute 3D camera space coordinates once and reuse them
         w2c = torch.eye(4, device=light_source.camera_to_worlds[0].device)
@@ -576,6 +580,8 @@ class ShadowSplatModel(Model):
         meta["opacities"] = meta["opacities"].unsqueeze(0)
 
         # pixel_ids/gaussian ids are sorted in order of depth of gaussians
+        torch.cuda.synchronize()
+        start_time = time.time()
         gs_ids, pixel_ids, camera_ids = rasterize_to_indices_in_range(
             0,
             1000,
@@ -589,6 +595,8 @@ class ShadowSplatModel(Model):
             meta["isect_offsets"],
             meta["flatten_ids"],
         )
+        end_time = time.time()
+        print(f"    Time taken to rasterize to indices: {end_time - start_time} seconds")
 
         meta["gs_ids"] = gs_ids
         meta["pixel_ids"] = pixel_ids
@@ -597,11 +605,17 @@ class ShadowSplatModel(Model):
         alphas, indices, total_pixels = prepare_weights(meta)
 
         # Returns the weights and the transmittances
+        torch.cuda.synchronize()
+        start_time = time.time()
         weights, _ = render_weight_from_alpha(alphas, ray_indices=indices, n_rays=total_pixels)
+        end_time = time.time()
+        print(f"    Time taken to render weights: {end_time - start_time} seconds")
 
         ### TODO: FIND ALL GAUSSIAN PIXEL INTERSECTIONS IN THE PROJECTION STEP (NOT THE RASTERIZATION STEP)
 
         # Calculate the distance of rasterized Gaussians to the light source to get logistic parameters
+        torch.cuda.synchronize()
+        start_time = time.time()
         means_rasterized_camera = means_camera_space[gs_ids]
         distances = -means_rasterized_camera[:, 2]  # torch.norm(diff, dim=-1)
 
@@ -643,6 +657,9 @@ class ShadowSplatModel(Model):
         lighting_weights = weights_.unsqueeze(-1)
 
         self.shadow_fn = lambda x: apply_weight_to_RGB(x, lighting_weights, intensity)
+
+        end_time = time.time()
+        print(f"    Time for rest: {end_time - start_time} seconds")
 
         shadow_meta = {
             "depth": depth,

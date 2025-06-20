@@ -2,6 +2,7 @@
 
 import numpy as np
 import torch
+import time
 import viser
 import viser.transforms as vtf
 import nerfview
@@ -177,11 +178,14 @@ class MinimalViewer:
         )
 
         with torch.no_grad():
+            start_time = time.time()
             shadow_meta = self.model.update_light_source(
                 light_source,
                 variance_factor=variance_factor,
                 intensity=[red_intensity, green_intensity, blue_intensity],
             )
+            end_time = time.time()
+            print(f"Time taken to update light source: {end_time - start_time} seconds")
             # TODO: visualize outputs
 
         cv_to_gl = torch.tensor(
