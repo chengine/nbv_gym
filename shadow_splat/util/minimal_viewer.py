@@ -93,6 +93,18 @@ class MinimalViewer:
         self.focal_length_slider = self.viser_server.gui.add_slider(
             label="Focal length", min=0.0, max=3000.0, step=1.0, initial_value=1650
         )
+        self.variance_factor_slider = self.viser_server.gui.add_slider(
+            label="Variance factor", min=0.0, max=5.0, step=0.05, initial_value=0.1
+        )
+        self.red_intensity_slider = self.viser_server.gui.add_slider(
+            label="Red intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
+        )
+        self.green_intensity_slider = self.viser_server.gui.add_slider(
+            label="Green intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
+        )
+        self.blue_intensity_slider = self.viser_server.gui.add_slider(
+            label="Blue intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
+        )
         self.origin_input = self.viser_server.gui.add_vector3(
             label="Origin",
             step=0.1,
@@ -109,6 +121,10 @@ class MinimalViewer:
         self.radius_slider.on_update(self.update_light_source_pose)
         self.dim_slider.on_update(self.update_light_source_pose)
         self.focal_length_slider.on_update(self.update_light_source_pose)
+        self.variance_factor_slider.on_update(self.update_light_source_pose)
+        self.red_intensity_slider.on_update(self.update_light_source_pose)
+        self.green_intensity_slider.on_update(self.update_light_source_pose)
+        self.blue_intensity_slider.on_update(self.update_light_source_pose)
         self.origin_input.on_update(self.update_light_source_pose)
         self.camera_type_select.on_update(self.update_light_source_pose)
 
@@ -132,6 +148,10 @@ class MinimalViewer:
         radius = self.radius_slider.value
         dimension = self.dim_slider.value
         focal_length = self.focal_length_slider.value
+        variance_factor = self.variance_factor_slider.value
+        red_intensity = self.red_intensity_slider.value
+        green_intensity = self.green_intensity_slider.value
+        blue_intensity = self.blue_intensity_slider.value
         origin = torch.tensor(self.origin_input.value)
 
         if self.camera_type_select.value == "Perspective":
@@ -157,7 +177,11 @@ class MinimalViewer:
         )
 
         with torch.no_grad():
-            shadow_meta = self.model.update_light_source(light_source)
+            shadow_meta = self.model.update_light_source(
+                light_source,
+                variance_factor=variance_factor,
+                intensity=[red_intensity, green_intensity, blue_intensity],
+            )
             # TODO: visualize outputs
 
         cv_to_gl = torch.tensor(

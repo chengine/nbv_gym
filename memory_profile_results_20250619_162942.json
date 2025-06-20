@@ -1,0 +1,1394 @@
+{
+  "50000": {
+    "400x300": {
+      "peak_allocated_gb": 0.02835559844970703,
+      "peak_reserved_gb": 0.216796875,
+      "total_time": 0.30461549758911133,
+      "stage_diffs": [
+        {
+          "from": "warmup_complete",
+          "to": "before_iteration_1",
+          "allocated_diff": 0,
+          "reserved_diff": 0,
+          "time_diff": 0.00028061866760253906
+        },
+        {
+          "from": "before_iteration_1",
+          "to": "after_iteration_1",
+          "allocated_diff": 30208,
+          "reserved_diff": 0,
+          "time_diff": 0.0031261444091796875
+        },
+        {
+          "from": "after_iteration_1",
+          "to": "before_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": -169869312,
+          "time_diff": 0.10133504867553711
+        },
+        {
+          "from": "before_iteration_2",
+          "to": "after_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": 184549376,
+          "time_diff": 0.0039942264556884766
+        },
+        {
+          "from": "after_iteration_2",
+          "to": "before_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": -184549376,
+          "time_diff": 0.09587788581848145
+        },
+        {
+          "from": "before_iteration_3",
+          "to": "after_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": 184549376,
+          "time_diff": 0.003900766372680664
+        },
+        {
+          "from": "after_iteration_3",
+          "to": "profiling_complete",
+          "allocated_diff": 0,
+          "reserved_diff": -184549376,
+          "time_diff": 0.09563112258911133
+        }
+      ],
+      "snapshots": [
+        {
+          "stage": "warmup_complete",
+          "allocated": 30416384,
+          "reserved": 218103808,
+          "max_allocated": 210987008,
+          "max_reserved": 218103808,
+          "timestamp": 0.0004696846008300781,
+          "gpu_memory_used": 25034620928,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8193114112,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_1",
+          "allocated": 30416384,
+          "reserved": 218103808,
+          "max_allocated": 210987008,
+          "max_reserved": 218103808,
+          "timestamp": 0.0007503032684326172,
+          "gpu_memory_used": 25034620928,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8193114112,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_1",
+          "allocated": 30446592,
+          "reserved": 218103808,
+          "max_allocated": 210987008,
+          "max_reserved": 218103808,
+          "timestamp": 0.0038764476776123047,
+          "gpu_memory_used": 25034620928,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8193114112,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_2",
+          "allocated": 30446592,
+          "reserved": 48234496,
+          "max_allocated": 210987008,
+          "max_reserved": 218103808,
+          "timestamp": 0.10521149635314941,
+          "gpu_memory_used": 25204490240,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8187224064,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_2",
+          "allocated": 30446592,
+          "reserved": 232783872,
+          "max_allocated": 210987008,
+          "max_reserved": 232783872,
+          "timestamp": 0.10920572280883789,
+          "gpu_memory_used": 25019940864,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8187224064,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_3",
+          "allocated": 30446592,
+          "reserved": 48234496,
+          "max_allocated": 210987008,
+          "max_reserved": 232783872,
+          "timestamp": 0.20508360862731934,
+          "gpu_memory_used": 25204490240,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8186654720,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_3",
+          "allocated": 30446592,
+          "reserved": 232783872,
+          "max_allocated": 210987008,
+          "max_reserved": 232783872,
+          "timestamp": 0.208984375,
+          "gpu_memory_used": 25019940864,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8186654720,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "profiling_complete",
+          "allocated": 30446592,
+          "reserved": 48234496,
+          "max_allocated": 210987008,
+          "max_reserved": 232783872,
+          "timestamp": 0.30461549758911133,
+          "gpu_memory_used": 25204490240,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8187142144,
+          "cpu_memory_total": 67146264576
+        }
+      ]
+    },
+    "800x600": {
+      "peak_allocated_gb": 0.02899789810180664,
+      "peak_reserved_gb": 0.681640625,
+      "total_time": 0.3347964286804199,
+      "stage_diffs": [
+        {
+          "from": "warmup_complete",
+          "to": "before_iteration_1",
+          "allocated_diff": 0,
+          "reserved_diff": 0,
+          "time_diff": 0.00036263465881347656
+        },
+        {
+          "from": "before_iteration_1",
+          "to": "after_iteration_1",
+          "allocated_diff": 120320,
+          "reserved_diff": 0,
+          "time_diff": 0.005402803421020508
+        },
+        {
+          "from": "after_iteration_1",
+          "to": "before_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": -683671552,
+          "time_diff": 0.1086735725402832
+        },
+        {
+          "from": "before_iteration_2",
+          "to": "after_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": 683671552,
+          "time_diff": 0.0065882205963134766
+        },
+        {
+          "from": "after_iteration_2",
+          "to": "before_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": -681574400,
+          "time_diff": 0.10236334800720215
+        },
+        {
+          "from": "before_iteration_3",
+          "to": "after_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": 681574400,
+          "time_diff": 0.0067484378814697266
+        },
+        {
+          "from": "after_iteration_3",
+          "to": "profiling_complete",
+          "allocated_diff": 0,
+          "reserved_diff": -683671552,
+          "time_diff": 0.10431146621704102
+        }
+      ],
+      "snapshots": [
+        {
+          "stage": "warmup_complete",
+          "allocated": 31015936,
+          "reserved": 731906048,
+          "max_allocated": 723197440,
+          "max_reserved": 731906048,
+          "timestamp": 0.0003459453582763672,
+          "gpu_memory_used": 24520818688,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8340447232,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_1",
+          "allocated": 31015936,
+          "reserved": 731906048,
+          "max_allocated": 723197440,
+          "max_reserved": 731906048,
+          "timestamp": 0.0007085800170898438,
+          "gpu_memory_used": 24520818688,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8340504576,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_1",
+          "allocated": 31136256,
+          "reserved": 731906048,
+          "max_allocated": 723197440,
+          "max_reserved": 731906048,
+          "timestamp": 0.0061113834381103516,
+          "gpu_memory_used": 24520818688,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8340504576,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_2",
+          "allocated": 31136256,
+          "reserved": 48234496,
+          "max_allocated": 723197440,
+          "max_reserved": 731906048,
+          "timestamp": 0.11478495597839355,
+          "gpu_memory_used": 25204490240,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8340504576,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_2",
+          "allocated": 31136256,
+          "reserved": 731906048,
+          "max_allocated": 723317760,
+          "max_reserved": 731906048,
+          "timestamp": 0.12137317657470703,
+          "gpu_memory_used": 24520818688,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8340762624,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_3",
+          "allocated": 31136256,
+          "reserved": 50331648,
+          "max_allocated": 723317760,
+          "max_reserved": 731906048,
+          "timestamp": 0.22373652458190918,
+          "gpu_memory_used": 25202393088,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8340762624,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_3",
+          "allocated": 31136256,
+          "reserved": 731906048,
+          "max_allocated": 723317760,
+          "max_reserved": 731906048,
+          "timestamp": 0.2304849624633789,
+          "gpu_memory_used": 24520818688,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8340762624,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "profiling_complete",
+          "allocated": 31136256,
+          "reserved": 48234496,
+          "max_allocated": 723317760,
+          "max_reserved": 731906048,
+          "timestamp": 0.3347964286804199,
+          "gpu_memory_used": 25204490240,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8340762624,
+          "cpu_memory_total": 67146264576
+        }
+      ]
+    },
+    "1600x1200": {
+      "peak_allocated_gb": 0.029333114624023438,
+      "peak_reserved_gb": 2.658203125,
+      "total_time": 0.447277307510376,
+      "stage_diffs": [
+        {
+          "from": "warmup_complete",
+          "to": "before_iteration_1",
+          "allocated_diff": 0,
+          "reserved_diff": 0,
+          "time_diff": 0.0002760887145996094
+        },
+        {
+          "from": "before_iteration_1",
+          "to": "after_iteration_1",
+          "allocated_diff": 480256,
+          "reserved_diff": 0,
+          "time_diff": 0.01503753662109375
+        },
+        {
+          "from": "after_iteration_1",
+          "to": "before_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": -2805989376,
+          "time_diff": 0.127547025680542
+        },
+        {
+          "from": "before_iteration_2",
+          "to": "after_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": 2805989376,
+          "time_diff": 0.030679702758789062
+        },
+        {
+          "from": "after_iteration_2",
+          "to": "before_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": -2803892224,
+          "time_diff": 0.12096333503723145
+        },
+        {
+          "from": "before_iteration_3",
+          "to": "after_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": 2803892224,
+          "time_diff": 0.030707120895385742
+        },
+        {
+          "from": "after_iteration_3",
+          "to": "profiling_complete",
+          "allocated_diff": 0,
+          "reserved_diff": -2805989376,
+          "time_diff": 0.12165236473083496
+        }
+      ],
+      "snapshots": [
+        {
+          "stage": "warmup_complete",
+          "allocated": 31015936,
+          "reserved": 2854223872,
+          "max_allocated": 2822873088,
+          "max_reserved": 2854223872,
+          "timestamp": 0.00041413307189941406,
+          "gpu_memory_used": 22398500864,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8363405312,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_1",
+          "allocated": 31015936,
+          "reserved": 2854223872,
+          "max_allocated": 2822873088,
+          "max_reserved": 2854223872,
+          "timestamp": 0.0006902217864990234,
+          "gpu_memory_used": 22398500864,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8363405312,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_1",
+          "allocated": 31496192,
+          "reserved": 2854223872,
+          "max_allocated": 2822873088,
+          "max_reserved": 2854223872,
+          "timestamp": 0.015727758407592773,
+          "gpu_memory_used": 22398500864,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8362889216,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_2",
+          "allocated": 31496192,
+          "reserved": 48234496,
+          "max_allocated": 2822873088,
+          "max_reserved": 2854223872,
+          "timestamp": 0.14327478408813477,
+          "gpu_memory_used": 25204490240,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8362889216,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_2",
+          "allocated": 31496192,
+          "reserved": 2854223872,
+          "max_allocated": 2823353344,
+          "max_reserved": 2854223872,
+          "timestamp": 0.17395448684692383,
+          "gpu_memory_used": 22398500864,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8363405312,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_3",
+          "allocated": 31496192,
+          "reserved": 50331648,
+          "max_allocated": 2823353344,
+          "max_reserved": 2854223872,
+          "timestamp": 0.2949178218841553,
+          "gpu_memory_used": 25202393088,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8363143168,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_3",
+          "allocated": 31496192,
+          "reserved": 2854223872,
+          "max_allocated": 2823353344,
+          "max_reserved": 2854223872,
+          "timestamp": 0.325624942779541,
+          "gpu_memory_used": 22398500864,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8361345024,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "profiling_complete",
+          "allocated": 31496192,
+          "reserved": 48234496,
+          "max_allocated": 2823353344,
+          "max_reserved": 2854223872,
+          "timestamp": 0.447277307510376,
+          "gpu_memory_used": 25204490240,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8361345024,
+          "cpu_memory_total": 67146264576
+        }
+      ]
+    }
+  },
+  "100000": {
+    "400x300": {
+      "peak_allocated_gb": 0.04128551483154297,
+      "peak_reserved_gb": 0.234375,
+      "total_time": 0.3048868179321289,
+      "stage_diffs": [
+        {
+          "from": "warmup_complete",
+          "to": "before_iteration_1",
+          "allocated_diff": 0,
+          "reserved_diff": 0,
+          "time_diff": 0.0002727508544921875
+        },
+        {
+          "from": "before_iteration_1",
+          "to": "after_iteration_1",
+          "allocated_diff": 30208,
+          "reserved_diff": 0,
+          "time_diff": 0.0033876895904541016
+        },
+        {
+          "from": "after_iteration_1",
+          "to": "before_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": -188743680,
+          "time_diff": 0.09869694709777832
+        },
+        {
+          "from": "before_iteration_2",
+          "to": "after_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": 188743680,
+          "time_diff": 0.004189014434814453
+        },
+        {
+          "from": "after_iteration_2",
+          "to": "before_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": -186646528,
+          "time_diff": 0.09641337394714355
+        },
+        {
+          "from": "before_iteration_3",
+          "to": "after_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": 186646528,
+          "time_diff": 0.0041692256927490234
+        },
+        {
+          "from": "after_iteration_3",
+          "to": "profiling_complete",
+          "allocated_diff": 0,
+          "reserved_diff": -186646528,
+          "time_diff": 0.09734106063842773
+        }
+      ],
+      "snapshots": [
+        {
+          "stage": "warmup_complete",
+          "allocated": 44299776,
+          "reserved": 251658240,
+          "max_allocated": 233550336,
+          "max_reserved": 251658240,
+          "timestamp": 0.00041675567626953125,
+          "gpu_memory_used": 25001066496,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8564166656,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_1",
+          "allocated": 44299776,
+          "reserved": 251658240,
+          "max_allocated": 233550336,
+          "max_reserved": 251658240,
+          "timestamp": 0.0006895065307617188,
+          "gpu_memory_used": 25001066496,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8564166656,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_1",
+          "allocated": 44329984,
+          "reserved": 251658240,
+          "max_allocated": 233550336,
+          "max_reserved": 251658240,
+          "timestamp": 0.00407719612121582,
+          "gpu_memory_used": 25001066496,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8564166656,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_2",
+          "allocated": 44329984,
+          "reserved": 62914560,
+          "max_allocated": 233550336,
+          "max_reserved": 251658240,
+          "timestamp": 0.10277414321899414,
+          "gpu_memory_used": 25189810176,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8564166656,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_2",
+          "allocated": 44329984,
+          "reserved": 251658240,
+          "max_allocated": 233580544,
+          "max_reserved": 251658240,
+          "timestamp": 0.1069631576538086,
+          "gpu_memory_used": 25001066496,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8564166656,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_3",
+          "allocated": 44329984,
+          "reserved": 65011712,
+          "max_allocated": 233580544,
+          "max_reserved": 251658240,
+          "timestamp": 0.20337653160095215,
+          "gpu_memory_used": 25187713024,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8564166656,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_3",
+          "allocated": 44329984,
+          "reserved": 251658240,
+          "max_allocated": 233580544,
+          "max_reserved": 251658240,
+          "timestamp": 0.20754575729370117,
+          "gpu_memory_used": 25001066496,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8564166656,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "profiling_complete",
+          "allocated": 44329984,
+          "reserved": 65011712,
+          "max_allocated": 233580544,
+          "max_reserved": 251658240,
+          "timestamp": 0.3048868179321289,
+          "gpu_memory_used": 25187713024,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8556343296,
+          "cpu_memory_total": 67146264576
+        }
+      ]
+    },
+    "800x600": {
+      "peak_allocated_gb": 0.04136943817138672,
+      "peak_reserved_gb": 0.701171875,
+      "total_time": 0.337230920791626,
+      "stage_diffs": [
+        {
+          "from": "warmup_complete",
+          "to": "before_iteration_1",
+          "allocated_diff": 0,
+          "reserved_diff": 0,
+          "time_diff": 0.00027441978454589844
+        },
+        {
+          "from": "before_iteration_1",
+          "to": "after_iteration_1",
+          "allocated_diff": 120320,
+          "reserved_diff": 0,
+          "time_diff": 0.005503416061401367
+        },
+        {
+          "from": "after_iteration_1",
+          "to": "before_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": -687865856,
+          "time_diff": 0.10880661010742188
+        },
+        {
+          "from": "before_iteration_2",
+          "to": "after_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": 687865856,
+          "time_diff": 0.007090091705322266
+        },
+        {
+          "from": "after_iteration_2",
+          "to": "before_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": -685768704,
+          "time_diff": 0.10358142852783203
+        },
+        {
+          "from": "before_iteration_3",
+          "to": "after_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": 685768704,
+          "time_diff": 0.007079362869262695
+        },
+        {
+          "from": "after_iteration_3",
+          "to": "profiling_complete",
+          "allocated_diff": 0,
+          "reserved_diff": -687865856,
+          "time_diff": 0.10449433326721191
+        }
+      ],
+      "snapshots": [
+        {
+          "stage": "warmup_complete",
+          "allocated": 44299776,
+          "reserved": 752877568,
+          "max_allocated": 728960000,
+          "max_reserved": 752877568,
+          "timestamp": 0.0004012584686279297,
+          "gpu_memory_used": 24499847168,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8370962432,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_1",
+          "allocated": 44299776,
+          "reserved": 752877568,
+          "max_allocated": 728960000,
+          "max_reserved": 752877568,
+          "timestamp": 0.0006756782531738281,
+          "gpu_memory_used": 24499847168,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8370962432,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_1",
+          "allocated": 44420096,
+          "reserved": 752877568,
+          "max_allocated": 728960000,
+          "max_reserved": 752877568,
+          "timestamp": 0.006179094314575195,
+          "gpu_memory_used": 24499847168,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8370962432,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_2",
+          "allocated": 44420096,
+          "reserved": 65011712,
+          "max_allocated": 728960000,
+          "max_reserved": 752877568,
+          "timestamp": 0.11498570442199707,
+          "gpu_memory_used": 25187713024,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8371478528,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_2",
+          "allocated": 44420096,
+          "reserved": 752877568,
+          "max_allocated": 729080320,
+          "max_reserved": 752877568,
+          "timestamp": 0.12207579612731934,
+          "gpu_memory_used": 24499847168,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8371220480,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_3",
+          "allocated": 44420096,
+          "reserved": 67108864,
+          "max_allocated": 729080320,
+          "max_reserved": 752877568,
+          "timestamp": 0.22565722465515137,
+          "gpu_memory_used": 25185615872,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8371220480,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_3",
+          "allocated": 44420096,
+          "reserved": 752877568,
+          "max_allocated": 729080320,
+          "max_reserved": 752877568,
+          "timestamp": 0.23273658752441406,
+          "gpu_memory_used": 24499847168,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8371220480,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "profiling_complete",
+          "allocated": 44420096,
+          "reserved": 65011712,
+          "max_allocated": 729080320,
+          "max_reserved": 752877568,
+          "timestamp": 0.337230920791626,
+          "gpu_memory_used": 25187713024,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8363253760,
+          "cpu_memory_total": 67146264576
+        }
+      ]
+    },
+    "1600x1200": {
+      "peak_allocated_gb": 0.041704654693603516,
+      "peak_reserved_gb": 2.63671875,
+      "total_time": 0.45302295684814453,
+      "stage_diffs": [
+        {
+          "from": "warmup_complete",
+          "to": "before_iteration_1",
+          "allocated_diff": 0,
+          "reserved_diff": 0,
+          "time_diff": 0.0002880096435546875
+        },
+        {
+          "from": "before_iteration_1",
+          "to": "after_iteration_1",
+          "allocated_diff": 480256,
+          "reserved_diff": 0,
+          "time_diff": 0.014855384826660156
+        },
+        {
+          "from": "after_iteration_1",
+          "to": "before_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": -2764046336,
+          "time_diff": 0.13023734092712402
+        },
+        {
+          "from": "before_iteration_2",
+          "to": "after_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": 2764046336,
+          "time_diff": 0.03118109703063965
+        },
+        {
+          "from": "after_iteration_2",
+          "to": "before_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": -2764046336,
+          "time_diff": 0.12305212020874023
+        },
+        {
+          "from": "before_iteration_3",
+          "to": "after_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": 2764046336,
+          "time_diff": 0.030642032623291016
+        },
+        {
+          "from": "after_iteration_3",
+          "to": "profiling_complete",
+          "allocated_diff": 0,
+          "reserved_diff": -2764046336,
+          "time_diff": 0.12233495712280273
+        }
+      ],
+      "snapshots": [
+        {
+          "stage": "warmup_complete",
+          "allocated": 44299776,
+          "reserved": 2831155200,
+          "max_allocated": 2793675264,
+          "max_reserved": 2831155200,
+          "timestamp": 0.00043201446533203125,
+          "gpu_memory_used": 22421569536,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8402751488,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_1",
+          "allocated": 44299776,
+          "reserved": 2831155200,
+          "max_allocated": 2793675264,
+          "max_reserved": 2831155200,
+          "timestamp": 0.0007200241088867188,
+          "gpu_memory_used": 22421569536,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8402751488,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_1",
+          "allocated": 44780032,
+          "reserved": 2831155200,
+          "max_allocated": 2793675264,
+          "max_reserved": 2831155200,
+          "timestamp": 0.015575408935546875,
+          "gpu_memory_used": 22421569536,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8402751488,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_2",
+          "allocated": 44780032,
+          "reserved": 67108864,
+          "max_allocated": 2793675264,
+          "max_reserved": 2831155200,
+          "timestamp": 0.1458127498626709,
+          "gpu_memory_used": 25185615872,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8403513344,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_2",
+          "allocated": 44780032,
+          "reserved": 2831155200,
+          "max_allocated": 2794155520,
+          "max_reserved": 2831155200,
+          "timestamp": 0.17699384689331055,
+          "gpu_memory_used": 22421569536,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8329031680,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_3",
+          "allocated": 44780032,
+          "reserved": 67108864,
+          "max_allocated": 2794155520,
+          "max_reserved": 2831155200,
+          "timestamp": 0.3000459671020508,
+          "gpu_memory_used": 25185615872,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8329031680,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_3",
+          "allocated": 44780032,
+          "reserved": 2831155200,
+          "max_allocated": 2794155520,
+          "max_reserved": 2831155200,
+          "timestamp": 0.3306879997253418,
+          "gpu_memory_used": 22421569536,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8328773632,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "profiling_complete",
+          "allocated": 44780032,
+          "reserved": 67108864,
+          "max_allocated": 2794155520,
+          "max_reserved": 2831155200,
+          "timestamp": 0.45302295684814453,
+          "gpu_memory_used": 25185615872,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8318509056,
+          "cpu_memory_total": 67146264576
+        }
+      ]
+    }
+  },
+  "200000": {
+    "400x300": {
+      "peak_allocated_gb": 0.06264925003051758,
+      "peak_reserved_gb": 0.287109375,
+      "total_time": 0.3091545104980469,
+      "stage_diffs": [
+        {
+          "from": "warmup_complete",
+          "to": "before_iteration_1",
+          "allocated_diff": 0,
+          "reserved_diff": 0,
+          "time_diff": 0.00026607513427734375
+        },
+        {
+          "from": "before_iteration_1",
+          "to": "after_iteration_1",
+          "allocated_diff": 30208,
+          "reserved_diff": 0,
+          "time_diff": 0.0031228065490722656
+        },
+        {
+          "from": "after_iteration_1",
+          "to": "before_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": -224395264,
+          "time_diff": 0.09996962547302246
+        },
+        {
+          "from": "before_iteration_2",
+          "to": "after_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": 224395264,
+          "time_diff": 0.004364490509033203
+        },
+        {
+          "from": "after_iteration_2",
+          "to": "before_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": -224395264,
+          "time_diff": 0.09663534164428711
+        },
+        {
+          "from": "before_iteration_3",
+          "to": "after_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": 224395264,
+          "time_diff": 0.004333019256591797
+        },
+        {
+          "from": "after_iteration_3",
+          "to": "profiling_complete",
+          "allocated_diff": 0,
+          "reserved_diff": -224395264,
+          "time_diff": 0.10004544258117676
+        }
+      ],
+      "snapshots": [
+        {
+          "stage": "warmup_complete",
+          "allocated": 67238912,
+          "reserved": 308281344,
+          "max_allocated": 277198336,
+          "max_reserved": 308281344,
+          "timestamp": 0.0004177093505859375,
+          "gpu_memory_used": 24944443392,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8308871168,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_1",
+          "allocated": 67238912,
+          "reserved": 308281344,
+          "max_allocated": 277198336,
+          "max_reserved": 308281344,
+          "timestamp": 0.0006837844848632812,
+          "gpu_memory_used": 24944443392,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8308871168,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_1",
+          "allocated": 67269120,
+          "reserved": 308281344,
+          "max_allocated": 277198336,
+          "max_reserved": 308281344,
+          "timestamp": 0.003806591033935547,
+          "gpu_memory_used": 24944443392,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8308871168,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_2",
+          "allocated": 67269120,
+          "reserved": 83886080,
+          "max_allocated": 277198336,
+          "max_reserved": 308281344,
+          "timestamp": 0.10377621650695801,
+          "gpu_memory_used": 25168838656,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8309645312,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_2",
+          "allocated": 67269120,
+          "reserved": 308281344,
+          "max_allocated": 277228544,
+          "max_reserved": 308281344,
+          "timestamp": 0.10814070701599121,
+          "gpu_memory_used": 24944443392,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8309645312,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_3",
+          "allocated": 67269120,
+          "reserved": 83886080,
+          "max_allocated": 277228544,
+          "max_reserved": 308281344,
+          "timestamp": 0.20477604866027832,
+          "gpu_memory_used": 25168838656,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8308707328,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_3",
+          "allocated": 67269120,
+          "reserved": 308281344,
+          "max_allocated": 277228544,
+          "max_reserved": 308281344,
+          "timestamp": 0.20910906791687012,
+          "gpu_memory_used": 24944443392,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8308707328,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "profiling_complete",
+          "allocated": 67269120,
+          "reserved": 83886080,
+          "max_allocated": 277228544,
+          "max_reserved": 308281344,
+          "timestamp": 0.3091545104980469,
+          "gpu_memory_used": 25168838656,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8299073536,
+          "cpu_memory_total": 67146264576
+        }
+      ]
+    },
+    "800x600": {
+      "peak_allocated_gb": 0.06273317337036133,
+      "peak_reserved_gb": 0.76953125,
+      "total_time": 0.3431689739227295,
+      "stage_diffs": [
+        {
+          "from": "warmup_complete",
+          "to": "before_iteration_1",
+          "allocated_diff": 0,
+          "reserved_diff": 0,
+          "time_diff": 0.0002770423889160156
+        },
+        {
+          "from": "before_iteration_1",
+          "to": "after_iteration_1",
+          "allocated_diff": 120320,
+          "reserved_diff": 0,
+          "time_diff": 0.00568389892578125
+        },
+        {
+          "from": "after_iteration_1",
+          "to": "before_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": -742391808,
+          "time_diff": 0.10810375213623047
+        },
+        {
+          "from": "before_iteration_2",
+          "to": "after_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": 742391808,
+          "time_diff": 0.007084369659423828
+        },
+        {
+          "from": "after_iteration_2",
+          "to": "before_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": -742391808,
+          "time_diff": 0.10752224922180176
+        },
+        {
+          "from": "before_iteration_3",
+          "to": "after_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": 742391808,
+          "time_diff": 0.0068933963775634766
+        },
+        {
+          "from": "after_iteration_3",
+          "to": "profiling_complete",
+          "allocated_diff": 0,
+          "reserved_diff": -742391808,
+          "time_diff": 0.10717630386352539
+        }
+      ],
+      "snapshots": [
+        {
+          "stage": "warmup_complete",
+          "allocated": 67238912,
+          "reserved": 826277888,
+          "max_allocated": 781169152,
+          "max_reserved": 826277888,
+          "timestamp": 0.0004279613494873047,
+          "gpu_memory_used": 24426446848,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8514482176,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_1",
+          "allocated": 67238912,
+          "reserved": 826277888,
+          "max_allocated": 781169152,
+          "max_reserved": 826277888,
+          "timestamp": 0.0007050037384033203,
+          "gpu_memory_used": 24426446848,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8514482176,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_1",
+          "allocated": 67359232,
+          "reserved": 826277888,
+          "max_allocated": 781169152,
+          "max_reserved": 826277888,
+          "timestamp": 0.00638890266418457,
+          "gpu_memory_used": 24426446848,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8514482176,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_2",
+          "allocated": 67359232,
+          "reserved": 83886080,
+          "max_allocated": 781169152,
+          "max_reserved": 826277888,
+          "timestamp": 0.11449265480041504,
+          "gpu_memory_used": 25168838656,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8514482176,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_2",
+          "allocated": 67359232,
+          "reserved": 826277888,
+          "max_allocated": 781289472,
+          "max_reserved": 826277888,
+          "timestamp": 0.12157702445983887,
+          "gpu_memory_used": 24426446848,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8507035648,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_3",
+          "allocated": 67359232,
+          "reserved": 83886080,
+          "max_allocated": 781289472,
+          "max_reserved": 826277888,
+          "timestamp": 0.22909927368164062,
+          "gpu_memory_used": 25168838656,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8507035648,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_3",
+          "allocated": 67359232,
+          "reserved": 826277888,
+          "max_allocated": 781289472,
+          "max_reserved": 826277888,
+          "timestamp": 0.2359926700592041,
+          "gpu_memory_used": 24426446848,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8507035648,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "profiling_complete",
+          "allocated": 67359232,
+          "reserved": 83886080,
+          "max_allocated": 781289472,
+          "max_reserved": 826277888,
+          "timestamp": 0.3431689739227295,
+          "gpu_memory_used": 25168838656,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8506777600,
+          "cpu_memory_total": 67146264576
+        }
+      ]
+    },
+    "1600x1200": {
+      "peak_allocated_gb": 0.06306838989257812,
+      "peak_reserved_gb": 2.720703125,
+      "total_time": 0.4288918972015381,
+      "stage_diffs": [
+        {
+          "from": "warmup_complete",
+          "to": "before_iteration_1",
+          "allocated_diff": 0,
+          "reserved_diff": 0,
+          "time_diff": 0.0002880096435546875
+        },
+        {
+          "from": "before_iteration_1",
+          "to": "after_iteration_1",
+          "allocated_diff": 480256,
+          "reserved_diff": 0,
+          "time_diff": 0.015112638473510742
+        },
+        {
+          "from": "after_iteration_1",
+          "to": "before_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": -2835349504,
+          "time_diff": 0.1185307502746582
+        },
+        {
+          "from": "before_iteration_2",
+          "to": "after_iteration_2",
+          "allocated_diff": 0,
+          "reserved_diff": 2835349504,
+          "time_diff": 0.032732248306274414
+        },
+        {
+          "from": "after_iteration_2",
+          "to": "before_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": -2835349504,
+          "time_diff": 0.1139841079711914
+        },
+        {
+          "from": "before_iteration_3",
+          "to": "after_iteration_3",
+          "allocated_diff": 0,
+          "reserved_diff": 2835349504,
+          "time_diff": 0.033263206481933594
+        },
+        {
+          "from": "after_iteration_3",
+          "to": "profiling_complete",
+          "allocated_diff": 0,
+          "reserved_diff": -2835349504,
+          "time_diff": 0.11458158493041992
+        }
+      ],
+      "snapshots": [
+        {
+          "stage": "warmup_complete",
+          "allocated": 67238912,
+          "reserved": 2921332736,
+          "max_allocated": 2861486080,
+          "max_reserved": 2921332736,
+          "timestamp": 0.0003993511199951172,
+          "gpu_memory_used": 22331392000,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8719597568,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_1",
+          "allocated": 67238912,
+          "reserved": 2921332736,
+          "max_allocated": 2861486080,
+          "max_reserved": 2921332736,
+          "timestamp": 0.0006873607635498047,
+          "gpu_memory_used": 22331392000,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8719597568,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_1",
+          "allocated": 67719168,
+          "reserved": 2921332736,
+          "max_allocated": 2861486080,
+          "max_reserved": 2921332736,
+          "timestamp": 0.015799999237060547,
+          "gpu_memory_used": 22331392000,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8719183872,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_2",
+          "allocated": 67719168,
+          "reserved": 85983232,
+          "max_allocated": 2861486080,
+          "max_reserved": 2921332736,
+          "timestamp": 0.13433074951171875,
+          "gpu_memory_used": 25166741504,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8718999552,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_2",
+          "allocated": 67719168,
+          "reserved": 2921332736,
+          "max_allocated": 2861966336,
+          "max_reserved": 2921332736,
+          "timestamp": 0.16706299781799316,
+          "gpu_memory_used": 22331392000,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8718999552,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "before_iteration_3",
+          "allocated": 67719168,
+          "reserved": 85983232,
+          "max_allocated": 2861966336,
+          "max_reserved": 2921332736,
+          "timestamp": 0.28104710578918457,
+          "gpu_memory_used": 25166741504,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8718999552,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "after_iteration_3",
+          "allocated": 67719168,
+          "reserved": 2921332736,
+          "max_allocated": 2861966336,
+          "max_reserved": 2921332736,
+          "timestamp": 0.31431031227111816,
+          "gpu_memory_used": 22331392000,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8718999552,
+          "cpu_memory_total": 67146264576
+        },
+        {
+          "stage": "profiling_complete",
+          "allocated": 67719168,
+          "reserved": 85983232,
+          "max_allocated": 2861966336,
+          "max_reserved": 2921332736,
+          "timestamp": 0.4288918972015381,
+          "gpu_memory_used": 25166741504,
+          "gpu_memory_total": 25252724736,
+          "cpu_memory_used": 8718741504,
+          "cpu_memory_total": 67146264576
+        }
+      ]
+    }
+  }
+}

@@ -1,12 +1,7 @@
-import numpy as np
 import torch
-import viser
-import viser.transforms as vtf
-import nerfview
 import time
 
 from nerfstudio.data.scene_box import SceneBox
-from nerfstudio.cameras.cameras import Cameras, CameraType
 
 from shadow_splat.model import ShadowSplatModel, ShadowSplatModelConfig
 from shadow_splat.util.minimal_viewer import MinimalViewer
