@@ -7,7 +7,9 @@ import viser
 import viser.transforms as vtf
 import nerfview
 from nerfstudio.cameras.cameras import Cameras, CameraType
+import matplotlib.pyplot as plt
 
+from shadow_splat.model import ShadowSplatModel
 from shadow_splat.viewer import camera_to_world_transform
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -16,7 +18,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class MinimalViewer:
     """viewer using nerfview."""
 
-    def __init__(self, model):
+    def __init__(self, model: ShadowSplatModel):
         self.model = model
 
         self.viser_server = viser.ViserServer(port=7007)
@@ -89,13 +91,13 @@ class MinimalViewer:
             label="Radius", min=0.0, max=10.0, step=0.1, initial_value=1.0
         )
         self.dim_slider = self.viser_server.gui.add_slider(
-            label="Dimension", min=0.0, max=2000.0, step=1.0, initial_value=1200
+            label="Dimension", min=0.0, max=3000.0, step=1.0, initial_value=2000
         )
         self.focal_length_slider = self.viser_server.gui.add_slider(
             label="Focal length", min=0.0, max=3000.0, step=1.0, initial_value=1650
         )
         self.variance_factor_slider = self.viser_server.gui.add_slider(
-            label="Variance factor", min=0.0, max=5.0, step=0.05, initial_value=0.1
+            label="Variance factor", min=0.0, max=1.0, step=0.01, initial_value=0.001
         )
         self.red_intensity_slider = self.viser_server.gui.add_slider(
             label="Red intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
@@ -130,7 +132,7 @@ class MinimalViewer:
         self.camera_type_select.on_update(self.update_light_source_pose)
 
         # Add light source camera
-        self.light_source_visualizer = self.viser_server.add_camera_frustum(
+        self.light_source_visualizer = self.viser_server.scene.add_camera_frustum(
             name="/light",
             fov=90.0,
             aspect=1.0,
@@ -184,6 +186,13 @@ class MinimalViewer:
                 variance_factor=variance_factor,
                 intensity=[red_intensity, green_intensity, blue_intensity],
             )
+            # Display depth on camera frustum
+            # depth = shadow_meta["depth"].squeeze()
+            # self.light_source_visualizer.image = depth.cpu().numpy()
+
+            distances = shadow_meta["distances"]
+            depth_flattened = shadow_meta["depth_flattened"]
+
             end_time = time.time()
             print(f"Time taken to update light source: {end_time - start_time} seconds")
             # TODO: visualize outputs
