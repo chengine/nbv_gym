@@ -3,8 +3,6 @@ name = "shadow-splat"
 description = "Shadow Gaussian Splatting"
 version = "0.1.0"
 
-dependencies = ["nerfstudio >= 1.1.0"] 
-
 [tool.setuptools.packages.find]
 include = ["shadow_splat*"]
 

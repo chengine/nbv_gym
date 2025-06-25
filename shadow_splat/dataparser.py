@@ -66,15 +66,26 @@ class ShadowSplatDataParser(Nerfstudio):
 
         print("dataparser | num frames", len(frames))
 
+        # Load 3D points
+        # print("dataparser | config.load_3D_points", self.config.load_3D_points)
+        # if self.config.load_3D_points:  # NOTE: for some reason this is False even though we set it to True in the method config
+        print("dataparser | loading 3D points")
+        if "ply_file_path" in meta:
+            ply_file_path = data_dir / meta["ply_file_path"]
+            if ply_file_path:
+                sparse_points = self._load_3D_points(
+                    ply_file_path,
+                    dataparser_outputs.dataparser_transform,
+                    dataparser_outputs.dataparser_scale,
+                )
+                if sparse_points is not None:
+                    dataparser_outputs.metadata.update(sparse_points)
+
         light_poses = []
         for frame in frames:
             light_poses.append(np.array(frame["light_pose"]))
 
         light_poses = torch.from_numpy(np.array(light_poses).astype(np.float32))
-
-        # TODO: transform poses
-        # dataparser_transform = dataparser_outputs["dataparser_transform"]
-        # dataparser_scale = dataparser_outputs["dataparser_scale"]
 
         lights = Cameras(
             fx=meta["light_intrinsics"]["fl_x"],

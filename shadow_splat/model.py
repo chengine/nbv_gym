@@ -341,19 +341,17 @@ class ShadowSplatModel(Model):
             "rasterize": [],
             "rasterize_to_indices": [],
             "render_weights": [],
-            "render_weights_to_sigmoid": [],
-            "render_weights_to_lighting": [],
-            "render_weights_to_variance": 0.0,
-            "render_weights_to_distances": 0.0,
         }
 
     def populate_modules(self):
         if self.seed_points is not None and not self.config.random_init:
             means = torch.nn.Parameter(self.seed_points[0])  # (Location, Color)
+            print("USING SEED POINTS")
         else:
             means = torch.nn.Parameter(
                 (torch.rand((self.config.num_random, 3)) - 0.5) * self.config.random_scale
             )
+            print("USING RANDOM POINTS")
         distances, _ = k_nearest_sklearn(means.data, 3)
         # find the average of the three nearest neighbors for each point and use that as the scale
         avg_dist = distances.mean(dim=-1, keepdim=True)
