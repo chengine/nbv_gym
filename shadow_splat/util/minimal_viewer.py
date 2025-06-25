@@ -192,6 +192,16 @@ class MinimalViewer:
 
             distances = shadow_meta["distances"]
             depth_flattened = shadow_meta["depth_flattened"]
+            centered_distances_squared = shadow_meta["centered_distances_squared"]
+            print(
+                f"    Distances - min: {distances.min().item():.4f}, max: {distances.max().item():.4f}, mean: {distances.mean().item():.4f}"
+            )
+            print(
+                f"    Depth flattened - min: {depth_flattened.min().item():.4f}, max: {depth_flattened.max().item():.4f}, mean: {depth_flattened.mean().item():.4f}"
+            )
+            print(
+                f"    Centered distances squared - min: {centered_distances_squared.min().item():.4f}, max: {centered_distances_squared.max().item():.4f}, mean: {centered_distances_squared.mean().item():.4f}"
+            )
 
             end_time = time.time()
             print(f"Time taken to update light source: {end_time - start_time} seconds")

@@ -337,6 +337,16 @@ class ShadowSplatModel(Model):
         self.seed_points = seed_points
         super().__init__(*args, **kwargs)
 
+        self.timing_dict = {
+            "rasterize": [],
+            "rasterize_to_indices": [],
+            "render_weights": [],
+            "render_weights_to_sigmoid": [],
+            "render_weights_to_lighting": [],
+            "render_weights_to_variance": 0.0,
+            "render_weights_to_distances": 0.0,
+        }
+
     def populate_modules(self):
         if self.seed_points is not None and not self.config.random_init:
             means = torch.nn.Parameter(self.seed_points[0])  # (Location, Color)
@@ -463,10 +473,6 @@ class ShadowSplatModel(Model):
     ):
         """Update the light source, generating a new shadow function for the scene."""
 
-        if not isinstance(light_source, Cameras):
-            print("Called get_outputs with not a camera")
-            return {}
-
         ######
         # Investigate if this is optimizing the light source pose
         if self.training:
@@ -539,8 +545,6 @@ class ShadowSplatModel(Model):
             colors_crop = torch.sigmoid(colors_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
             sh_degree_to_use = None
 
-        torch.cuda.synchronize()
-        start_time = time.time()
         depth, alphas, meta = rasterization(
             means=means_crop,
             quats=quats_crop,  # rasterization does normalization internally
@@ -561,11 +565,8 @@ class ShadowSplatModel(Model):
             rasterize_mode=self.config.rasterize_mode,
             # set some threshold to disregrad small gaussians for faster rendering.
             # radius_clip=3.0,
-            # TODO: Remember to pass in light source model [pinhole, ortho, fisheye] here
             camera_model=camera_model,
         )
-        end_time = time.time()
-        print(f"    Time taken to rasterize: {end_time - start_time:.4f} seconds")
 
         # Compute 3D camera space coordinates once and reuse them
         w2c = torch.eye(4, device=light_source.camera_to_worlds[0].device)
@@ -580,8 +581,7 @@ class ShadowSplatModel(Model):
         meta["opacities"] = meta["opacities"].unsqueeze(0)
 
         # pixel_ids/gaussian ids are sorted in order of depth of gaussians
-        torch.cuda.synchronize()
-        start_time = time.time()
+
         gs_ids, pixel_ids, camera_ids = rasterize_to_indices_in_range(
             0,
             1000,
@@ -595,8 +595,6 @@ class ShadowSplatModel(Model):
             meta["isect_offsets"],
             meta["flatten_ids"],
         )
-        end_time = time.time()
-        print(f"    Time taken to rasterize to indices: {end_time - start_time:.4f} seconds")
 
         meta["gs_ids"] = gs_ids
         meta["pixel_ids"] = pixel_ids
@@ -605,45 +603,24 @@ class ShadowSplatModel(Model):
         alphas, indices, total_pixels = prepare_weights(meta)
 
         # Returns the weights and the transmittances
-        torch.cuda.synchronize()
-        start_time = time.time()
         weights, _ = render_weight_from_alpha(alphas, ray_indices=indices, n_rays=total_pixels)
-        end_time = time.time()
-        print(f"    Time taken to render weights: {end_time - start_time:.4f} seconds")
 
         ### TODO: FIND ALL GAUSSIAN PIXEL INTERSECTIONS IN THE PROJECTION STEP (NOT THE RASTERIZATION STEP)
 
         # Calculate the distance of rasterized Gaussians to the light source to get logistic parameters
-        torch.cuda.synchronize()
-        start_time = time.time()
         means_rasterized_camera = means_camera_space[gs_ids]
         distances = -means_rasterized_camera[:, 2]  # torch.norm(diff, dim=-1)
 
         # Use the weights to calculate the variance of the fitted logistic function for each ray
         depth_flattened = depth.reshape(-1)[pixel_ids]
-        print(
-            f"    Distances - min: {distances.min().item():.4f}, max: {distances.max().item():.4f}, mean: {distances.mean().item():.4f}"
-        )
-        print(
-            f"    Depth flattened - min: {depth_flattened.min().item():.4f}, max: {depth_flattened.max().item():.4f}, mean: {depth_flattened.mean().item():.4f}"
-        )
         centered_distances_squared = (distances - depth_flattened) ** 2
-        print(centered_distances_squared.shape)
 
         # Sum up the centered distance for each ray
         variance = torch.zeros(total_pixels, device=self.device)
         variance.scatter_add_(0, pixel_ids, weights * centered_distances_squared)
 
-        print(
-            f"    Weights - min: {weights.min().item():.4f}, max: {weights.max().item():.4f}, mean: {weights.mean().item():.4f}"
-        )
-        print(
-            f"    Centered distances squared - min: {centered_distances_squared.min().item():.4f}, max: {centered_distances_squared.max().item():.4f}, mean: {centered_distances_squared.mean().item():.4f}"
-        )
-
         # Add minimum variance threshold to prevent division by very small numbers
-        min_variance = 1e-8  # Small threshold to prevent numerical issues
-        variance = torch.clamp(variance, min=min_variance)
+        variance = torch.clamp(variance, min=1e-8)
 
         s = torch.sqrt(variance_factor / (math.pi) ** 2 * variance)  # n_pixels
 
@@ -662,26 +639,11 @@ class ShadowSplatModel(Model):
             projected_pixel_ids
         ]
 
-        # Clamp sigmoid argument to prevent extreme values
-        # sigmoid_argument = torch.clamp(sigmoid_argument, min=-10.0, max=10.0)
-
         sigmoid_weights = 1.0 - torch.sigmoid(sigmoid_argument)
 
-        # Debug information
-        print(
-            f"    Sigmoid weights - min: {sigmoid_weights.min().item():.4f}, max: {sigmoid_weights.max().item():.4f}, mean: {sigmoid_weights.mean().item():.4f}"
-        )
-        print(
-            f"    Variance - min: {variance.min().item():.6f}, max: {variance.max().item():.6f}, mean: {variance.mean().item():.6f}"
-        )
-        print(
-            f"    Sigmoid argument - min: {sigmoid_argument.min().item():.4f}, max: {sigmoid_argument.max().item():.4f}, mean: {sigmoid_argument.mean().item():.4f}"
-        )
-
         # Way to reduce sigmoid weights into n_gaussians
-        weights_ = torch.ones(
-            self.means.shape[0], device=self.device
-        )  # TODO: IF WE SET THE DEFAULT TO 1, THEN GAUSSIANS NOT IN THE FRUSTUM ARE WELL-LIT
+        # NOTE: IF WE SET THE DEFAULT TO 1, THEN GAUSSIANS NOT IN THE FRUSTUM ARE WELL-LIT
+        weights_ = torch.ones(self.means.shape[0], device=self.device)
         # TODO: Might need this if we find that only applying weighting to projected gaussians based only on their means is not sufficient
         # for accuracy
         # weights_.scatter_reduce_(0, projected_gs_ids, sigmoid_weights, reduce="amax", include_self=False)
@@ -689,9 +651,6 @@ class ShadowSplatModel(Model):
         lighting_weights = weights_.unsqueeze(-1)
 
         self.shadow_fn = lambda x: apply_weight_to_RGB(x, lighting_weights, intensity)
-
-        end_time = time.time()
-        print(f"    Time for rest: {end_time - start_time:.4f} seconds")
 
         shadow_meta = {
             "distances": distances,
