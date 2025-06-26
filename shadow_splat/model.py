@@ -469,7 +469,7 @@ class ShadowSplatModel(Model):
         reduce: Optional[Literal["mean", "amax", "amin"]] = "amax",
         variance_factor: Optional[float] = 0.001,
         intensity: Optional[List[float]] = [1.0, 1.0, 1.0],
-        cutoff: Optional[float] = 0.1,
+        cutoff: Optional[float] = 0.5,
     ):
         """Update the light source, generating a new shadow function for the scene."""
 
