@@ -119,3 +119,30 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
     #         return camera, data
 
     #     return self.next_eval_image(step=step)
+
+    def next_eval_image(self, step: int) -> Tuple[Cameras, Dict]:
+        """Returns the next evaluation batch
+        Returns a Camera instead of raybundle
+        TODO: Make sure this logic is consistent with the vanilladatamanager"""
+        if self.config.cache_images == "disk":
+            camera, data = next(self.iter_eval_image_dataloader)[0]
+            return camera, data
+        image_idx = self.eval_unseen_cameras.pop(
+            random.randint(0, len(self.eval_unseen_cameras) - 1)
+        )
+        # Make sure to re-populate the unseen cameras list if we have exhausted it
+        if len(self.eval_unseen_cameras) == 0:
+            self.eval_unseen_cameras = [i for i in range(len(self.eval_dataset))]
+        data = self.cached_eval[image_idx]
+        data = data.copy()
+        data["image"] = data["image"].to(self.device)
+        assert len(self.eval_dataset.cameras.shape) == 1, "Assumes single batch dimension"
+        camera = self.eval_dataset.cameras[image_idx : image_idx + 1].to(self.device)
+
+        light = (
+            self.dataparser.get_dataparser_outputs(split=self.test_split)
+            .lights[image_idx : image_idx + 1]
+            .to(self.device)
+        )
+
+        return camera, data, light

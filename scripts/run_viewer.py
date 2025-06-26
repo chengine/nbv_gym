@@ -5,6 +5,7 @@ Based on the run_viewer.py script from nerfstudio.
 
 Example usage:
     python ../shadow_splat/scripts/run_viewer.py --load-config outputs/rains_chair/shadow-splat/2024-10-29_115808/config.yml
+    python scripts/run_viewer.py --load-config outputs/o3d_el45_az60/shadow-splat/2025-06-25_133628/config.yml
 
 """
 

@@ -76,6 +76,8 @@ def apply_weight_to_RGB(
     if input.dim() == 3:  # higher order spherical harmonics
         new_color = input
     else:  # direct color
+        # print("weights nan ", torch.isnan(weights).sum())
+        # print("input nan ", torch.isnan(input).sum())
         new_color = weights * SH2RGB(input)  # NOTE: THIS IS THE ORIGINAL LINEAR WEIGHTING
         update_color_mask = weights.squeeze(-1) < 1.0
 
@@ -103,9 +105,14 @@ def apply_weight_to_RGB(
         elif tonemapping_type == "linear":
             updated_color = torch.clamp(updated_color, min=0.0, max=1.0)
 
-        # Does gamma correction # NOTE: leads to nans during training
+        # Does gamma correction
         # if gamma_correction:
         #     updated_color = updated_color ** (1.0 / 2.2)
+
+        # Print min and max of updated color
+        # print(
+        #     f"Updated color min: {updated_color.min().item():.3f}, max: {updated_color.max().item():.3f}"
+        # )
 
         new_color[update_color_mask] = updated_color
         new_color = RGB2SH(new_color)
