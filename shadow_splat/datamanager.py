@@ -103,7 +103,19 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
 
         cameras.metadata["cam_idx"] = image_idx
 
-        # added
+        # NOTE: Added
         light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
 
         return cameras, data, light
+
+    # def next_eval(self, step: int) -> Tuple[Cameras, Dict]:
+    #     """Returns the next evaluation batch
+    #     Returns a Camera instead of raybundle"""
+    #     self.eval_count += 1
+    #     if self.config.cache_images == "disk":
+    #         camera, data = next(self.iter_eval_image_dataloader)[0]
+    #         camera = camera.to(self.device)
+    #         data = get_dict_to_torch(data, self.device)
+    #         return camera, data
+
+    #     return self.next_eval_image(step=step)

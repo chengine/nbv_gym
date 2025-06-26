@@ -76,6 +76,8 @@ def apply_weight_to_RGB(
     if input.dim() == 3:  # higher order spherical harmonics
         new_color = input
     else:  # direct color
+        # print("weights nan ", torch.isnan(weights).sum())
+        # print("input nan ", torch.isnan(input).sum())
         new_color = weights * SH2RGB(input)  # NOTE: THIS IS THE ORIGINAL LINEAR WEIGHTING
         update_color_mask = weights.squeeze(-1) < 1.0
 
@@ -104,8 +106,13 @@ def apply_weight_to_RGB(
             updated_color = torch.clamp(updated_color, min=0.0, max=1.0)
 
         # Does gamma correction
-        if gamma_correction:
-            updated_color = updated_color ** (1.0 / 2.2)
+        # if gamma_correction:
+        #     updated_color = updated_color ** (1.0 / 2.2)
+
+        # Print min and max of updated color
+        # print(
+        #     f"Updated color min: {updated_color.min().item():.3f}, max: {updated_color.max().item():.3f}"
+        # )
 
         new_color[update_color_mask] = updated_color
         new_color = RGB2SH(new_color)
@@ -113,7 +120,7 @@ def apply_weight_to_RGB(
     return new_color
 
 
-@torch.compile
+# @torch.compile
 def prepare_weights(meta):
     C, N = meta["means2d"].shape[:2]
     pixel_ids_x = meta["pixel_ids"] % meta["width"]
@@ -137,7 +144,7 @@ def prepare_weights(meta):
     return alphas, indices, total_pixels
 
 
-@torch.compile
+# @torch.compile
 def relighting_absorb_mode(meta, weights, device, reduce, reweighting_fn):
     C, N = meta["means2d"].shape[:2]
 
@@ -211,7 +218,7 @@ def resize_image(image: torch.Tensor, d: int):
     )
 
 
-@torch_compile()
+# @torch_compile()
 def get_viewmat(optimized_camera_to_world):
     """
     function that converts c2w to gsplat world2camera matrix, using compile for some speed
@@ -277,7 +284,7 @@ class ShadowSplatModelConfig(ModelConfig):
     """weight of ssim loss"""
     stop_split_at: int = 15000
     """stop splitting at this step"""
-    sh_degree: int = 3
+    sh_degree: int = 0
     """maximum degree of spherical harmonics to use"""
     use_scale_regularization: bool = False
     """If enabled, a scale regularization introduced in PhysGauss (https://xpandora.github.io/PhysGaussian/) is used for reducing huge spikey gaussians."""
@@ -456,6 +463,7 @@ class ShadowSplatModel(Model):
                              Currently, the supported strategies include default and mcmc.""")
 
         self.shadow_fn = None
+        self.lighting_weights = None
 
         ### TODO: Learn this lighting_fn!!!
         # self.reweighting_param = torch.nn.Parameter(torch.randn(1, device='cuda'))
@@ -466,7 +474,7 @@ class ShadowSplatModel(Model):
         light_source: Cameras,
         mask: Optional[torch.Tensor] = None,
         reduce: Optional[Literal["mean", "amax", "amin"]] = "amax",
-        variance_factor: Optional[float] = 0.1,
+        variance_factor: Optional[float] = 0.001,
         intensity: Optional[List[float]] = [1.0, 1.0, 1.0],
     ):
         """Update the light source, generating a new shadow function for the scene."""
@@ -646,9 +654,13 @@ class ShadowSplatModel(Model):
         # for accuracy
         # weights_.scatter_reduce_(0, projected_gs_ids, sigmoid_weights, reduce="amax", include_self=False)
         weights_[projected_gs_ids] = sigmoid_weights
-        lighting_weights = weights_.unsqueeze(-1)
+        self.lighting_weights = weights_.unsqueeze(-1)
 
-        self.shadow_fn = lambda x: apply_weight_to_RGB(x, lighting_weights, intensity)
+        # During training, detach the lighting weights to prevent gradient issues
+        if self.training:
+            self.lighting_weights = self.lighting_weights.detach()
+
+        self.shadow_fn = lambda x: apply_weight_to_RGB(x, self.lighting_weights, intensity)
 
         shadow_meta = {
             "distances": distances,
@@ -857,7 +869,23 @@ class ShadowSplatModel(Model):
         )
         return out["rgb"]
 
-    def get_outputs(self, camera: Cameras) -> Dict[str, Union[torch.Tensor, List]]:
+    def forward(
+        self, camera: Cameras, light: Optional[Cameras] = None
+    ) -> Dict[str, Union[torch.Tensor, List]]:
+        """Forward pass that takes a camera and optional light source.
+
+        Args:
+            camera: The camera(s) for which output images are rendered
+            light: Optional light source camera for shadow computation
+
+        Returns:
+            Outputs of model (ie. rendered colors)
+        """
+        return self.get_outputs(camera, light)
+
+    def get_outputs(
+        self, camera: Cameras, light: Optional[Cameras] = None
+    ) -> Dict[str, Union[torch.Tensor, List]]:
         """Takes in a camera and returns a dictionary of outputs.
 
         Args:
@@ -870,6 +898,9 @@ class ShadowSplatModel(Model):
         if not isinstance(camera, Cameras):
             print("Called get_outputs with not a camera")
             return {}
+
+        if light is not None:
+            self.update_light_source(light)
 
         if self.training:
             assert camera.shape[0] == 1, "Only one camera at a time"
@@ -888,12 +919,14 @@ class ShadowSplatModel(Model):
             crop_ids = None
 
         # Shadow the scene
-        if self.shadow_fn is not None:
-            features_dc = self.shadow_fn(self.features_dc)
-            features_rest = self.shadow_fn(self.features_rest)
-        else:
-            features_dc = self.features_dc
-            features_rest = self.features_rest
+        # if self.shadow_fn is not None:
+        #     features_dc = self.shadow_fn(self.features_dc)
+        #     features_rest = self.shadow_fn(self.features_rest)
+        # else:
+        #     features_dc = self.features_dc
+        #     features_rest = self.features_rest
+        features_dc = self.features_dc
+        features_rest = self.features_rest
 
         if crop_ids is not None:
             opacities_crop = self.opacities[crop_ids]
@@ -982,11 +1015,43 @@ class ShadowSplatModel(Model):
         if background.shape[0] == 3 and not self.training:
             background = background.expand(H, W, 3)
 
+        # RENDER SHADOW WEIGHTS
+        if self.lighting_weights is not None:
+            render_shadow, _, _ = rasterization(
+                means=means_crop,
+                quats=quats_crop,  # rasterization does normalization internally
+                scales=torch.exp(scales_crop),
+                opacities=torch.sigmoid(opacities_crop).squeeze(-1),
+                colors=self.lighting_weights.expand(-1, 3),
+                viewmats=viewmat,  # [1, 4, 4]
+                Ks=K,  # [1, 3, 3]
+                width=W,
+                height=H,
+                packed=False,
+                near_plane=0.01,
+                far_plane=1e10,
+                render_mode="RGB",
+                sh_degree=None,
+                sparse_grad=False,
+                absgrad=self.strategy.absgrad
+                if isinstance(self.strategy, DefaultStrategy)
+                else False,
+                rasterize_mode=self.config.rasterize_mode,
+                # set some threshold to disregrad small gaussians for faster rendering.
+                # radius_clip=3.0,
+            )
+
         return {
             "rgb": rgb.squeeze(0),  # type: ignore
             "depth": depth_im,  # type: ignore
             "accumulation": alpha.squeeze(0),  # type: ignore
             "background": background,  # type: ignore
+            "shadow_weights": render_shadow.squeeze(0)
+            if self.lighting_weights is not None
+            else None,  # type: ignore
+            "shadowed_rgb": render_shadow.squeeze(0) * rgb.squeeze(0)
+            if self.lighting_weights is not None
+            else None,  # type: ignore
         }  # type: ignore
 
     def get_gt_img(self, image: torch.Tensor):
@@ -1047,7 +1112,8 @@ class ShadowSplatModel(Model):
         gt_img = self.composite_with_background(
             self.get_gt_img(batch["image"]), outputs["background"]
         )
-        pred_img = outputs["rgb"]
+        # pred_img = outputs["rgb"]
+        pred_img = outputs["shadowed_rgb"]
 
         # Set masked part of both ground-truth and rendered image to black.
         # This is a little bit sketchy for the SSIM loss.

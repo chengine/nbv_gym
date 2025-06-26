@@ -57,12 +57,25 @@ class ShadowSplatPipeline(VanillaPipeline):
             step: current iteration step to update sampler if using DDP (distributed)
         """
         cameras, batch, light = self.datamanager.next_train(step)
-        self._model.update_light_source(light)  # added
-        model_outputs = self._model(
-            cameras
-        )  # train distributed data parallel model if world_size > 1
+        # import torch
+
+        # with torch.no_grad():
+        #     if step >= 500:
+        #         self._model.update_light_source(light)  # added
+        # if step >= 500:
+        #     model_outputs = self._model(cameras, light)
+        # else:
+        #     model_outputs = self._model(cameras)
+        model_outputs = self._model(cameras, light)
         metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
         loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
+
+        # import matplotlib.pyplot as plt
+
+        # fig, ax = plt.subplots(1, 2)
+        # ax[0].imshow(batch["image"].detach().cpu().numpy())
+        # ax[1].imshow(model_outputs["rgb"].detach().cpu().numpy())
+        # plt.show()
 
         return model_outputs, loss_dict, metrics_dict
 

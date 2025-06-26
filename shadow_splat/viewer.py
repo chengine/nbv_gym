@@ -15,6 +15,8 @@ class CustomViewer(Viewer):
         # Initialize the parent Viewer class
         super().__init__(*args, **kwargs)
 
+        print("CustomViewer | __init__")
+
         tabs = self.viser_server.gui.add_tab_group()
         lighting_tab = tabs.add_tab("Light", viser.Icon.SUN)
 
@@ -33,14 +35,14 @@ class CustomViewer(Viewer):
             label="Radius", min=0.0, max=10.0, step=0.1, initial_value=1.0
         )
         self.dim_slider = self.viser_server.gui.add_slider(
-            label="Dimension", min=0.0, max=2000.0, step=1.0, initial_value=1200
+            label="Dimension", min=0.0, max=2000.0, step=1.0, initial_value=2000
         )
         self.focal_length_slider = self.viser_server.gui.add_slider(
             label="Focal length", min=0.0, max=3000.0, step=1.0, initial_value=1650
         )
 
         self.variance_factor_slider = self.viser_server.gui.add_slider(
-            label="Variance factor", min=0.0, max=5.0, step=0.05, initial_value=0.1
+            label="Variance factor", min=0.0, max=1.0, step=0.01, initial_value=0.001
         )
 
         self.red_intensity_slider = self.viser_server.gui.add_slider(
@@ -79,7 +81,7 @@ class CustomViewer(Viewer):
         self.camera_type_select.on_update(self.update_light_source_pose)
 
         # Add light source camera
-        self.light_source_visualizer = self.viser_server.add_camera_frustum(
+        self.light_source_visualizer = self.viser_server.scene.add_camera_frustum(
             name="/light",
             fov=90.0,
             aspect=1.0,
@@ -165,17 +167,6 @@ def camera_to_world_transform(azimuth_rad, elevation_rad, origin, radius):
     y = radius * torch.cos(elevation_rad) * torch.sin(azimuth_rad)
     z = radius * torch.sin(elevation_rad)
     camera_position = torch.tensor([x, y, z]) + origin
-
-    # # Compute the forward, right, and up vectors
-    # forward = -camera_position / torch.norm(camera_position)  # Normalize
-    # up = torch.tensor([0.0, 0.0, 1.0])
-    # right = torch.cross(up, forward)
-    # right = right / torch.norm(right)  # Normalize
-    # up = torch.cross(forward, right)  # Re-compute the up vector to ensure orthogonality
-
-    # # Construct the rotation matrix
-    # rotation_matrix = torch.stack([right, up, -forward], dim=1)  # 3x3 rotation matrix
-
     up = torch.tensor([0.0, 0.0, 1.0])
     rotation_matrix = look_at(camera_position, origin, up)
 
