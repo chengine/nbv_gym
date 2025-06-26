@@ -469,6 +469,7 @@ class ShadowSplatModel(Model):
         reduce: Optional[Literal["mean", "amax", "amin"]] = "amax",
         variance_factor: Optional[float] = 0.001,
         intensity: Optional[List[float]] = [1.0, 1.0, 1.0],
+        cutoff: Optional[float] = 0.1,
     ):
         """Update the light source, generating a new shadow function for the scene."""
 
@@ -605,7 +606,7 @@ class ShadowSplatModel(Model):
         weights, _ = render_weight_from_alpha(alphas, ray_indices=indices, n_rays=total_pixels)
 
         ### TODO: FIND ALL GAUSSIAN PIXEL INTERSECTIONS IN THE PROJECTION STEP (NOT THE RASTERIZATION STEP)
-
+        ### TODO: REPLACE ADVANCED INDEXING WITH MULTIPLICATION AND ADDITION FOR FASTER COMPUTATION
         # Calculate the distance of rasterized Gaussians to the light source to get logistic parameters
         means_rasterized_camera = means_camera_space[gs_ids]
         distances = -means_rasterized_camera[:, 2]  # torch.norm(diff, dim=-1)
@@ -639,6 +640,9 @@ class ShadowSplatModel(Model):
         ]
 
         sigmoid_weights = 1.0 - torch.sigmoid(sigmoid_argument)
+
+        lit_mask = (sigmoid_weights > cutoff)
+        sigmoid_weights = torch.clamp(sigmoid_weights + lit_mask, 0., 1.)
 
         # Way to reduce sigmoid weights into n_gaussians
         # NOTE: IF WE SET THE DEFAULT TO 1, THEN GAUSSIANS NOT IN THE FRUSTUM ARE WELL-LIT

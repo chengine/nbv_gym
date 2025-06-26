@@ -45,6 +45,10 @@ class CustomViewer(Viewer):
             label="Variance factor", min=0.0, max=1.0, step=0.01, initial_value=0.001
         )
 
+        self.cutoff_slider = self.viser_server.gui.add_slider(
+            label="Cutoff", min=0.0, max=1.0, step=0.01, initial_value=0.5
+        )
+
         self.red_intensity_slider = self.viser_server.gui.add_slider(
             label="Red intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
         )
@@ -77,6 +81,7 @@ class CustomViewer(Viewer):
         self.red_intensity_slider.on_update(self.update_light_source_pose)
         self.green_intensity_slider.on_update(self.update_light_source_pose)
         self.blue_intensity_slider.on_update(self.update_light_source_pose)
+        self.cutoff_slider.on_update(self.update_light_source_pose)
         self.origin_input.on_update(self.update_light_source_pose)
         self.camera_type_select.on_update(self.update_light_source_pose)
 
@@ -101,6 +106,7 @@ class CustomViewer(Viewer):
         dimension = self.dim_slider.value
         focal_length = self.focal_length_slider.value
         variance_factor = self.variance_factor_slider.value
+        cutoff = self.cutoff_slider.value
         red_intensity = self.red_intensity_slider.value
         green_intensity = self.green_intensity_slider.value
         blue_intensity = self.blue_intensity_slider.value
@@ -135,6 +141,7 @@ class CustomViewer(Viewer):
                 light_source,
                 variance_factor=variance_factor,
                 intensity=[red_intensity, green_intensity, blue_intensity],
+                cutoff=cutoff,
             )
 
         cv_to_gl = torch.tensor(
