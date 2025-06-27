@@ -30,7 +30,10 @@ shadow_splat = MethodSpecification(
                 dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
                 cache_images_type="uint8",
             ),
-            model=ShadowSplatModelConfig(),
+            model=ShadowSplatModelConfig(
+                # reset_alpha_every=1000000,
+                # cull_alpha_thresh=0.001,
+            ),
         ),
         optimizers={
             "means": {

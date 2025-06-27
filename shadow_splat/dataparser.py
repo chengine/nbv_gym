@@ -64,12 +64,12 @@ class ShadowSplatDataParser(Nerfstudio):
         inds = np.argsort(fnames)
         frames = [meta["frames"][ind] for ind in inds]
 
-        print("dataparser | num frames", len(frames))
+        # print("dataparser | num frames", len(frames))
 
         # Load 3D points
         # print("dataparser | config.load_3D_points", self.config.load_3D_points)
         # if self.config.load_3D_points:  # NOTE: for some reason this is False even though we set it to True in the method config
-        print("dataparser | loading 3D points")
+        # print("dataparser | loading 3D points")
         if "ply_file_path" in meta:
             ply_file_path = data_dir / meta["ply_file_path"]
             if ply_file_path:
