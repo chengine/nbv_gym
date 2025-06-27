@@ -11,8 +11,9 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from pytorch_msssim import SSIM
 
 # Model type
-model_type = "splatfacto" # "shadow-splat" or "splatfacto"
-dataset_name = "o3d_el45_az60"
+model_type = "shadow-splat" # "shadow-splat" or "splatfacto"
+dataset_name = "multi_light" # "o3d_el45_az60" or "multi_light"
+albedo = True
 
 # Looks at the directory and looks for the latest checkpoint
 config_path = Path(f"outputs/{dataset_name}/{model_type}/")
@@ -22,9 +23,7 @@ latest_folder = max(config_path.glob("*"), key=os.path.getctime)
 
 config_path = Path(f"{latest_folder}/config.yml")
 
-# Directory to save results
-results_dir = Path(f"/home/chengine/Research/shadow_splat/results/{dataset_name}/{model_type}/{latest_folder.name}")
-results_dir.mkdir(parents=True, exist_ok=True)
+print("Loading model from: ", config_path)
 
 # Load pipeline
 pipeline = GaussianSplat(config_path, dataset_mode="train", device="cuda")
@@ -33,7 +32,11 @@ pipeline = GaussianSplat(config_path, dataset_mode="train", device="cuda")
 cameras = pipeline.get_cameras()
 
 # Load the light source
-light_sources = pipeline.get_light_source()
+if not albedo:
+    light_sources = pipeline.get_light_source()
+else:
+    light_sources = None
+    model_type = "shadow-splat-albedo"
 
 # Load images
 images = pipeline.get_images()
@@ -41,6 +44,10 @@ images = pipeline.get_images()
 print("Number of cameras: ", len(cameras))
 print("Number of light sources: ", len(light_sources) if light_sources is not None else 0)
 print("Number of images: ", len(images))
+
+# Directory to save results
+results_dir = Path(f"/home/chengine/Research/shadow_splat/results/{dataset_name}/{model_type}/{latest_folder.name}")
+results_dir.mkdir(parents=True, exist_ok=True)
 
 # Initialize metrics
 psnr_metric = PeakSignalNoiseRatio(data_range=1.0)
@@ -56,6 +63,8 @@ for idx in range(len(cameras)):
         outputs = pipeline.render(cameras[idx:idx+1], light_sources[idx:idx+1] if light_sources is not None else None)
     elif model_type == "splatfacto":
         outputs = pipeline.render(cameras[idx:idx+1])
+    elif model_type == "shadow-splat-albedo":
+        outputs = pipeline.render(cameras[idx:idx+1], None)
     else:
         raise ValueError(f"Invalid model type: {model_type}")
 
