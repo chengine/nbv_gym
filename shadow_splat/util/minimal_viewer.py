@@ -99,14 +99,8 @@ class MinimalViewer:
         self.variance_factor_slider = self.viser_server.gui.add_slider(
             label="Variance factor", min=0.0, max=1.0, step=0.01, initial_value=0.001
         )
-        self.red_intensity_slider = self.viser_server.gui.add_slider(
-            label="Red intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
-        )
-        self.green_intensity_slider = self.viser_server.gui.add_slider(
-            label="Green intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
-        )
-        self.blue_intensity_slider = self.viser_server.gui.add_slider(
-            label="Blue intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
+        self.intensity_slider = self.viser_server.gui.add_slider(
+            label="Intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
         )
         self.cutoff_slider = self.viser_server.gui.add_slider(
             label="Cutoff", min=0.0, max=1.0, step=0.01, initial_value=0.5
@@ -128,9 +122,7 @@ class MinimalViewer:
         self.dim_slider.on_update(self.update_light_source_pose)
         self.focal_length_slider.on_update(self.update_light_source_pose)
         self.variance_factor_slider.on_update(self.update_light_source_pose)
-        self.red_intensity_slider.on_update(self.update_light_source_pose)
-        self.green_intensity_slider.on_update(self.update_light_source_pose)
-        self.blue_intensity_slider.on_update(self.update_light_source_pose)
+        self.intensity_slider.on_update(self.update_light_source_pose)
         self.origin_input.on_update(self.update_light_source_pose)
         self.camera_type_select.on_update(self.update_light_source_pose)
         self.cutoff_slider.on_update(self.update_light_source_pose)
@@ -156,9 +148,7 @@ class MinimalViewer:
         dimension = self.dim_slider.value
         focal_length = self.focal_length_slider.value
         variance_factor = self.variance_factor_slider.value
-        red_intensity = self.red_intensity_slider.value
-        green_intensity = self.green_intensity_slider.value
-        blue_intensity = self.blue_intensity_slider.value
+        intensity = self.intensity_slider.value
         origin = torch.tensor(self.origin_input.value)
         cutoff = self.cutoff_slider.value
 
@@ -189,7 +179,7 @@ class MinimalViewer:
             shadow_meta = self.model.update_light_source(
                 light_source,
                 variance_factor=variance_factor,
-                intensity=[red_intensity, green_intensity, blue_intensity],
+                intensity=intensity * np.ones(3),
                 cutoff=cutoff,
             )
             # Display depth on camera frustum

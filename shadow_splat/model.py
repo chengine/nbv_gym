@@ -386,7 +386,7 @@ class ShadowSplatModel(Model):
             features_rest = torch.nn.Parameter(torch.zeros((num_points, dim_sh - 1, 3)))
 
         # opacities = torch.nn.Parameter(torch.logit(0.1 * torch.ones(num_points, 1)))
-        opacities = torch.nn.Parameter(torch.logit(0.9 * torch.ones(num_points, 1)))
+        opacities = torch.nn.Parameter(torch.logit(0.1 * torch.ones(num_points, 1)))
         self.gauss_params = torch.nn.ParameterDict(
             {
                 "means": means,
@@ -485,11 +485,11 @@ class ShadowSplatModel(Model):
 
         # Use learnable parameters if not provided
         if variance_factor is None:
-            variance_factor = self.light_params["variance_factor"]
+            variance_factor = torch.exp(self.light_params["variance_factor"])
         if intensity is None:
-            intensity = self.light_params["intensity"].squeeze()
+            intensity = torch.exp(self.light_params["intensity"])
         if cutoff is None:
-            cutoff = self.light_params["cutoff"]
+            cutoff = torch.sigmoid(self.light_params["cutoff"])
 
         ######
         # Investigate if this is optimizing the light source pose
@@ -1148,8 +1148,8 @@ class ShadowSplatModel(Model):
             self.get_gt_img(batch["image"]), outputs["background"]
         )
         pred_img = outputs["rgb"]
-        lit_mask = torch.sigmoid(10 * (outputs["shadow_weights"] - self.light_params["cutoff"]))
-        # lit_mask = outputs["shadow_weights"] ** 2
+        lit_mask = outputs["shadow_weights"] > self.light_params["cutoff"]
+        # lit_mask = torch.sigmoid(10 * (outputs["shadow_weights"] - self.light_params["cutoff"]))
         gt_img = gt_img * lit_mask
         pred_img = pred_img * lit_mask
 
@@ -1180,14 +1180,15 @@ class ShadowSplatModel(Model):
         else:
             scale_reg = torch.tensor(0.0).to(self.device)
 
-        # Sparsity regularizer
-        sparsity_loss = 0.0 * torch.sigmoid(self.opacities).mean()
+        # Sparsity regularization
+        # avg_opacity = torch.sigmoid(self.opacities).mean()
+        # sparsity_loss = 0.01 * avg_opacity
+        # print("loss | average opacity", avg_opacity)
 
         loss_dict = {
-            "main_loss": (1 - self.config.ssim_lambda) * Ll1
-            + self.config.ssim_lambda * simloss
-            + sparsity_loss,
+            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss,
             "scale_reg": scale_reg,
+            # "sparsity_loss": sparsity_loss,
         }
 
         # Losses for mcmc

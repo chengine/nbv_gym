@@ -27,10 +27,15 @@ shadow_splat = MethodSpecification(
         mixed_precision=False,
         pipeline=ShadowSplatPipelineConfig(
             datamanager=ShadowSplatDataManagerConfig(
-                dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
+                dataparser=ShadowSplatDataParserConfig(
+                    load_3D_points=True, train_split_fraction=1.0
+                ),
                 cache_images_type="uint8",
             ),
-            model=ShadowSplatModelConfig(),
+            model=ShadowSplatModelConfig(
+                # reset_alpha_every=1000000,
+                # cull_alpha_thresh=0.001,
+            ),
         ),
         optimizers={
             "means": {
