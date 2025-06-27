@@ -75,6 +75,42 @@ def apply_weight_to_RGB(
     ### TODO: How to handle spherical harmonics???
     if input.dim() == 3:  # higher order spherical harmonics
         new_color = input
+        # new_color = weights[:, None, :] * SH2RGB(
+        #     input
+        # )  # NOTE: THIS IS THE ORIGINAL LINEAR WEIGHTING
+        # update_color_mask = weights.squeeze(-1) < 1.0
+
+        # updated_color = new_color[update_color_mask]
+
+        # # Apply tonemapping to the color
+        # updated_color[:, :, 0] *= intensity[0]
+        # updated_color[:, :, 1] *= intensity[1]
+        # updated_color[:, :, 2] *= intensity[2]
+
+        # # Does Reinhard tonemapping
+        # if tonemapping_type == "reinhard":
+        #     updated_color /= updated_color + 1.0
+
+        # # Does luminance tonemapping
+        # elif tonemapping_type == "luminance":
+        #     luminance = (
+        #         0.2126 * updated_color[:, :, 0]
+        #         + 0.7152 * updated_color[:, :, 1]
+        #         + 0.0722 * updated_color[:, :, 2]
+        #     )
+        #     updated_color /= (luminance + 1.0)[:, None, None]
+
+        # # Does linear tonemapping
+        # elif tonemapping_type == "linear":
+        #     updated_color = torch.clamp(updated_color, min=0.0, max=1.0)
+
+        # # Does gamma correction # NOTE: leads to nans during training
+        # # if gamma_correction:
+        # #     updated_color = updated_color ** (1.0 / 2.2)
+
+        # new_color[update_color_mask] = updated_color
+        # new_color = RGB2SH(new_color)
+
     else:  # direct color
         new_color = weights * SH2RGB(input)  # NOTE: THIS IS THE ORIGINAL LINEAR WEIGHTING
         update_color_mask = weights.squeeze(-1) < 1.0
@@ -277,7 +313,7 @@ class ShadowSplatModelConfig(ModelConfig):
     """weight of ssim loss"""
     stop_split_at: int = 15000
     """stop splitting at this step"""
-    sh_degree: int = 0
+    sh_degree: int = 3
     """maximum degree of spherical harmonics to use"""
     use_scale_regularization: bool = False
     """If enabled, a scale regularization introduced in PhysGauss (https://xpandora.github.io/PhysGaussian/) is used for reducing huge spikey gaussians."""
@@ -379,7 +415,8 @@ class ShadowSplatModel(Model):
             features_dc = torch.nn.Parameter(torch.rand(num_points, 3))
             features_rest = torch.nn.Parameter(torch.zeros((num_points, dim_sh - 1, 3)))
 
-        opacities = torch.nn.Parameter(torch.logit(0.1 * torch.ones(num_points, 1)))
+        # opacities = torch.nn.Parameter(torch.logit(0.1 * torch.ones(num_points, 1)))
+        opacities = torch.nn.Parameter(torch.logit(0.9 * torch.ones(num_points, 1)))
         self.gauss_params = torch.nn.ParameterDict(
             {
                 "means": means,
@@ -388,6 +425,13 @@ class ShadowSplatModel(Model):
                 "features_dc": features_dc,
                 "features_rest": features_rest,
                 "opacities": opacities,
+            }
+        )
+        self.light_params = torch.nn.ParameterDict(
+            {
+                "intensity": torch.nn.Parameter(torch.log(torch.ones(3))),
+                "cutoff": torch.nn.Parameter(torch.log(torch.tensor(0.5))),
+                "variance_factor": torch.nn.Parameter(torch.logit(torch.tensor(0.01))),
             }
         )
 
@@ -467,11 +511,19 @@ class ShadowSplatModel(Model):
         light_source: Cameras,
         mask: Optional[torch.Tensor] = None,
         reduce: Optional[Literal["mean", "amax", "amin"]] = "amax",
-        variance_factor: Optional[float] = 0.001,
-        intensity: Optional[List[float]] = [1.0, 1.0, 1.0],
-        cutoff: Optional[float] = 0.5,
+        variance_factor: Optional[float] = None,
+        intensity: Optional[List[float]] = None,
+        cutoff: Optional[float] = None,
     ):
         """Update the light source, generating a new shadow function for the scene."""
+
+        # Use learnable parameters if not provided
+        if variance_factor is None:
+            variance_factor = self.light_params["variance_factor"]
+        if intensity is None:
+            intensity = self.light_params["intensity"].squeeze()
+        if cutoff is None:
+            cutoff = self.light_params["cutoff"]
 
         ######
         # Investigate if this is optimizing the light source pose
@@ -641,8 +693,17 @@ class ShadowSplatModel(Model):
 
         sigmoid_weights = 1.0 - torch.sigmoid(sigmoid_argument)
 
-        lit_mask = (sigmoid_weights > cutoff)
-        sigmoid_weights = torch.clamp(sigmoid_weights + lit_mask, 0., 1.)
+        # Use learnable cutoff parameter for differentiable masking
+        if self.training:
+            smooth_mask = torch.sigmoid(
+                (sigmoid_weights - cutoff) * 10.0
+            )  # 10.0 controls sharpness
+            # Apply the smooth mask to create differentiable lighting weights
+            sigmoid_weights = smooth_mask + (1.0 - smooth_mask) * sigmoid_weights
+        else:
+            # During evaluation, use the provided cutoff for consistency
+            lit_mask = sigmoid_weights > cutoff
+            sigmoid_weights = torch.clamp(sigmoid_weights + lit_mask, 0.0, 1.0)
 
         # Way to reduce sigmoid weights into n_gaussians
         # NOTE: IF WE SET THE DEFAULT TO 1, THEN GAUSSIANS NOT IN THE FRUSTUM ARE WELL-LIT
@@ -654,8 +715,8 @@ class ShadowSplatModel(Model):
         self.lighting_weights = weights_.unsqueeze(-1)
 
         # During training, detach the lighting weights to prevent gradient issues
-        if self.training:
-            self.lighting_weights = self.lighting_weights.detach()
+        # if self.training:
+        #     self.lighting_weights = self.lighting_weights.detach()
 
         self.shadow_fn = lambda x: apply_weight_to_RGB(x, self.lighting_weights, intensity)
 
@@ -796,6 +857,11 @@ class ShadowSplatModel(Model):
             for name in ["means", "scales", "quats", "features_dc", "features_rest", "opacities"]
         }
 
+    def get_light_param_groups(self) -> Dict[str, List[Parameter]]:
+        return {
+            name: [self.light_params[name]] for name in ["intensity", "cutoff", "variance_factor"]
+        }
+
     def get_param_groups(self) -> Dict[str, List[Parameter]]:
         """Obtain the parameter groups for the optimizers
 
@@ -806,6 +872,7 @@ class ShadowSplatModel(Model):
         if self.config.use_bilateral_grid:
             gps["bilateral_grid"] = list(self.bil_grids.parameters())
         self.camera_optimizer.get_param_groups(param_groups=gps)
+        gps.update(self.get_light_param_groups())
         # gps['reweighting_param'] = [self.reweighting_param]
         return gps
 
@@ -897,7 +964,12 @@ class ShadowSplatModel(Model):
             return {}
 
         if light is not None:
-            self.update_light_source(light)
+            self.update_light_source(
+                light,
+                variance_factor=torch.exp(self.light_params["variance_factor"]),
+                intensity=torch.exp(self.light_params["intensity"]),
+                cutoff=torch.sigmoid(self.light_params["cutoff"]),
+            )
 
         if self.training:
             assert camera.shape[0] == 1, "Only one camera at a time"
@@ -1010,11 +1082,43 @@ class ShadowSplatModel(Model):
         if background.shape[0] == 3 and not self.training:
             background = background.expand(H, W, 3)
 
+        # RENDER SHADOW WEIGHTS
+        if self.lighting_weights is not None:
+            render_shadow, _, _ = rasterization(
+                means=means_crop,
+                quats=quats_crop,  # rasterization does normalization internally
+                scales=torch.exp(scales_crop),
+                opacities=torch.sigmoid(opacities_crop).squeeze(-1),
+                colors=self.lighting_weights.expand(-1, 3),
+                viewmats=viewmat,  # [1, 4, 4]
+                Ks=K,  # [1, 3, 3]
+                width=W,
+                height=H,
+                packed=False,
+                near_plane=0.01,
+                far_plane=1e10,
+                render_mode="RGB",
+                sh_degree=None,
+                sparse_grad=False,
+                absgrad=self.strategy.absgrad
+                if isinstance(self.strategy, DefaultStrategy)
+                else False,
+                rasterize_mode=self.config.rasterize_mode,
+                # set some threshold to disregrad small gaussians for faster rendering.
+                # radius_clip=3.0,
+            )
+
         return {
             "rgb": rgb.squeeze(0),  # type: ignore
             "depth": depth_im,  # type: ignore
             "accumulation": alpha.squeeze(0),  # type: ignore
             "background": background,  # type: ignore
+            "shadow_weights": render_shadow.squeeze(0)
+            if self.lighting_weights is not None
+            else None,  # type: ignore
+            "shadowed_rgb": render_shadow.squeeze(0) * rgb.squeeze(0)
+            if self.lighting_weights is not None
+            else None,  # type: ignore
         }  # type: ignore
 
     def get_gt_img(self, image: torch.Tensor):
@@ -1076,6 +1180,10 @@ class ShadowSplatModel(Model):
             self.get_gt_img(batch["image"]), outputs["background"]
         )
         pred_img = outputs["rgb"]
+        lit_mask = torch.sigmoid(10 * (outputs["shadow_weights"] - self.light_params["cutoff"]))
+        # lit_mask = outputs["shadow_weights"] ** 2
+        gt_img = gt_img * lit_mask
+        pred_img = pred_img * lit_mask
 
         # Set masked part of both ground-truth and rendered image to black.
         # This is a little bit sketchy for the SSIM loss.
@@ -1104,8 +1212,13 @@ class ShadowSplatModel(Model):
         else:
             scale_reg = torch.tensor(0.0).to(self.device)
 
+        # Sparsity regularizer
+        sparsity_loss = 0.0 * torch.sigmoid(self.opacities).mean()
+
         loss_dict = {
-            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss,
+            "main_loss": (1 - self.config.ssim_lambda) * Ll1
+            + self.config.ssim_lambda * simloss
+            + sparsity_loss,
             "scale_reg": scale_reg,
         }
 

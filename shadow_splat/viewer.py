@@ -21,9 +21,26 @@ class CustomViewer(Viewer):
         lighting_tab = tabs.add_tab("Light", viser.Icon.SUN)
 
         with lighting_tab:
-            self._add_light_source_slider()
+            # Extract pipeline from kwargs
+            pipeline = kwargs["pipeline"]
 
-    def _add_light_source_slider(self):
+            # Get initial light parameters from pipeline model
+            initial_variance_factor = torch.exp(
+                pipeline.model.light_params["variance_factor"]
+            ).item()
+            initial_cutoff = torch.sigmoid(pipeline.model.light_params["cutoff"]).item()
+            initial_intensity = (
+                torch.exp(pipeline.model.light_params["intensity"]).detach().cpu().numpy()
+            )
+            self._add_light_source_slider(
+                initial_variance_factor=initial_variance_factor,
+                initial_cutoff=initial_cutoff,
+                initial_intensity=initial_intensity,
+            )
+
+    def _add_light_source_slider(
+        self, initial_variance_factor=0.01, initial_cutoff=0.5, initial_intensity=np.ones(3)
+    ):
         """Add a slider to the control panel for adjusting the light source position."""
         self.az_slider = self.viser_server.gui.add_slider(
             label="Azimuth", min=0.0, max=360.0, step=0.1, initial_value=0.0
@@ -42,23 +59,27 @@ class CustomViewer(Viewer):
         )
 
         self.variance_factor_slider = self.viser_server.gui.add_slider(
-            label="Variance factor", min=0.0, max=1.0, step=0.01, initial_value=0.001
+            label="Variance factor",
+            min=0.0,
+            max=1.0,
+            step=0.01,
+            initial_value=initial_variance_factor,
         )
 
         self.cutoff_slider = self.viser_server.gui.add_slider(
-            label="Cutoff", min=0.0, max=1.0, step=0.01, initial_value=0.5
+            label="Cutoff", min=0.0, max=1.0, step=0.01, initial_value=initial_cutoff
         )
 
         self.red_intensity_slider = self.viser_server.gui.add_slider(
-            label="Red intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
+            label="Red intensity", min=0.0, max=10.0, step=0.1, initial_value=initial_intensity[0]
         )
 
         self.green_intensity_slider = self.viser_server.gui.add_slider(
-            label="Green intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
+            label="Green intensity", min=0.0, max=10.0, step=0.1, initial_value=initial_intensity[1]
         )
 
         self.blue_intensity_slider = self.viser_server.gui.add_slider(
-            label="Blue intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
+            label="Blue intensity", min=0.0, max=10.0, step=0.1, initial_value=initial_intensity[2]
         )
 
         self.origin_input = self.viser_server.gui.add_vector3(

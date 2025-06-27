@@ -108,6 +108,9 @@ class MinimalViewer:
         self.blue_intensity_slider = self.viser_server.gui.add_slider(
             label="Blue intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
         )
+        self.cutoff_slider = self.viser_server.gui.add_slider(
+            label="Cutoff", min=0.0, max=1.0, step=0.01, initial_value=0.5
+        )
         self.origin_input = self.viser_server.gui.add_vector3(
             label="Origin",
             step=0.1,
@@ -130,6 +133,7 @@ class MinimalViewer:
         self.blue_intensity_slider.on_update(self.update_light_source_pose)
         self.origin_input.on_update(self.update_light_source_pose)
         self.camera_type_select.on_update(self.update_light_source_pose)
+        self.cutoff_slider.on_update(self.update_light_source_pose)
 
         # Add light source camera
         self.light_source_visualizer = self.viser_server.scene.add_camera_frustum(
@@ -156,6 +160,7 @@ class MinimalViewer:
         green_intensity = self.green_intensity_slider.value
         blue_intensity = self.blue_intensity_slider.value
         origin = torch.tensor(self.origin_input.value)
+        cutoff = self.cutoff_slider.value
 
         if self.camera_type_select.value == "Perspective":
             camera_type = CameraType.PERSPECTIVE
@@ -185,6 +190,7 @@ class MinimalViewer:
                 light_source,
                 variance_factor=variance_factor,
                 intensity=[red_intensity, green_intensity, blue_intensity],
+                cutoff=cutoff,
             )
             # Display depth on camera frustum
             # depth = shadow_meta["depth"].squeeze()
