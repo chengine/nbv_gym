@@ -65,8 +65,7 @@ from nerfstudio.utils.spherical_harmonics import RGB2SH, SH2RGB, num_sh_bases
 from gsplat.cuda._wrapper import rasterize_to_indices_in_range
 from nerfacc import render_weight_from_alpha
 
-from shadow_splat.slim_rasterization import slim_rasterization
-
+# from shadow_splat.slim_rasterization import slim_rasterization
 
 # @torch.compile
 def apply_weight_to_RGB(
