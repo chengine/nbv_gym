@@ -81,9 +81,31 @@ class ShadowSplatDataParser(Nerfstudio):
                 if sparse_points is not None:
                     dataparser_outputs.metadata.update(sparse_points)
 
+        # Get the same indices that were used for cameras in the parent method
+        # This ensures lights and cameras have the same split
+        camera_indices = dataparser_outputs.image_filenames
+        print("dataparser | num cameras", len(camera_indices))
+
+        # Create a mapping from camera filenames to frame indices
+        filename_to_frame_idx = {}
+        for i, frame in enumerate(frames):
+            filepath = Path(frame["file_path"])
+            fname = self._get_fname(filepath, data_dir)
+            filename_to_frame_idx[fname] = i
+
+        # Get the frame indices corresponding to the split cameras
+        split_frame_indices = []
+        for camera_filename in camera_indices:
+            if camera_filename in filename_to_frame_idx:
+                split_frame_indices.append(filename_to_frame_idx[camera_filename])
+            else:
+                # Fallback: use the same index if filename mapping fails
+                split_frame_indices.append(len(split_frame_indices))
+
+        # Load light poses only for the split frames
         light_poses = []
-        for frame in frames:
-            light_poses.append(np.array(frame["light_pose"]))
+        for frame_idx in split_frame_indices:
+            light_poses.append(np.array(frames[frame_idx]["light_pose"]))
 
         light_poses = torch.from_numpy(np.array(light_poses).astype(np.float32))
 

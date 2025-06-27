@@ -80,6 +80,7 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
         )
         # print(self.train_dataparser_outputs.lights)
         print("datamanager init | num cameras: ", len(self.train_dataset.cameras))
+        print("datamanager init | num lights: ", len(self.train_dataparser_outputs.lights))
 
     def next_train(self, step: int) -> Tuple[Cameras, Dict, Cameras]:
         """Returns the next training batch

@@ -73,48 +73,49 @@ if __name__ == "__main__":
     #     "seed points", points.cpu().numpy(), 0.5 * colors.cpu().numpy(), point_size=1e-3
     # )
 
-    import matplotlib.pyplot as plt
-    from nerfstudio.cameras.cameras import Cameras, CameraType
+    # import matplotlib.pyplot as plt
+    # from nerfstudio.cameras.cameras import Cameras, CameraType
 
-    cam_pose = torch.tensor(
-        [
-            [0.9961710408648277, -0.009231897826373096, 0.0869369277396496, 0.08693692773964962],
-            [0.08742572471695988, 0.10519271411966656, -0.9906014514192135, -0.9906014514192136],
-            [-0.0, 0.994409002854792, 0.10559704087396808, 0.1055970408739681],
-            [0.0, 0.0, 0.0, 1.0],
-        ]
-    )
-    light_pose = torch.tensor(
-        [
-            [-0.8090169943749473, -0.34549150281252644, 0.4755282581475768, 0.4755282581475768],
-            [0.5877852522924732, -0.4755282581475768, 0.6545084971874736, 0.6545084971874736],
-            [0.0, 0.8090169943749475, 0.5877852522924732, 0.5877852522924732],
-            [0.0, 0.0, 0.0, 1.0],
-        ]
-    )
-    camera = Cameras(
-        camera_to_worlds=cam_pose.unsqueeze(0),
-        fx=1350.7389543325814,
-        fy=1350.7389543325814,
-        cx=640.0,
-        cy=360.0,
-        width=1280,
-        height=720,
-        camera_type=CameraType.PERSPECTIVE,
-    ).to(device)
-    light = Cameras(
-        camera_to_worlds=light_pose.unsqueeze(0),
-        fx=1650.0,
-        fy=1650.0,
-        cx=1000.0,
-        cy=1000.0,
-        width=2000,
-        height=2000,
-        camera_type=CameraType.ORTHOPHOTO,
-    ).to(device)
-    out = model(camera, light)
-    plt.imshow(out["rgb"].detach().cpu().numpy())
-    plt.show()
+    # # For solar_progression_6/view_0002_light_0004.png
+    # cam_pose = torch.tensor(
+    #     [
+    #         [0.9961710408648277, -0.009231897826373096, 0.0869369277396496, 0.08693692773964962],
+    #         [0.08742572471695988, 0.10519271411966656, -0.9906014514192135, -0.9906014514192136],
+    #         [-0.0, 0.994409002854792, 0.10559704087396808, 0.1055970408739681],
+    #         [0.0, 0.0, 0.0, 1.0],
+    #     ]
+    # )
+    # light_pose = torch.tensor(
+    #     [
+    #         [-0.8090169943749473, -0.34549150281252644, 0.4755282581475768, 0.4755282581475768],
+    #         [0.5877852522924732, -0.4755282581475768, 0.6545084971874736, 0.6545084971874736],
+    #         [0.0, 0.8090169943749475, 0.5877852522924732, 0.5877852522924732],
+    #         [0.0, 0.0, 0.0, 1.0],
+    #     ]
+    # )
+    # camera = Cameras(
+    #     camera_to_worlds=cam_pose.unsqueeze(0),
+    #     fx=1350.7389543325814,
+    #     fy=1350.7389543325814,
+    #     cx=640.0,
+    #     cy=360.0,
+    #     width=1280,
+    #     height=720,
+    #     camera_type=CameraType.PERSPECTIVE,
+    # ).to(device)
+    # light = Cameras(
+    #     camera_to_worlds=light_pose.unsqueeze(0),
+    #     fx=1650.0,
+    #     fy=1650.0,
+    #     cx=1000.0,
+    #     cy=1000.0,
+    #     width=2000,
+    #     height=2000,
+    #     camera_type=CameraType.ORTHOPHOTO,
+    # ).to(device)
+    # out = model(camera, light)
+    # plt.imshow(out["rgb"].detach().cpu().numpy())
+    # plt.show()
 
     while True:
         time.sleep(1.0)
