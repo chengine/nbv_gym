@@ -34,6 +34,10 @@ except ImportError:
     print("Please install gsplat>=1.0.0")
 from pytorch_msssim import SSIM
 from torch.nn import Parameter
+from torchmetrics.image import PeakSignalNoiseRatio
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+
+import torch.nn.functional as tf
 import math
 from nerfstudio.cameras.camera_optimizers import CameraOptimizer, CameraOptimizerConfig
 from nerfstudio.cameras.cameras import Cameras, CameraType
@@ -61,8 +65,7 @@ from nerfstudio.utils.spherical_harmonics import RGB2SH, SH2RGB, num_sh_bases
 from gsplat.cuda._wrapper import rasterize_to_indices_in_range
 from nerfacc import render_weight_from_alpha
 
-from shadow_splat.slim_rasterization import slim_rasterization
-
+# from shadow_splat.slim_rasterization import slim_rasterization
 
 # @torch.compile
 def apply_weight_to_RGB(
@@ -186,42 +189,9 @@ def relighting_absorb_mode(meta, weights, device, reduce, reweighting_fn):
     weights_ = torch.ones(N, device=device)
     weights_.scatter_reduce_(0, meta["gs_ids"], weights, reduce=reduce, include_self=False)
 
-    # Determine the gaussians in the lighting frustum
-    # Gaussians within the image dimensions
-    # means2d = meta["means2d"].squeeze(0)
-    # in_frustum_mask = (torch.abs(means2d[:, 0] - meta["width"] / 2) < meta["width"] / 2) & (
-    #     torch.abs(means2d[:, 1] - meta["height"] / 2) < meta["height"] / 2
-    # )
-    # # Gaussians outside the frustum as determined by rasterization
-    # outside_frustum_mask = (meta["radii"].squeeze(0) == 0) | ~in_frustum_mask
-
-    # weights_[outside_frustum_mask] = 1.0  # relight all gaussians outside frustum
-
-    ### TODO: Implement the mask functionality to handle the lack of sorting in the weights.
-    # if mask is not None:
-    #     if len(mask.shape) == 2:
-    #     # if mask is HxW image, just multiply the intensities with the gaussian weights
-    #         light_source_intensity = mask.reshape(-1)
-    #         light_source_intensity_weights = light_source_intensity[pixel_ids[sorted_weights_indices]]
-    #         sorted_weights = sorted_weights * light_source_intensity_weights
-    #     else:
-    #         assert mask.shape[-1] == 3, "Mask must have 3 channels"
-    #         # the mask has associated colors to it.
-    #         light_source_intensity = mask.reshape(-1, 3)
-    #         light_source_intensity_weights = light_source_intensity[pixel_ids[sorted_weights_indices]]
-    #         sorted_weights = sorted_weights[:, None] * light_source_intensity_weights
-
     # Reweighting function uses the rendering weights and maps it through a function to handle how light is absorbed by the gaussians.
     lighting_weights = reweighting_fn(weights_)
 
-    ### TODO: This functionality is to allow for masks and different weights being to applied to the R, G, and B channels.
-    # if len(lighting_weights.shape) == 2:
-    #     new_weights = torch.zeros((self.means.shape[0], 3), device=lighting_weights.device)
-    #     new_weights[img_plane_gs_ids] = 1.0 #lighting_weights
-    # else:
-    #     new_weights = torch.zeros(self.means.shape[0], device=lighting_weights.device)
-    #     new_weights[img_plane_gs_ids] = 1.0 #lighting_weights
-    #     new_weights = new_weights.unsqueeze(-1)
     lighting_weights = lighting_weights.unsqueeze(-1)
 
     return lighting_weights
@@ -236,7 +206,6 @@ def resize_image(image: torch.Tensor, d: int):
 
     return downscaled image in shape [H//d, W//d, C]
     """
-    import torch.nn.functional as tf
 
     image = image.to(torch.float32)
     weight = (1.0 / (d * d)) * torch.ones((1, 1, d, d), dtype=torch.float32, device=image.device)
@@ -438,10 +407,6 @@ class ShadowSplatModel(Model):
         self.camera_optimizer: CameraOptimizer = self.config.camera_optimizer.setup(
             num_cameras=self.num_train_data, device="cpu"
         )
-
-        # metrics
-        from torchmetrics.image import PeakSignalNoiseRatio
-        from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
         self.psnr = PeakSignalNoiseRatio(data_range=1.0)
         self.ssim = SSIM(data_range=1.0, size_average=True, channel=3)
@@ -1058,6 +1023,8 @@ class ShadowSplatModel(Model):
             # set some threshold to disregrad small gaussians for faster rendering.
             # radius_clip=3.0,
         )
+
+        # NOTE: TO ADAM, DOES THIS NEED TO BE ADAPTED TO LIGHT PARAMS?
         if self.training:
             self.strategy.step_pre_backward(
                 self.gauss_params, self.optimizers, self.strategy_state, self.step, self.info
