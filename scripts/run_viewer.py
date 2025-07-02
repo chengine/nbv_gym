@@ -64,10 +64,6 @@ class RunViewer:
         config.viewer = self.viewer.as_viewer_config()
         config.viewer.num_rays_per_chunk = num_rays_per_chunk
 
-        print("Light parameters:")
-        for param_name, param_value in pipeline.model.light_params.items():
-            print(f"{param_name}: {param_value}")
-
         _start_viewer(config, pipeline, step)
 
     def save_checkpoint(self, *args, **kwargs):
