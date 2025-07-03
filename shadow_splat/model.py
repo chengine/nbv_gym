@@ -67,6 +67,7 @@ from nerfacc import render_weight_from_alpha
 
 # from shadow_splat.slim_rasterization import slim_rasterization
 
+
 # @torch.compile
 def apply_weight_to_RGB(
     input,
@@ -1049,43 +1050,11 @@ class ShadowSplatModel(Model):
         if background.shape[0] == 3 and not self.training:
             background = background.expand(H, W, 3)
 
-        # RENDER SHADOW WEIGHTS
-        if self.lighting_weights is not None:
-            render_shadow, _, _ = rasterization(
-                means=means_crop,
-                quats=quats_crop,  # rasterization does normalization internally
-                scales=torch.exp(scales_crop),
-                opacities=torch.sigmoid(opacities_crop).squeeze(-1),
-                colors=self.lighting_weights.expand(-1, 3),
-                viewmats=viewmat,  # [1, 4, 4]
-                Ks=K,  # [1, 3, 3]
-                width=W,
-                height=H,
-                packed=False,
-                near_plane=0.01,
-                far_plane=1e10,
-                render_mode="RGB",
-                sh_degree=None,
-                sparse_grad=False,
-                absgrad=self.strategy.absgrad
-                if isinstance(self.strategy, DefaultStrategy)
-                else False,
-                rasterize_mode=self.config.rasterize_mode,
-                # set some threshold to disregrad small gaussians for faster rendering.
-                # radius_clip=3.0,
-            )
-
         return {
             "rgb": rgb.squeeze(0),  # type: ignore
             "depth": depth_im,  # type: ignore
             "accumulation": alpha.squeeze(0),  # type: ignore
             "background": background,  # type: ignore
-            "shadow_weights": render_shadow.squeeze(0)
-            if self.lighting_weights is not None
-            else None,  # type: ignore
-            "shadowed_rgb": render_shadow.squeeze(0) * rgb.squeeze(0)
-            if self.lighting_weights is not None
-            else None,  # type: ignore
         }  # type: ignore
 
     def get_gt_img(self, image: torch.Tensor):
@@ -1148,9 +1117,9 @@ class ShadowSplatModel(Model):
         )
         pred_img = outputs["rgb"]
         # lit_mask = outputs["shadow_weights"] > self.light_params["cutoff"]
-        lit_mask = torch.sigmoid(10 * (outputs["shadow_weights"] - self.light_params["cutoff"]))
-        gt_img = gt_img * lit_mask
-        pred_img = pred_img * lit_mask
+        # lit_mask = torch.sigmoid(10 * (outputs["shadow_weights"] - self.light_params["cutoff"]))
+        # gt_img = gt_img * lit_mask
+        # pred_img = pred_img * lit_mask
 
         # Set masked part of both ground-truth and rendered image to black.
         # This is a little bit sketchy for the SSIM loss.
