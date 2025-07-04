@@ -3,7 +3,6 @@ import os
 import numpy as np
 import json
 from pathlib import Path
-from tqdm import tqdm
 
 from shadow_splat.util.general import fibonacci_hemisphere_points
 from shadow_splat.util.logger import Logger
@@ -50,12 +49,10 @@ if __name__ == "__main__":
 
     frames = []
 
-    # bar = tqdm(total=NUM_VIEWS, position=0, leave=True)
     for i, location in Logger.tqdm(
         enumerate(camera_locations), total=NUM_VIEWS, desc="Rendering views"
     ):
         pose = set_camera_pose(camera, location, TARGET)
-        # bpy.context.view_layer.update()
 
         # Render image
         file_path = os.path.join(IMG_FOLDER, f"view_{i:03d}.png")
@@ -64,9 +61,6 @@ if __name__ == "__main__":
 
         frame_data = {"transform_matrix": pose.tolist(), "file_path": f"images/view_{i:03d}.png"}
         frames.append(frame_data)
-    #     bar.update(1)
-
-    # bar.close()
 
     # Compute intrinsic matrix
     intrinsics = get_camera_intrinsics(bpy.context.scene, camera)
