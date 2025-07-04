@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 
 def generate_plane_points(width: float = 1.0, height: float = 1.0, num_points: int = 100):
@@ -51,3 +52,59 @@ def generate_cylinder_points():
     # Combine surface and interior points
     cylinder_points = torch.cat([surface_points, interior_points], dim=0)
     return cylinder_points
+
+
+def fibonacci_hemisphere_angles(N, min_elevation_rad=0.0):
+    """returns elevation and azimuth in radians"""
+    golden_angle = np.pi * (3 - np.sqrt(5))
+    indices = np.arange(N)
+    azimuth = (indices * golden_angle) % (2 * np.pi)
+
+    z_min = np.sin(min_elevation_rad)
+    z = np.linspace(z_min, 1.0, N)
+    elevation = np.arcsin(z)
+
+    return elevation, azimuth
+
+
+def fibonacci_hemisphere_points(N, radius=1.0, min_elevation_rad=0.0):
+    """returns elevation and azimuth in radians"""
+    elevation, azimuth = fibonacci_hemisphere_angles(N, min_elevation_rad)
+    x = np.cos(elevation) * np.cos(azimuth)
+    y = np.cos(elevation) * np.sin(azimuth)
+    z = np.sin(elevation)
+    return np.stack([x, y, z], axis=-1) * radius
+
+
+def generate_ply_from_points(
+    points: np.ndarray, colors: np.ndarray, filename: str = "pc.ply"
+) -> None:
+    """Generate PLY file from points for gaussian splatting initialization"""
+    # Check that both points and colors are Nx3 arrays
+    assert points.shape[1] == 3, "Points array should have shape Nx3"
+    assert colors.shape[1] == 3, "Colors array should have shape Nx3"
+    assert points.shape[0] == colors.shape[0], (
+        "Points and colors arrays must have the same number of rows"
+    )
+
+    num_vertices = points.shape[0]
+
+    # Open file for writing
+    with open(filename, "w") as ply_file:
+        # Write PLY header
+        ply_file.write("ply\n")
+        ply_file.write("format ascii 1.0\n")
+        ply_file.write(f"element vertex {num_vertices}\n")
+        ply_file.write("property float x\n")
+        ply_file.write("property float y\n")
+        ply_file.write("property float z\n")
+        ply_file.write("property uint8 red\n")
+        ply_file.write("property uint8 green\n")
+        ply_file.write("property uint8 blue\n")
+        ply_file.write("end_header\n")
+
+        # Write vertex data (points and colors)
+        for point, color in zip(points, colors):
+            x, y, z = point
+            r, g, b = color.astype(int)  # Convert color to int if not already
+            ply_file.write(f"{x} {y} {z} {r} {g} {b}\n")

@@ -24,7 +24,6 @@ os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple, Type, Union
-import time
 import torch
 from gsplat.strategy import DefaultStrategy, MCMCStrategy
 

@@ -18,14 +18,14 @@ import bpy
 script_dir = os.path.dirname(__file__)
 sys.path.insert(0, script_dir)
 
-from datagen_util import get_camera_intrinsics  # noqa: E402
+from scripts.datagen.blender_util import get_camera_intrinsics  # noqa: E402
 
 
 if __name__ == "__main__":
     # Get all light sources in the scene
     print("=== Light Sources ===")
     for obj in bpy.data.objects:
-        if obj.type == 'LIGHT':
+        if obj.type == "LIGHT":
             light = obj.data
             print("Name:", obj.name)
             print("Type:", light.type)
@@ -33,7 +33,7 @@ if __name__ == "__main__":
             print("Energy:", light.energy)
             print("Location:", obj.location)
             print("Rotation:", obj.rotation_euler)
-            if light.type == 'SPOT':
+            if light.type == "SPOT":
                 print("Spot Size:", light.spot_size)
                 print("Spot Blend:", light.spot_blend)
             print("---------")
@@ -44,3 +44,5 @@ if __name__ == "__main__":
     # Get camera extrinsics
     camera_extrinsics = get_camera_intrinsics(scene, camera)
     print(camera_extrinsics)
+
+    # Move the camera
