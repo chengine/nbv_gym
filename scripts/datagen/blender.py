@@ -1,139 +1,86 @@
-import logging
+"""
+Class for Blender data generation.
+"""
 
-try:
-    import bpy
-except ImportError:
-    pass
-import os
+from pathlib import Path
+
+import bpy
 import numpy as np
-from .. import _pylupnt as _pnt
-from scipy.spatial.transform import Rotation as R
-from .. import utils
+from mathutils import Matrix
 
 
 class Blender:
-    EEVEE = "BLENDER_EEVEE"
-    CYCLES = "CYCLES"
+    def __init__(self, scene_path: str | Path):
+        """
+        Initialize the Blender class.
 
-    ENGINE = EEVEE
-    ALBEDO = 0.169
-    SUN_ENERGY = 30
-    SCALE_BU = 1e-3
-    R_ocv2ogl = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]], dtype=float)
+        Args:
+            scene_path: Path to the scene file.
+        """
+        bpy.ops.wm.open_mainfile(filepath=scene_path)
+        self.scene = bpy.context.scene
 
-    CAMERA = None
-    SUN = None
-    BODY = None
-    BODY_SECONDARY = None
+        # Render settings
+        self.scene.render.engine = "CYCLES"
+        self.scene.render.film_transparent = True
 
-    SCENE = dict(
-        fov=60,  # [deg]
-        resx=1024,
-        resy=1024,
-        encoding=8,
-        rendSamples=64,
-        viewSamples=4,
-        scattering=0,
-        labelDepth=0,
-        labelID=0,
-        labelSlopes=0,
-        viewtransform="Filmic",
-        filmexposure=1,
-    )
-    _SCENE_OLD = None
+        # Camera settings
+        self.camera = bpy.context.scene.camera
 
-    def __init__(self):
-        bpy.ops.wm.open_mainfile(
-            filepath=os.path.join(utils.LUPNT_DATA_PATH, "surface", "Moon.blend")
-        )
-        self.CAMERA = bpy.data.objects["Camera"]
-        self.SUN = bpy.data.objects["Sun"]
-        self.BODY = bpy.data.objects["Moon"]
-        self.BODY_SECONDARY = None
-        self.update_scene()
+        # Render layers
+        self.scene.use_nodes = True
+        self.tree = self.scene.node_tree
 
-    def update_scene(self):
-        # CAMERA properties
-        self.CAMERA.data.type = "PERSP"
-        self.CAMERA.data.lens_unit = "FOV"
-        self.CAMERA.data.angle = self.SCENE["fov"] * np.pi / 180
-        self.CAMERA.data.clip_start = 0.1  # [m]
-        self.CAMERA.data.clip_end = 10000  # [m]
-        if self.ENGINE == "CYCLES":
-            bpy.context.scene.cycles.film_exposure = self.SCENE["filmexposure"]
-        bpy.context.scene.view_settings.view_transform = self.SCENE["viewtransform"]
-        bpy.context.scene.render.pixel_aspect_x = 1
-        bpy.context.scene.render.pixel_aspect_y = 1
-        bpy.context.scene.render.resolution_x = self.SCENE["resx"]  # CAM resolution (x)
-        bpy.context.scene.render.resolution_y = self.SCENE["resy"]  # CAM resolution (y)
-        bpy.context.scene.render.image_settings.color_mode = "BW"
-        bpy.context.scene.render.image_settings.color_depth = str(self.SCENE["encoding"])
-        if self.ENGINE == "CYCLES":
-            bpy.context.scene.cycles.diffuse_bounces = 0
+    def render(self, file_path: str | Path):
+        """Render the scene and save the image to the given file path."""
+        self.scene.render.filepath = file_path
+        bpy.ops.render.render(write_still=True)
 
-        # SUN properties
-        self.SUN.data.type = "SUN"
-        self.SUN.data.energy = self.SUN_ENERGY
-        self.SUN.data.angle = 0.53 * np.pi / 180
+    def set_camera_pose(self, pose: np.ndarray):
+        """Set the camera pose (OpenGL convention)."""
+        self.camera.matrix_world = Matrix(pose)
 
-        # WORLD properties
-        # black = (0, 0, 0, 1)
-        # bpy.data.worlds["World"].node_tree.nodes["Background"].inputs[0].default_value = black
+    def get_depth(self):
+        pass
 
-        # RENDERING ENGINE properties
-        bpy.context.scene.render.engine = self.ENGINE
-        if self.ENGINE == "CYCLES":
-            bpy.context.scene.cycles.device = "GPU"
-            bpy.context.scene.cycles.samples = self.SCENE["rendSamples"]
-            bpy.context.scene.cycles.preview_samples = self.SCENE["viewSamples"]
+    def get_albedo(self):
+        pass
 
-        self._SCENE_OLD = self.SCENE.copy()
+    def setup_depth(self):
+        """
+        Setup depth rendering.
 
-    def render(self, r_c_pa, R_pa2c, r_s_pa, filepath, frame="OpenCV"):
-        if self.SCENE != self._SCENE_OLD:
-            self.update_scene()
+        Mostly taken from https://github.com/weiaicunzai/blender_shapenet_render/blob/master/render_depth.py#L68
+        """
+        self.scene.use_nodes = True
+        tree = self.scene.node_tree
+        tree.nodes.clear()
+        self.scene.view_layers[0].use_pass_z = True
 
-        SUN_DISTANCE = 3e6  # [km]
+        g_depth_color_mode = "BW"
+        g_depth_color_depth = "16"
+        g_depth_file_format = "PNG"
+        g_depth_clip_start = 0.5
+        g_depth_clip_end = 4
 
-        if frame == "OpenCV":
-            R_pa2ogl = self.R_ocv2ogl @ R_pa2c
-        elif frame == "OpenGL":
-            R_pa2ogl = R_pa2c
-        else:
-            raise ValueError("frame must be either 'OpenCV' or 'OpenGL'")
+        for node in tree.nodes:
+            tree.nodes.remove(node)
 
-        # Camera
-        q_c_pa = _pnt.rot2quat(R_pa2ogl)
+        render_layer_node = tree.nodes.new("CompositorNodeRLayers")
+        map_value_node = tree.nodes.new("CompositorNodeMapValue")
+        file_output_node = tree.nodes.new("CompositorNodeOutputFile")
 
-        # Moon
-        r_m_pa = np.zeros(3)
-        q_m_pa = np.array([1, 0, 0, 0])
+        map_value_node.offset[0] = -g_depth_clip_start
+        map_value_node.size[0] = 1 / (g_depth_clip_end - g_depth_clip_start)
+        map_value_node.use_min = True
+        map_value_node.use_max = True
+        map_value_node.min[0] = 0.0
+        map_value_node.max[0] = 1.0
 
-        # Sun
-        r_s_pa = np.array(r_s_pa) / np.linalg.norm(r_s_pa)
-        ez = r_s_pa
-        ex = np.cross(np.array([0, 0, 1]), ez)
-        ex /= np.linalg.norm(ex)
-        ey = np.cross(ez, ex)
-        ey /= np.linalg.norm(ey)
-        rot = np.array([ex, ey, ez])
-        q_s_pa = _pnt.rot2quat(rot)
+        file_output_node.format.color_mode = g_depth_color_mode
+        file_output_node.format.color_depth = g_depth_color_depth
+        file_output_node.format.file_format = g_depth_file_format
+        file_output_node.base_path = "."
 
-        bpy.context.scene.frame_current = 0
-
-        self.BODY.rotation_mode = "QUATERNION"
-        self.BODY.location = r_m_pa * self.SCALE_BU
-        self.BODY.rotation_quaternion = q_m_pa
-
-        self.CAMERA.rotation_mode = "QUATERNION"
-        self.CAMERA.location = r_c_pa * self.SCALE_BU
-        self.CAMERA.rotation_quaternion = q_c_pa
-
-        self.SUN.rotation_mode = "QUATERNION"
-        self.SUN.location = r_s_pa * SUN_DISTANCE * self.SCALE_BU
-        self.SUN.rotation_quaternion = q_s_pa
-
-        bpy.context.view_layer.update()
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        bpy.context.scene.render.filepath = os.path.join(filepath)
-        bpy.ops.render.render(write_still=1)
+        tree.links.new(render_layer_node.outputs[2], map_value_node.inputs[0])
+        tree.links.new(map_value_node.outputs[0], file_output_node.inputs[0])

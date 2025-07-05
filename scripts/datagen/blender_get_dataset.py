@@ -15,6 +15,7 @@ NUM_VIEWS = 100
 RADIUS = 1.75
 MIN_ELEVATION_RAD = np.deg2rad(5.0)
 TARGET = (0, 0, 0.3)
+RENDER_DEPTH = True
 
 RENDERER = "cycles"
 BLENDER_FILE = "/home/addai/Blender/master_chief.blend"
@@ -29,7 +30,14 @@ if __name__ == "__main__":
     if not os.path.exists(IMG_FOLDER):
         os.makedirs(IMG_FOLDER)
 
+    # Load the scene
     bpy.ops.wm.open_mainfile(filepath=BLENDER_FILE)
+    scene = bpy.context.scene
+
+    if RENDER_DEPTH:
+        scene.use_nodes = True
+        tree = scene.node_tree
+        tree.nodes.clear()
 
     # Render settings
     if RENDERER == "eevee":
