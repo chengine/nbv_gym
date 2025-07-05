@@ -56,6 +56,28 @@ def set_camera_pose(cam, location, target):
     return matrix_world
 
 
+def look_at_blender(camera_pos, target, up=(0, 0, 1)):
+    camera_pos = np.array(camera_pos, dtype=np.float64)
+    target = np.array(target, dtype=np.float64)
+    up = np.array(up, dtype=np.float64)
+
+    forward = target - camera_pos
+    forward = forward / np.linalg.norm(forward)
+
+    right = np.cross(forward, up)
+    right = right / np.linalg.norm(right)
+
+    up_corrected = np.cross(right, forward)
+    up_corrected = up_corrected / np.linalg.norm(up_corrected)
+
+    rot = np.stack([right, up_corrected, -forward], axis=1)
+    mat = np.eye(4)
+    mat[:3, :3] = rot
+    mat[:3, 3] = camera_pos
+
+    return mat
+
+
 # BKE_camera_sensor_size
 def get_sensor_size(sensor_fit, sensor_x, sensor_y):
     if sensor_fit == "VERTICAL":

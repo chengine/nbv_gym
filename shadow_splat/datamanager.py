@@ -26,8 +26,6 @@ from copy import deepcopy
 
 from nerfstudio.cameras.cameras import Cameras
 from rich.progress import Console
-
-CONSOLE = Console(width=120)
 from nerfstudio.data.datamanagers.full_images_datamanager import (
     FullImageDatamanager,
     FullImageDatamanagerConfig,
@@ -39,6 +37,8 @@ from typing import (
     Type,
     Union,
 )
+
+CONSOLE = Console(width=120)
 
 
 @dataclass

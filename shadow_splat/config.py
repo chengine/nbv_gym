@@ -7,7 +7,7 @@ from nerfstudio.engine.optimizers import AdamOptimizerConfig
 from nerfstudio.engine.schedulers import ExponentialDecaySchedulerConfig
 from nerfstudio.plugins.types import MethodSpecification
 
-from shadow_splat.model_ import ShadowSplatModelConfig
+from shadow_splat.model import ShadowSplatModelConfig
 from shadow_splat.dataparser import ShadowSplatDataParserConfig
 from shadow_splat.datamanager import ShadowSplatDataManagerConfig
 from shadow_splat.pipeline import ShadowSplatPipelineConfig
