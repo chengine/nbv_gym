@@ -143,6 +143,7 @@ class ShadowSplatModelConfig(SplatfactoModelConfig):
 
     _target: Type = field(default_factory=lambda: ShadowSplatModel)
     # TODO: add shadow splat specific parameters here
+    compute_variance: bool = False
 
 
 class ShadowSplatModel(SplatfactoModel):
@@ -303,43 +304,47 @@ class ShadowSplatModel(SplatfactoModel):
         meta["opacities"] = meta["opacities"].unsqueeze(0)
 
         # pixel_ids/gaussian ids are sorted in order of depth of gaussians
+        if self.config.compute_variance:
+            gs_ids, pixel_ids, camera_ids = rasterize_to_indices_in_range(
+                0,
+                1000,
+                torch.ones(1, meta["height"], meta["width"], device=self.device),
+                meta["means2d"],
+                meta["conics"],
+                meta["opacities"],
+                meta["width"],
+                meta["height"],
+                meta["tile_size"],
+                meta["isect_offsets"],
+                meta["flatten_ids"],
+            )
 
-        gs_ids, pixel_ids, camera_ids = rasterize_to_indices_in_range(
-            0,
-            1000,
-            torch.ones(1, meta["height"], meta["width"], device=self.device),
-            meta["means2d"],
-            meta["conics"],
-            meta["opacities"],
-            meta["width"],
-            meta["height"],
-            meta["tile_size"],
-            meta["isect_offsets"],
-            meta["flatten_ids"],
-        )
+            meta["gs_ids"] = gs_ids
+            meta["pixel_ids"] = pixel_ids
+            meta["camera_ids"] = camera_ids
 
-        meta["gs_ids"] = gs_ids
-        meta["pixel_ids"] = pixel_ids
-        meta["camera_ids"] = camera_ids
+            alphas, indices, total_pixels = prepare_weights(meta)
 
-        alphas, indices, total_pixels = prepare_weights(meta)
+            # Returns the weights and the transmittances
+            weights, _ = render_weight_from_alpha(alphas, ray_indices=indices, n_rays=total_pixels)
 
-        # Returns the weights and the transmittances
-        weights, _ = render_weight_from_alpha(alphas, ray_indices=indices, n_rays=total_pixels)
+            ### TODO: FIND ALL GAUSSIAN PIXEL INTERSECTIONS IN THE PROJECTION STEP (NOT THE RASTERIZATION STEP)
+            ### TODO: REPLACE ADVANCED INDEXING WITH MULTIPLICATION AND ADDITION FOR FASTER COMPUTATION
+            # Calculate the distance of rasterized Gaussians to the light source to get logistic parameters
+            means_rasterized_camera = means_camera_space[gs_ids]
+            distances = -means_rasterized_camera[:, 2]  # torch.norm(diff, dim=-1)
 
-        ### TODO: FIND ALL GAUSSIAN PIXEL INTERSECTIONS IN THE PROJECTION STEP (NOT THE RASTERIZATION STEP)
-        ### TODO: REPLACE ADVANCED INDEXING WITH MULTIPLICATION AND ADDITION FOR FASTER COMPUTATION
-        # Calculate the distance of rasterized Gaussians to the light source to get logistic parameters
-        means_rasterized_camera = means_camera_space[gs_ids]
-        distances = -means_rasterized_camera[:, 2]  # torch.norm(diff, dim=-1)
+            # Use the weights to calculate the variance of the fitted logistic function for each ray
+            depth_flattened = depth.reshape(-1)[pixel_ids]
+            centered_distances_squared = (distances - depth_flattened) ** 2
 
-        # Use the weights to calculate the variance of the fitted logistic function for each ray
-        depth_flattened = depth.reshape(-1)[pixel_ids]
-        centered_distances_squared = (distances - depth_flattened) ** 2
-
-        # Sum up the centered distance for each ray
-        variance = torch.zeros(total_pixels, device=self.device)
-        variance.scatter_add_(0, pixel_ids, weights * centered_distances_squared)
+            # Sum up the centered distance for each ray
+            variance = torch.zeros(total_pixels, device=self.device)
+            variance.scatter_add_(0, pixel_ids, weights * centered_distances_squared)
+        else:
+            # NOTE: hardcode variance to test
+            total_pixels = meta["height"] * meta["width"]
+            variance = 0.04 * torch.ones(total_pixels, device=self.device)
 
         # Add minimum variance threshold to prevent division by very small numbers
         variance = torch.clamp(variance, min=1e-8)
@@ -391,9 +396,9 @@ class ShadowSplatModel(SplatfactoModel):
         self.shadow_fn = lambda x: apply_weight_to_RGB(x, self.lighting_weights, intensity)
 
         shadow_meta = {
-            "distances": distances,
-            "depth_flattened": depth_flattened,
-            "centered_distances_squared": centered_distances_squared,
+            # "distances": distances,
+            # "depth_flattened": depth_flattened,
+            # "centered_distances_squared": centered_distances_squared,
             "variance": variance,
             "s": s,
             "sigmoid_weights": sigmoid_weights,
