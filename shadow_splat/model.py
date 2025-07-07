@@ -20,7 +20,7 @@ Gaussian Splatting implementation that combines many recent advancements.
 from __future__ import annotations
 import os
 
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+# os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple, Type, Union
@@ -41,7 +41,6 @@ from gsplat.cuda._wrapper import rasterize_to_indices_in_range
 from nerfacc import render_weight_from_alpha
 
 from shadow_splat.util.nerfstudio import get_viewmat
-
 
 # @torch.compile
 def apply_weight_to_RGB(
@@ -91,7 +90,6 @@ def apply_weight_to_RGB(
 
     return new_color
 
-
 # @torch.compile
 def prepare_weights(meta):
     C, N = meta["means2d"].shape[:2]
@@ -135,7 +133,6 @@ def relighting_absorb_mode(meta, weights, device, reduce, reweighting_fn):
     lighting_weights = lighting_weights.unsqueeze(-1)
 
     return lighting_weights
-
 
 @dataclass
 class ShadowSplatModelConfig(SplatfactoModelConfig):
