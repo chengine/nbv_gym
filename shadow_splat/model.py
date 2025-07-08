@@ -51,6 +51,7 @@ from nerfstudio.model_components.lib_bilagrid import (
     total_variation_loss,
 )
 from shadow_splat.util.nerfstudio import get_viewmat
+import matplotlib.pyplot as plt
 
 @dataclass
 class ShadowSplatModelConfig(SplatfactoModelConfig):
@@ -60,7 +61,7 @@ class ShadowSplatModelConfig(SplatfactoModelConfig):
     # TODO: add shadow splat specific parameters here
     ambient: bool = True        # Controls whether Gaussians outside the light frustum are set to ambient or to black
     tone_mapping: Literal["linear", "luminance", "reinhard"] = "linear"
-    gamma_correction: float = 2.2
+    gamma_correction: float = 1.0
 
 class ShadowSplatModel(SplatfactoModel):
     """Nerfstudio's implementation of Shadow Splatting
@@ -288,6 +289,7 @@ class ShadowSplatModel(SplatfactoModel):
                 Ks=light_K,  # [C, 3, 3]
                 width=light_W,
                 height=light_H,
+                light=light,
                 variance_factor=torch.exp(self.light_params["variance_factor"]),
                 intensity=torch.exp(self.light_params["intensity"]),
                 cutoff=torch.sigmoid(self.light_params["cutoff"]),
@@ -302,6 +304,8 @@ class ShadowSplatModel(SplatfactoModel):
                 camera_model=light_model,
                 distloss=False,     # 2DGS only
             )
+            # print("irradiance", irradiance.max(), irradiance.min())
+            # print("irradiance_fraction", irradiance_fraction.max(), irradiance_fraction.min())
         else:
             irradiance, irradiance_fraction = None, None
 
@@ -340,6 +344,7 @@ class ShadowSplatModel(SplatfactoModel):
             sparse_grad=False,
             absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
             rasterize_mode=self.config.rasterize_mode,
+            camera_model=camera_model,
             # set some threshold to disregrad small gaussians for faster rendering.
             # radius_clip=3.0,
         )
@@ -424,7 +429,7 @@ class ShadowSplatModel(SplatfactoModel):
             self.get_gt_img(batch["image"]), outputs["background"]
         )
         metrics_dict = {}
-        predicted_rgb = outputs["rgb"]
+        predicted_rgb = outputs["rgb_relight"]
 
         metrics_dict["psnr"] = self.psnr(predicted_rgb, gt_rgb)
         if self.config.color_corrected_metrics:
@@ -447,11 +452,18 @@ class ShadowSplatModel(SplatfactoModel):
         gt_img = self.composite_with_background(
             self.get_gt_img(batch["image"]), outputs["background"]
         )
-        pred_img = outputs["rgb"]
+        pred_img = outputs["rgb_relight"]
         # lit_mask = outputs["shadow_weights"] > self.light_params["cutoff"]
         # lit_mask = torch.sigmoid(10 * (outputs["shadow_weights"] - self.light_params["cutoff"]))
         # gt_img = gt_img * lit_mask
         # pred_img = pred_img * lit_mask
+
+        # fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+        # ax[0].imshow(gt_img.cpu().numpy())
+        # ax[1].imshow(pred_img.detach().cpu().numpy())
+        # ax[2].imshow(outputs["rgb"].detach().cpu().numpy())
+        # # ax[3].imshow(outputs["shadow"])
+        # plt.show()
 
         # Set masked part of both ground-truth and rendered image to black.
         # This is a little bit sketchy for the SSIM loss.
@@ -525,7 +537,7 @@ class ShadowSplatModel(SplatfactoModel):
         gt_rgb = self.composite_with_background(
             self.get_gt_img(batch["image"]), outputs["background"]
         )
-        predicted_rgb = outputs["rgb"]
+        predicted_rgb = outputs["rgb_relight"]
         cc_rgb = None
 
         combined_rgb = torch.cat([gt_rgb, predicted_rgb], dim=1)

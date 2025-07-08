@@ -15,7 +15,6 @@ from shadow_splat.pipeline import ShadowSplatPipelineConfig
 
 # NOTE: The ShadowSplatTrainer import is needed for some reason to make the viewer work
 from shadow_splat.trainer import ShadowSplatTrainerConfig, ShadowSplatTrainer
-# from nerfstudio.engine.trainer import TrainerConfig
 
 shadow_splat = MethodSpecification(
     ShadowSplatTrainerConfig(

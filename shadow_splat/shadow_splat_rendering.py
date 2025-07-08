@@ -22,6 +22,8 @@ from gsplat.distributed import (
     all_to_all_tensor_list,
 )
 from gsplat.utils import depth_to_normal
+from nerfstudio.cameras.cameras import Cameras, CameraType
+import matplotlib.pyplot as plt
 
 def evaluate_logistic_distribution(
         means2d: Tensor,        # [N, 2] where N is the number of gaussians in the frustum
@@ -52,11 +54,17 @@ def evaluate_logistic_distribution(
 
     # Add minimum variance threshold to prevent division by very small numbers
     variance = torch.clamp(variance_image_flattened, min=1e-8)
-    s = torch.sqrt(variance_factor / (math.pi) ** 2 * variance)  # n_pixels
-    
-    sigmoid_argument = (depths - depth_image_flattened[projected_pixel_ids]) / s[
-        projected_pixel_ids
-    ]
+    s = torch.sqrt(variance_factor / (math.pi)**2 * variance)  # n_pixels
+
+    sigmoid_argument = (depths - depth_image_flattened[projected_pixel_ids]) / s[projected_pixel_ids]
+
+    # print("depth diff", (depths - depth_image_flattened[projected_pixel_ids]).max(), (depths - depth_image_flattened[projected_pixel_ids]).min() )
+
+    # print("depths", depths.max(), depths.min())
+    # print(depth_image_flattened.max(), depth_image_flattened.min())
+    # print(projected_pixel_ids.max(), projected_pixel_ids.min())
+    # print(s.max(), s.min())
+    # print(sigmoid_argument.max(), sigmoid_argument.min())
 
     sigmoid_weights = 1.0 - torch.sigmoid(sigmoid_argument)
 
@@ -83,6 +91,7 @@ def calculate_relighting_weights(
     Ks: Tensor,  # [C, 3, 3]
     width: int,
     height: int,
+    light: Cameras, 
     variance_factor: float,
     intensity: List[float],
     cutoff: float,
@@ -137,12 +146,31 @@ def calculate_relighting_weights(
 
     depth_image = moments[..., 0].squeeze()
     depth_sqr_image = moments[..., 1].squeeze()
-    variance_image = depth_sqr_image + (alphas.squeeze() - 2) * depth_image**2
+    # variance_image = 1*torch.ones_like(depth_image) 
+    variance_image = depth_sqr_image - depth_image**2
+
+    # fig, ax = plt.subplots(1, 2, figsize=(15, 5))
+    # ax[0].imshow(depth_image.detach().cpu().numpy())
+    # ax[1].imshow(variance_image.detach().cpu().numpy())
+    # # Add colorbar
+    # fig.colorbar(ax[0].imshow(depth_image.detach().cpu().numpy()), ax=ax[0])
+    # fig.colorbar(ax[1].imshow(variance_image.detach().cpu().numpy()), ax=ax[1])
+    # plt.show()
 
     depths = meta["depths"]     # Depths of each gaussian in frustum
     means2d = meta["means2d"]   # 2D means of each gaussian in frustum
     gaussian_ids = meta["gaussian_ids"] # Indices of the gaussians in the frustum
     
+    # # Compute 3D camera space coordinates once and reuse them
+    # w2c = torch.eye(4, device=light.camera_to_worlds[0].device)
+    # w2c[:3] = light.camera_to_worlds[0, :3]
+    # w2c = torch.linalg.inv(w2c)
+
+    # # Transform all means to camera space
+    # means_camera_space = (w2c[:3, :3] @ means.T).T + w2c[:3, 3][None]
+    # depths = -means_camera_space[:, 2]
+    # depths = depths[meta["gaussian_ids"]]
+
     #print(f"depths: {depths.shape}, means2d: {means2d.shape}, gaussian_ids: {gaussian_ids.shape}")
     #print(f"depth_image: {depth_image.shape}, variance_image: {variance_image.shape}")
     # This represents the fraction of light that is received by each gaussian in the frustum
@@ -155,6 +183,8 @@ def calculate_relighting_weights(
             cutoff,
             hard_cutoff,
     )
+
+    # print("weights", weights.max(), weights.min(), weights.mean())
 
     # TODO: May want to implement different weightings for different channels (i.e. R is different from G is different from B)
     if ambient:
@@ -477,6 +507,7 @@ def moment_rasterization(
     # If in distributed mode, we need to scatter the GSs to the destination ranks, based
     # on which cameras they are visible to, which we already figured out in the projection
     # stage.
+    # TODO: Get rid of colors variable
     if distributed:
         if packed:
             # count how many elements need to be sent to each rank
@@ -645,8 +676,8 @@ def moment_rasterization(
         )
 
     # We use expected depth
-    if depth_mode == "expected":
-        render_colors = render_colors / render_alphas.clamp(min=1e-10)
+    # if depth_mode == "expected":
+    render_colors = render_colors / render_alphas.clamp(min=1e-10)
 
     return render_colors, render_alphas, meta
 
