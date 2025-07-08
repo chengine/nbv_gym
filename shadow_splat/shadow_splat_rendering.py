@@ -23,53 +23,6 @@ from gsplat.distributed import (
 )
 from gsplat.utils import depth_to_normal
 
-# def apply_weight_to_RGB(
-#     input,
-#     weights,
-#     intensity,
-#     tonemapping_type: Optional[Literal["linear", "reinhard", "luminance"]] = "linear",
-#     gamma_correction: Optional[bool] = True,
-# ):
-#     ### TODO: How to handle spherical harmonics???
-#     if input.dim() == 3:  # higher order spherical harmonics
-#         new_color = input
-#     else:  # direct color
-#         new_color = weights * SH2RGB(input)  # NOTE: THIS IS THE ORIGINAL LINEAR WEIGHTING
-#         update_color_mask = weights.squeeze(-1) < 1.0
-
-#         updated_color = new_color[update_color_mask]
-
-#         # Apply tonemapping to the color
-#         updated_color[:, 0] *= intensity[0]
-#         updated_color[:, 1] *= intensity[1]
-#         updated_color[:, 2] *= intensity[2]
-
-#         # Does Reinhard tonemapping
-#         if tonemapping_type == "reinhard":
-#             updated_color /= updated_color + 1.0
-
-#         # Does luminance tonemapping
-#         elif tonemapping_type == "luminance":
-#             luminance = (
-#                 0.2126 * updated_color[:, 0]
-#                 + 0.7152 * updated_color[:, 1]
-#                 + 0.0722 * updated_color[:, 2]
-#             )
-#             updated_color /= (luminance + 1.0)[:, None]
-
-#         # Does linear tonemapping
-#         elif tonemapping_type == "linear":
-#             updated_color = torch.clamp(updated_color, min=0.0, max=1.0)
-
-#         # Does gamma correction # NOTE: leads to nans during training
-#         # if gamma_correction:
-#         #     updated_color = updated_color ** (1.0 / 2.2)
-
-#         new_color[update_color_mask] = updated_color
-#         new_color = RGB2SH(new_color)
-
-#     return new_color
-
 def evaluate_logistic_distribution(
         means2d: Tensor,        # [N, 2] where N is the number of gaussians in the frustum
         depths: Tensor,         # [N] where N is the number of gaussians in the frustum
@@ -191,7 +144,7 @@ def calculate_relighting_weights(
     gaussian_ids = meta["gaussian_ids"] # Indices of the gaussians in the frustum
     
     # This represents the fraction of light that is received by each gaussian in the frustum
-    weights = evaluate_logistic_distribution(
+    irradiance_fraction = evaluate_logistic_distribution(
             means2d,        # [N, 2] where N is the number of gaussians in the frustum
             depths,         # [N] where N is the number of gaussians in the frustum
             depth_image,    # [H, W]
@@ -203,14 +156,16 @@ def calculate_relighting_weights(
 
     # TODO: May want to implement different weightings for different channels (i.e. R is different from G is different from B)
     if ambient:
-        scene_color_weights = torch.ones_like(means)
+        irradiance = torch.ones_like(means)
     else:
-        scene_color_weights = torch.zeros_like(means)
+        irradiance = torch.zeros_like(means)
 
     # The total intensity of the light that is received by each gaussian in the frustum is the product of the intensity of the light source and the fraction of light that is received by the gaussian
-    scene_color_weights[gaussian_ids] = torch.stack([weights * intensity[0], weights * intensity[1], weights * intensity[2]], dim=-1)
+    irradiance[gaussian_ids] = torch.stack([irradiance_fraction * intensity[0], 
+                                            irradiance_fraction * intensity[1], 
+                                            irradiance_fraction * intensity[2]], dim=-1)
 
-    return scene_color_weights
+    return irradiance, irradiance_fraction
 
 # Renders the accumulated or expected depth (first moment) and the accumulated
 # or expected variance (second moment). Will add higher moments as necessary.
@@ -1294,31 +1249,6 @@ def augmented_rasterization(
             dim=-1,
         )
 
-    # Apply tone mapping and gamma correction
-    if render_mode in ["RGB+D", "RGB+ED", "RGB"] and color_weights is not None:
-        cdim = color_weights.shape[-1]
-
-        relit_image = render_colors[..., cdim:2*cdim]
-
-        if tone_mapping == "reinhard":
-            relit_image /= relit_image + 1.0
-        # Does luminance tonemapping
-        elif tone_mapping == "luminance":
-            luminance = (
-                0.2126 * relit_image[..., 0]
-                + 0.7152 * relit_image[..., 1]
-                + 0.0722 * relit_image[..., 2]
-            )
-            relit_image /= (luminance + 1.0)[:, None]
-        # Does linear tonemapping
-        elif tone_mapping == "linear":
-            relit_image = torch.clamp(relit_image, min=0.0, max=1.0)
-
-        # Does gamma correction # NOTE: leads to nans during training
-        relit_image = relit_image ** (1.0 / gamma_correction)
-
-        render_colors[..., cdim:2*cdim] = relit_image
-
     return render_colors, render_alphas, meta
 
 # Renders the accumulated or expected depth (first moment) and the accumulated
@@ -1921,31 +1851,6 @@ def augmented_rasterization_2dgs(
         render_normals_from_depth = depth_to_normal(
             depth_for_normal, torch.linalg.inv(viewmats), Ks
         ).squeeze(0)
-
-    # Apply tone mapping and gamma correction
-    if render_mode in ["RGB+D", "RGB+ED", "RGB"] and color_weights is not None:
-        cdim = color_weights.shape[-1]
-
-        relit_image = render_colors[..., cdim:2*cdim]
-
-        if tone_mapping == "reinhard":
-            relit_image /= relit_image + 1.0
-        # Does luminance tonemapping
-        elif tone_mapping == "luminance":
-            luminance = (
-                0.2126 * relit_image[..., 0]
-                + 0.7152 * relit_image[..., 1]
-                + 0.0722 * relit_image[..., 2]
-            )
-            relit_image /= (luminance + 1.0)[:, None]
-        # Does linear tonemapping
-        elif tone_mapping == "linear":
-            relit_image = torch.clamp(relit_image, min=0.0, max=1.0)
-
-        # Does gamma correction # NOTE: leads to nans during training
-        relit_image = relit_image ** (1.0 / gamma_correction)
-
-        render_colors[..., cdim:2*cdim] = relit_image
 
     meta = {
         "camera_ids": camera_ids,
