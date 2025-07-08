@@ -11,6 +11,7 @@ import torch
 import time
 import numpy as np
 import json
+import gc
 from datetime import datetime
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.data.scene_box import SceneBox
@@ -61,8 +62,6 @@ def clear_model_memory(model):
         del model.last_size
 
     # Force garbage collection
-    import gc
-
     gc.collect()
 
     # Clear CUDA cache
@@ -91,6 +90,7 @@ def get_seed_points():
 if __name__ == "__main__":
     # Load model
     config = ShadowSplatModelConfig()
+    config.compute_variance = False
     scene_box = SceneBox(aabb=torch.tensor([[-1, -1, -1], [1, 1, 1]]))
     model = ShadowSplatModel(config, scene_box, num_train_data=100).to(device)
 
@@ -137,16 +137,15 @@ if __name__ == "__main__":
         shadow_meta = model.update_light_source(light)
         times.append(time.time() - start_time)
 
-        # Explicitly delete the returned metadata to free memory
-        clear_shadow_meta(shadow_meta)
-
-        # Clear model memory to prevent accumulation
-        clear_model_memory(model)
+    clear_shadow_meta(shadow_meta)
+    clear_model_memory(model)
 
     # Write result to file
     repeat_result = f"Repeat update_light_source\n  avg: {np.mean(times):.4f}s, max: {np.max(times):.4f}s, min: {np.min(times):.4f}s"
     print(repeat_result)
     write_result_to_file(repeat_result)
+
+    print_memory_usage()
 
     # - Different pose
     times = []
@@ -158,16 +157,15 @@ if __name__ == "__main__":
         shadow_meta = model.update_light_source(light)
         times.append(time.time() - start_time)
 
-        # Explicitly delete the returned metadata to free memory
         clear_shadow_meta(shadow_meta)
-
-        # Clear model memory to prevent accumulation
         clear_model_memory(model)
 
     # Write result to file
     different_result = f"Different update_light_source\n  avg: {np.mean(times):.4f}s, max: {np.max(times):.4f}s, min: {np.min(times):.4f}s"
     print(different_result)
     write_result_to_file(different_result)
+
+    print_memory_usage()
 
     # Test timing of rendering
     # Create a test camera pose for rendering
