@@ -7,7 +7,6 @@ import viser.transforms as tf
 from nerfstudio.viewer.viewer import Viewer
 from nerfstudio.cameras.cameras import Cameras, CameraType
 
-
 class CustomViewer(Viewer):
     """Custom viewer with an additional slider for adjusting the light source position dynamically."""
 
@@ -157,13 +156,13 @@ class CustomViewer(Viewer):
             camera_type=camera_type,
         )
 
-        with torch.no_grad():
-            self.pipeline.model.update_light_source(
-                light_source,
-                variance_factor=variance_factor,
-                intensity=[red_intensity, green_intensity, blue_intensity],
-                cutoff=cutoff,
-            )
+        # with torch.no_grad():
+        #     self.pipeline.model.update_light_source(
+        #         light_source,
+        #         variance_factor=variance_factor,
+        #         intensity=[red_intensity, green_intensity, blue_intensity],
+        #         cutoff=cutoff,
+        #     )
 
         cv_to_gl = torch.tensor(
             [

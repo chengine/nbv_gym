@@ -135,16 +135,18 @@ def calculate_relighting_weights(
 
     # TODO: Implement 2DGS moment rasterization
 
-    depth_image = moments[..., 0]
-    depth_sqr_image = moments[..., 1]
-    variance_image = depth_sqr_image + (alphas - 2) * depth_image**2
+    depth_image = moments[..., 0].squeeze()
+    depth_sqr_image = moments[..., 1].squeeze()
+    variance_image = depth_sqr_image + (alphas.squeeze() - 2) * depth_image**2
 
     depths = meta["depths"]     # Depths of each gaussian in frustum
     means2d = meta["means2d"]   # 2D means of each gaussian in frustum
     gaussian_ids = meta["gaussian_ids"] # Indices of the gaussians in the frustum
     
+    #print(f"depths: {depths.shape}, means2d: {means2d.shape}, gaussian_ids: {gaussian_ids.shape}")
+    #print(f"depth_image: {depth_image.shape}, variance_image: {variance_image.shape}")
     # This represents the fraction of light that is received by each gaussian in the frustum
-    irradiance_fraction = evaluate_logistic_distribution(
+    weights = evaluate_logistic_distribution(
             means2d,        # [N, 2] where N is the number of gaussians in the frustum
             depths,         # [N] where N is the number of gaussians in the frustum
             depth_image,    # [H, W]
@@ -157,13 +159,16 @@ def calculate_relighting_weights(
     # TODO: May want to implement different weightings for different channels (i.e. R is different from G is different from B)
     if ambient:
         irradiance = torch.ones_like(means)
+        irradiance_fraction = torch.ones_like(opacities)
     else:
         irradiance = torch.zeros_like(means)
+        irradiance_fraction = torch.zeros_like(opacities)
 
     # The total intensity of the light that is received by each gaussian in the frustum is the product of the intensity of the light source and the fraction of light that is received by the gaussian
-    irradiance[gaussian_ids] = torch.stack([irradiance_fraction * intensity[0], 
-                                            irradiance_fraction * intensity[1], 
-                                            irradiance_fraction * intensity[2]], dim=-1)
+    irradiance[gaussian_ids] = torch.stack([weights * intensity[0], 
+                                            weights * intensity[1], 
+                                            weights * intensity[2]], dim=-1)
+    irradiance_fraction[gaussian_ids] = weights
 
     return irradiance, irradiance_fraction
 
@@ -872,6 +877,7 @@ def augmented_rasterization(
     # TODO: We may want to add more checks for the additional channels like with colors
     if additional_channels is not None:
         assert additional_channels.shape[0] == N, additional_channels.shape
+        additional_channels = additional_channels[None].expand(C, -1, -1)
 
     def reshape_view(C: int, world_view: torch.Tensor, N_world: list) -> torch.Tensor:
         view_list = list(
@@ -1159,7 +1165,6 @@ def augmented_rasterization(
             backgrounds = torch.cat(
                 [backgrounds, torch.zeros(C, background_channels_pad_size, device=backgrounds.device)], dim=-1
             )
-
 
     # Identify intersecting tiles
     tile_width = math.ceil(width / float(tile_size))

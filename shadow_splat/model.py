@@ -20,7 +20,7 @@ Gaussian Splatting implementation that combines many recent advancements.
 from __future__ import annotations
 import os
 
-# os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple, Type, Union
@@ -32,7 +32,7 @@ try:
     from gsplat.rendering import rasterization
 except ImportError:
     print("Please install gsplat>=1.0.0")
-from shadow_splat_rendering import (
+from shadow_splat.shadow_splat_rendering import (
     moment_rasterization,
     augmented_rasterization,
     moment_rasterization_2dgs,
@@ -302,6 +302,8 @@ class ShadowSplatModel(SplatfactoModel):
                 camera_model=light_model,
                 distloss=False,     # 2DGS only
             )
+        else:
+            irradiance, irradiance_fraction = None, None
 
         if self.config.output_depth_during_training or not self.training:
             render_mode = "RGB+ED"
@@ -331,7 +333,7 @@ class ShadowSplatModel(SplatfactoModel):
             far_plane=1e10,
             render_mode=render_mode,
             sh_degree=sh_degree_to_use,
-            additional_channels=irradiance_fraction.reshape(-1, 1), # [(C,) N, D2] or [(C,) N, K, D2]
+            additional_channels=irradiance_fraction.reshape(-1, 1) if irradiance_fraction is not None else None, # [(C,) N, D2] or [(C,) N, K, D2]
             color_weights=irradiance, # [(C,) N, 3],
             tone_mapping="linear",
             gamma_correction=2.2,
@@ -352,47 +354,58 @@ class ShadowSplatModel(SplatfactoModel):
         rgb = render[:, ..., :3] + (1 - alpha) * background
         rgb = torch.clamp(rgb, 0.0, 1.0)
 
-        # Apply tone mapping and gamma correction
-        rgb_intensity = render[:,...,3:6] + (1 - alpha) * background  # NOTE: Should we be mixing with the background?
+        if light is not None:
+            # Apply tone mapping and gamma correction
+            rgb_intensity = render[:,...,3:6] + (1 - alpha) * background  # NOTE: Should we be mixing with the background?
 
-        if self.config.tone_mapping == "reinhard":
-            rgb_relight = rgb_intensity / (rgb_intensity + 1.0)
-        # Does luminance tonemapping
-        elif self.config.tone_mapping == "luminance":
-            luminance = (
-                0.2126 * rgb_intensity[..., 0]
-                + 0.7152 * rgb_intensity[..., 1]
-                + 0.0722 * rgb_intensity[..., 2]
-            )
-            rgb_relight = rgb_intensity / (luminance + 1.0)[:, None]
-        # Does linear tonemapping
-        elif self.config.tone_mapping == "linear":
-            rgb_relight = torch.clamp(rgb_intensity, min=0.0, max=1.0)
+            if self.config.tone_mapping == "reinhard":
+                rgb_relight = rgb_intensity / (rgb_intensity + 1.0)
+            # Does luminance tonemapping
+            elif self.config.tone_mapping == "luminance":
+                luminance = (
+                    0.2126 * rgb_intensity[..., 0]
+                    + 0.7152 * rgb_intensity[..., 1]
+                    + 0.0722 * rgb_intensity[..., 2]
+                )
+                rgb_relight = rgb_intensity / (luminance + 1.0)[:, None]
+            # Does linear tonemapping
+            elif self.config.tone_mapping == "linear":
+                rgb_relight = torch.clamp(rgb_intensity, min=0.0, max=1.0)
 
-        # Does gamma correction # NOTE: leads to nans during training
-        rgb_relight = rgb_relight ** (1.0 / self.config.gamma_correction)
+            # Does gamma correction # NOTE: leads to nans during training
+            rgb_relight = rgb_relight ** (1.0 / self.config.gamma_correction)
+        else:
+            rgb_relight = rgb
 
         # apply bilateral grid
         if self.config.use_bilateral_grid and self.training:
             if camera.metadata is not None and "cam_idx" in camera.metadata:
                 rgb = self._apply_bilateral_grid(rgb, camera.metadata["cam_idx"], H, W)
-                rgb_relight = self._apply_bilateral_grid(rgb_relight, camera.metadata["cam_idx"], H, W)
+
+                if light is not None:
+                    rgb_relight = self._apply_bilateral_grid(rgb_relight, camera.metadata["cam_idx"], H, W)
 
         if render_mode == "RGB+ED":
             depth_im = render[:, ..., -1:]
             depth_im = torch.where(alpha > 0, depth_im, depth_im.detach().max()).squeeze(0)
 
-            shadow_im = render[:, ..., -2:-1]
+            if light is not None:
+                shadow_im = render[:, ..., -2:-1]
+            else:
+                shadow_im = None
         else:
             depth_im = None
-            shadow_im = render[:, ..., -1:]
+            if light is not None:
+                shadow_im = render[:, ..., -1:]
+            else:
+                shadow_im = None
 
         if background.shape[0] == 3 and not self.training:
             background = background.expand(H, W, 3)
 
         return {
             "rgb": rgb.squeeze(0),  # type: ignore
-            "rgb_relight": rgb_relight.squeeze(0),  # type: ignore
+            "rgb_relight": rgb_relight.squeeze(0) if light is not None else rgb.squeeze(0),  # type: ignore
             "depth": depth_im,  # type: ignore
             "shadow": shadow_im,  # type: ignore
             "accumulation": alpha.squeeze(0),  # type: ignore
@@ -411,7 +424,7 @@ class ShadowSplatModel(SplatfactoModel):
             self.get_gt_img(batch["image"]), outputs["background"]
         )
         metrics_dict = {}
-        predicted_rgb = outputs["rgb_relight"]
+        predicted_rgb = outputs["rgb"]
 
         metrics_dict["psnr"] = self.psnr(predicted_rgb, gt_rgb)
         if self.config.color_corrected_metrics:
@@ -434,7 +447,7 @@ class ShadowSplatModel(SplatfactoModel):
         gt_img = self.composite_with_background(
             self.get_gt_img(batch["image"]), outputs["background"]
         )
-        pred_img = outputs["rgb_relight"]
+        pred_img = outputs["rgb"]
         # lit_mask = outputs["shadow_weights"] > self.light_params["cutoff"]
         # lit_mask = torch.sigmoid(10 * (outputs["shadow_weights"] - self.light_params["cutoff"]))
         # gt_img = gt_img * lit_mask
@@ -512,7 +525,7 @@ class ShadowSplatModel(SplatfactoModel):
         gt_rgb = self.composite_with_background(
             self.get_gt_img(batch["image"]), outputs["background"]
         )
-        predicted_rgb = outputs["rgb_relight"]
+        predicted_rgb = outputs["rgb"]
         cc_rgb = None
 
         combined_rgb = torch.cat([gt_rgb, predicted_rgb], dim=1)
