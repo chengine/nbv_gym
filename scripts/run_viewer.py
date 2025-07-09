@@ -26,7 +26,7 @@ from nerfstudio.utils import writer
 from nerfstudio.utils.eval_utils import eval_setup
 from nerfstudio.viewer_legacy.server.viewer_state import ViewerLegacyState
 
-from shadow_splat.viewer import CustomViewer as ViewerState
+from shadow_splat.viewer import ShadowSplatViewer as ViewerState
 
 
 @dataclass

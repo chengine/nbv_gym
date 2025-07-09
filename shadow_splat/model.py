@@ -53,15 +53,19 @@ from nerfstudio.model_components.lib_bilagrid import (
 from shadow_splat.util.nerfstudio import get_viewmat
 import matplotlib.pyplot as plt
 
+
 @dataclass
 class ShadowSplatModelConfig(SplatfactoModelConfig):
     """Splatfacto Model Config, nerfstudio's implementation of Gaussian Splatting"""
 
     _target: Type = field(default_factory=lambda: ShadowSplatModel)
     # TODO: add shadow splat specific parameters here
-    ambient: bool = True        # Controls whether Gaussians outside the light frustum are set to ambient or to black
+    ambient: bool = (
+        True  # Controls whether Gaussians outside the light frustum are set to ambient or to black
+    )
     tone_mapping: Literal["linear", "luminance", "reinhard"] = "linear"
     gamma_correction: float = 1.0
+
 
 class ShadowSplatModel(SplatfactoModel):
     """Nerfstudio's implementation of Shadow Splatting
@@ -91,7 +95,10 @@ class ShadowSplatModel(SplatfactoModel):
             }
         )
 
-    # TODO: What's the best way to return features_dc/rest to reflect the shadows conditioend on a light source?
+        self.irradiance = None
+        self.irradiance_fraction = None
+
+    # TODO: What's the best way to return features_dc/rest to reflect the shadows conditioned on a light source?
     @property
     def features_dc(self):
         return self.gauss_params["features_dc"]
@@ -182,6 +189,87 @@ class ShadowSplatModel(SplatfactoModel):
         """
         return self.get_outputs(camera, light)
 
+    def compute_irradiance(
+        self,
+        light: Cameras,
+        variance_factor: Optional[float] = None,
+        intensity: Optional[float] = None,
+        cutoff: Optional[float] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Get the irradiance for a given camera and light source.
+
+        Args:
+            camera: The camera(s) for which output images are rendered
+            light: Optional light source camera for shadow computation
+        """
+        camera_scale_fac = self._get_downscale_factor()
+        opacities_crop = self.opacities
+        means_crop = self.means
+        scales_crop = self.scales
+        quats_crop = self.quats
+
+        # TODO: Implement light intrinsic optimization
+        light_camera_to_world = light.camera_to_worlds
+        light.rescale_output_resolution(1 / camera_scale_fac)
+        light_viewmat = get_viewmat(light_camera_to_world)
+        light_K = light.get_intrinsics_matrices().cuda()
+        light_W, light_H = int(light.width.item()), int(light.height.item())
+        self.light_last_size = (light_H, light_W)
+        light.rescale_output_resolution(camera_scale_fac)  # type: ignore
+
+        if light.camera_type == CameraType.PERSPECTIVE.value:
+            light_model = "pinhole"
+        elif light.camera_type == CameraType.ORTHOPHOTO.value:
+            light_model = "ortho"
+        elif light.camera_type == CameraType.FISHEYE.value:
+            light_model = "fisheye"
+        else:
+            raise ValueError("Unknown light type: %s", light.camera_type)
+
+        if self.training:
+            hard_cutoff = False
+        else:
+            hard_cutoff = True
+
+        # print lighting params values
+        if variance_factor is None:
+            variance_factor = torch.exp(self.light_params["variance_factor"])
+        if intensity is None:
+            intensity = torch.exp(self.light_params["intensity"])
+        if cutoff is None:
+            cutoff = torch.sigmoid(self.light_params["cutoff"])
+        # print(f"variance_factor: {variance_factor:.4f}")
+        # print(f"intensity: {intensity:.4f}")
+        # print(f"cutoff: {cutoff:.4f}")
+
+        irradiance, irradiance_fraction = calculate_relighting_weights(
+            means=means_crop,  # [N, 3]
+            quats=quats_crop,  # [N, 4]
+            scales=torch.exp(scales_crop),  # [N, 3]
+            opacities=torch.sigmoid(opacities_crop).squeeze(-1),  # [N]
+            viewmats=light_viewmat,  # [C, 4, 4]
+            Ks=light_K,  # [C, 3, 3]
+            width=light_W,
+            height=light_H,
+            light=light,
+            variance_factor=variance_factor,
+            intensity=intensity,
+            cutoff=cutoff,
+            hard_cutoff=hard_cutoff,
+            ambient=self.config.ambient,
+            near_plane=0.01,
+            far_plane=1e10,
+            depth_mode="absolute",
+            sparse_grad=False,
+            absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
+            rasterize_mode=self.config.rasterize_mode,
+            camera_model=light_model,
+            distloss=False,  # 2DGS only
+        )
+        self.irradiance = irradiance
+        self.irradiance_fraction = irradiance_fraction
+        return irradiance, irradiance_fraction
+
     def get_outputs(
         self, camera: Cameras, light: Optional[Cameras] = None
     ) -> Dict[str, Union[torch.Tensor, List]]:
@@ -197,7 +285,7 @@ class ShadowSplatModel(SplatfactoModel):
         if not isinstance(camera, Cameras):
             print("Called get_outputs with not a camera")
             return {}
-        
+
         if self.training:
             assert camera.shape[0] == 1, "Only one camera at a time"
             optimized_camera_to_world = self.camera_optimizer.apply_to_camera(camera)
@@ -221,19 +309,19 @@ class ShadowSplatModel(SplatfactoModel):
         if crop_ids is not None:
             opacities_crop = self.opacities[crop_ids]
             means_crop = self.means[crop_ids]
-            features_dc_crop = self.features_dc[crop_ids]
-            features_rest_crop = self.features_rest[crop_ids]
+            albedo_dc_crop = self.albedo_dc[crop_ids]
+            albedo_rest_crop = self.albedo_rest[crop_ids]
             scales_crop = self.scales[crop_ids]
             quats_crop = self.quats[crop_ids]
         else:
             opacities_crop = self.opacities
             means_crop = self.means
-            features_dc_crop = self.features_dc
-            features_rest_crop = self.features_rest
+            albedo_dc_crop = self.albedo_dc
+            albedo_rest_crop = self.albedo_rest
             scales_crop = self.scales
             quats_crop = self.quats
 
-        colors_crop = torch.cat((features_dc_crop[:, None, :], features_rest_crop), dim=1)
+        albedo_crop = torch.cat((albedo_dc_crop[:, None, :], albedo_rest_crop), dim=1)
 
         camera_scale_fac = self._get_downscale_factor()
         camera.rescale_output_resolution(1 / camera_scale_fac)
@@ -258,54 +346,12 @@ class ShadowSplatModel(SplatfactoModel):
 
         if light is not None:
             # TODO: Implement light intrinsic optimization
-            light_camera_to_world = light.camera_to_worlds
-            light.rescale_output_resolution(1 / camera_scale_fac)
-            light_viewmat = get_viewmat(light_camera_to_world)
-            light_K = light.get_intrinsics_matrices().cuda()
-            light_W, light_H = int(light.width.item()), int(light.height.item())
-            self.light_last_size = (light_H, light_W)
-            light.rescale_output_resolution(camera_scale_fac)  # type: ignore
-
-            if light.camera_type == CameraType.PERSPECTIVE.value:
-                light_model = "pinhole"
-            elif light.camera_type == CameraType.ORTHOPHOTO.value:
-                light_model = "ortho"
-            elif light.camera_type == CameraType.FISHEYE.value:
-                light_model = "fisheye"
-            else:
-                raise ValueError("Unknown light type: %s", light.camera_type)
-
-            if self.training:
-                hard_cutoff = False
-            else:
-                hard_cutoff = True
-
-            irradiance, irradiance_fraction = calculate_relighting_weights(
-                means=means_crop,  # [N, 3]
-                quats=quats_crop,  # [N, 4]
-                scales=torch.exp(scales_crop),  # [N, 3]       
-                opacities=torch.sigmoid(opacities_crop).squeeze(-1),  # [N]    
-                viewmats=light_viewmat,  # [C, 4, 4]
-                Ks=light_K,  # [C, 3, 3]
-                width=light_W,
-                height=light_H,
-                light=light,
-                variance_factor=torch.exp(self.light_params["variance_factor"]),
-                intensity=torch.exp(self.light_params["intensity"]),
-                cutoff=torch.sigmoid(self.light_params["cutoff"]),
-                hard_cutoff=hard_cutoff,
-                ambient=self.config.ambient,
-                near_plane=0.01,
-                far_plane=1e10,
-                depth_mode="absolute",
-                sparse_grad=False,
-                absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
-                rasterize_mode=self.config.rasterize_mode,
-                camera_model=light_model,
-                distloss=False,     # 2DGS only
-            )
-            # print("irradiance", irradiance.max(), irradiance.min())
-            # print("irradiance_fraction", irradiance_fraction.max(), irradiance_fraction.min())
+            irradiance, irradiance_fraction = self.compute_irradiance(light)
+        elif self.irradiance is not None and self.irradiance.shape[0] == self.means.shape[0]:
+            # NOTE: during training, the sizes occasionally mismatch right after training
+            # For now we just display albedo in the viewer for this one frame as a workaround
+            irradiance = self.irradiance
+            irradiance_fraction = self.irradiance_fraction
         else:
             irradiance, irradiance_fraction = None, None
 
@@ -319,15 +365,16 @@ class ShadowSplatModel(SplatfactoModel):
                 self.step // self.config.sh_degree_interval, self.config.sh_degree
             )
         else:
-            colors_crop = torch.sigmoid(colors_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
+            albedo_crop = torch.sigmoid(albedo_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
             sh_degree_to_use = None
 
+        # First 3 channels of render are albedo, next 3 are relit color (intensity)
         render, alpha, self.info = augmented_rasterization(
             means=means_crop,
             quats=quats_crop,  # rasterization does normalization internally
             scales=torch.exp(scales_crop),
             opacities=torch.sigmoid(opacities_crop).squeeze(-1),
-            colors=colors_crop,
+            colors=albedo_crop,
             viewmats=viewmat,  # [1, 4, 4]
             Ks=K,  # [1, 3, 3]
             width=W,
@@ -337,8 +384,10 @@ class ShadowSplatModel(SplatfactoModel):
             far_plane=1e10,
             render_mode=render_mode,
             sh_degree=sh_degree_to_use,
-            additional_channels=irradiance_fraction.reshape(-1, 1) if irradiance_fraction is not None else None, # [(C,) N, D2] or [(C,) N, K, D2]
-            color_weights=irradiance, # [(C,) N, 3],
+            additional_channels=irradiance_fraction.reshape(-1, 1)
+            if irradiance_fraction is not None
+            else None,  # [(C,) N, D2] or [(C,) N, K, D2]
+            color_weights=irradiance,  # [(C,) N, 3],
             tone_mapping="linear",
             gamma_correction=2.2,
             sparse_grad=False,
@@ -356,39 +405,45 @@ class ShadowSplatModel(SplatfactoModel):
         alpha = alpha[:, ...]
 
         background = self._get_background_color()
-        rgb = render[:, ..., :3] + (1 - alpha) * background
-        rgb = torch.clamp(rgb, 0.0, 1.0)
+        albedo_rgb = render[:, ..., :3] + (1 - alpha) * background
+        albedo_rgb = torch.clamp(albedo_rgb, 0.0, 1.0)
 
-        if light is not None:
+        if irradiance is not None:
             # Apply tone mapping and gamma correction
-            rgb_intensity = render[:,...,3:6] + (1 - alpha) * background  # NOTE: Should we be mixing with the background?
+            relit_intensity = (
+                render[:, ..., 3:6] + (1 - alpha) * background
+            )  # NOTE: Should we be mixing with the background?
 
             if self.config.tone_mapping == "reinhard":
-                rgb_relight = rgb_intensity / (rgb_intensity + 1.0)
+                relit_rgb = relit_intensity / (relit_intensity + 1.0)
             # Does luminance tonemapping
             elif self.config.tone_mapping == "luminance":
                 luminance = (
-                    0.2126 * rgb_intensity[..., 0]
-                    + 0.7152 * rgb_intensity[..., 1]
-                    + 0.0722 * rgb_intensity[..., 2]
+                    0.2126 * relit_intensity[..., 0]
+                    + 0.7152 * relit_intensity[..., 1]
+                    + 0.0722 * relit_intensity[..., 2]
                 )
-                rgb_relight = rgb_intensity / (luminance + 1.0)[:, None]
+                relit_rgb = relit_intensity / (luminance + 1.0)[:, None]
             # Does linear tonemapping
             elif self.config.tone_mapping == "linear":
-                rgb_relight = torch.clamp(rgb_intensity, min=0.0, max=1.0)
+                relit_rgb = torch.clamp(relit_intensity, min=0.0, max=1.0)
 
             # Does gamma correction # NOTE: leads to nans during training
-            rgb_relight = rgb_relight ** (1.0 / self.config.gamma_correction)
+            relit_rgb = relit_rgb ** (1.0 / self.config.gamma_correction)
         else:
-            rgb_relight = rgb
+            relit_rgb = albedo_rgb
 
         # apply bilateral grid
         if self.config.use_bilateral_grid and self.training:
             if camera.metadata is not None and "cam_idx" in camera.metadata:
-                rgb = self._apply_bilateral_grid(rgb, camera.metadata["cam_idx"], H, W)
+                albedo_rgb = self._apply_bilateral_grid(
+                    albedo_rgb, camera.metadata["cam_idx"], H, W
+                )
 
                 if light is not None:
-                    rgb_relight = self._apply_bilateral_grid(rgb_relight, camera.metadata["cam_idx"], H, W)
+                    relit_rgb = self._apply_bilateral_grid(
+                        relit_rgb, camera.metadata["cam_idx"], H, W
+                    )
 
         if render_mode == "RGB+ED":
             depth_im = render[:, ..., -1:]
@@ -409,8 +464,8 @@ class ShadowSplatModel(SplatfactoModel):
             background = background.expand(H, W, 3)
 
         return {
-            "rgb": rgb.squeeze(0),  # type: ignore
-            "rgb_relight": rgb_relight.squeeze(0) if light is not None else rgb.squeeze(0),  # type: ignore
+            "rgb": relit_rgb.squeeze(0),  # type: ignore
+            "albedo": albedo_rgb.squeeze(0),  # type: ignore
             "depth": depth_im,  # type: ignore
             "shadow": shadow_im,  # type: ignore
             "accumulation": alpha.squeeze(0),  # type: ignore
@@ -429,7 +484,7 @@ class ShadowSplatModel(SplatfactoModel):
             self.get_gt_img(batch["image"]), outputs["background"]
         )
         metrics_dict = {}
-        predicted_rgb = outputs["rgb_relight"]
+        predicted_rgb = outputs["rgb"]
 
         metrics_dict["psnr"] = self.psnr(predicted_rgb, gt_rgb)
         if self.config.color_corrected_metrics:
@@ -452,7 +507,7 @@ class ShadowSplatModel(SplatfactoModel):
         gt_img = self.composite_with_background(
             self.get_gt_img(batch["image"]), outputs["background"]
         )
-        pred_img = outputs["rgb_relight"]
+        pred_img = outputs["rgb"]
         # lit_mask = outputs["shadow_weights"] > self.light_params["cutoff"]
         # lit_mask = torch.sigmoid(10 * (outputs["shadow_weights"] - self.light_params["cutoff"]))
         # gt_img = gt_img * lit_mask
@@ -537,7 +592,7 @@ class ShadowSplatModel(SplatfactoModel):
         gt_rgb = self.composite_with_background(
             self.get_gt_img(batch["image"]), outputs["background"]
         )
-        predicted_rgb = outputs["rgb_relight"]
+        predicted_rgb = outputs["rgb"]
         cc_rgb = None
 
         combined_rgb = torch.cat([gt_rgb, predicted_rgb], dim=1)
