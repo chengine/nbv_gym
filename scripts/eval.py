@@ -13,7 +13,7 @@ from pytorch_msssim import SSIM
 # Model type
 model_type = "shadow-splat" # "shadow-splat" or "splatfacto"
 dataset_name = "multi_light" # "o3d_el45_az60" or "multi_light"
-albedo = True
+albedo = False
 
 # Looks at the directory and looks for the latest checkpoint
 config_path = Path(f"outputs/{dataset_name}/{model_type}/")
@@ -69,7 +69,7 @@ for idx in range(len(cameras)):
         raise ValueError(f"Invalid model type: {model_type}")
 
     # Get rendered and ground truth images
-    rendered_img = outputs['rgb'].squeeze().cpu()
+    rendered_img = outputs['rgb_relight'].squeeze().cpu()
     gt_img = images[idx].squeeze().cpu()[..., :3]
     
     # Ensure images are in the correct format for metrics computation

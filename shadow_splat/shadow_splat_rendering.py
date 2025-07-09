@@ -472,6 +472,7 @@ def moment_rasterization(
     if packed:
         # The results are packed into shape [nnz, ...]. All elements are valid.
         (
+            batch_ids,
             camera_ids,
             gaussian_ids,
             radii,
@@ -607,8 +608,8 @@ def moment_rasterization(
         tile_width,
         tile_height,
         packed=packed,
-        n_cameras=C,
-        camera_ids=camera_ids,
+        n_images=C,
+        image_ids=camera_ids,
         gaussian_ids=gaussian_ids,
     )
     # print("rank", world_rank, "Before isect_offset_encode")
@@ -625,7 +626,7 @@ def moment_rasterization(
             "width": width,
             "height": height,
             "tile_size": tile_size,
-            "n_cameras": C,
+            "n_images": C,
         }
     )
 
@@ -1039,7 +1040,7 @@ def augmented_rasterization(
         camtoworlds = torch.inverse(viewmats)  # [C, 4, 4]
         if packed:
             dirs = means[gaussian_ids, :] - camtoworlds[camera_ids, :3, 3]  # [nnz, 3]
-            masks = radii > 0  # [nnz]
+            masks = (radii > 0).any(-1)  # [nnz]
             if colors.dim() == 3:
                 # Turn [N, K, 3] into [nnz, 3]
                 shs = colors[gaussian_ids, :, :]  # [nnz, K, 3]
@@ -1049,7 +1050,7 @@ def augmented_rasterization(
             colors = spherical_harmonics(sh_degree, dirs, shs, masks=masks)  # [nnz, 3]
         else:
             dirs = means[None, :, :] - camtoworlds[:, None, :3, 3]  # [C, N, 3]
-            masks = radii > 0  # [C, N]
+            masks = (radii > 0).any(-1)  # [C, N]
             if colors.dim() == 3:
                 # Turn [N, K, 3] into [C, N, K, 3]
                 shs = colors.expand(C, -1, -1, -1)  # [C, N, K, 3]
@@ -1208,8 +1209,8 @@ def augmented_rasterization(
         tile_width,
         tile_height,
         packed=packed,
-        n_cameras=C,
-        camera_ids=camera_ids,
+        n_images=C,
+        image_ids=camera_ids,
         gaussian_ids=gaussian_ids,
     )
     # print("rank", world_rank, "Before isect_offset_encode")
@@ -1467,8 +1468,8 @@ def moment_rasterization_2dgs(
         tile_width,
         tile_height,
         packed=packed,
-        n_cameras=C,
-        camera_ids=camera_ids,
+        n_images=C,
+        image_ids=camera_ids,
         gaussian_ids=gaussian_ids,
     )
     isect_offsets = isect_offset_encode(isect_ids, C, tile_width, tile_height)
@@ -1763,8 +1764,8 @@ def augmented_rasterization_2dgs(
         tile_width,
         tile_height,
         packed=packed,
-        n_cameras=C,
-        camera_ids=camera_ids,
+        n_images=C,
+        image_ids=camera_ids,
         gaussian_ids=gaussian_ids,
     )
     isect_offsets = isect_offset_encode(isect_ids, C, tile_width, tile_height)

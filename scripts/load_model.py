@@ -119,10 +119,10 @@ class GaussianSplat():
                ):
         
         # render outputs
-        if isinstance(self.pipeline.model, SplatfactoModel):
+        if type(self.pipeline.model) is SplatfactoModel:
             with torch.no_grad():
                 outputs = self.pipeline.model(camera)
-        elif isinstance(self.pipeline.model, ShadowSplatModel):
+        elif type(self.pipeline.model) is ShadowSplatModel:
             with torch.no_grad():
                 outputs = self.pipeline.model(camera, light_source)
 
