@@ -7,14 +7,15 @@ import viser.transforms as tf
 from nerfstudio.viewer.viewer import Viewer
 from nerfstudio.cameras.cameras import Cameras, CameraType
 
-class CustomViewer(Viewer):
+
+class ShadowSplatViewer(Viewer):
     """Custom viewer with an additional slider for adjusting the light source position dynamically."""
 
     def __init__(self, *args, **kwargs):
         # Initialize the parent Viewer class
         super().__init__(*args, **kwargs)
 
-        print("CustomViewer | __init__")
+        print("ShadowSplatViewer | __init__")
 
         tabs = self.viser_server.gui.add_tab_group()
         lighting_tab = tabs.add_tab("Light", viser.Icon.SUN)
@@ -143,7 +144,7 @@ class CustomViewer(Viewer):
         new_pose = camera_to_world_transform(az_rad, el_rad, origin, radius).to(
             self.pipeline.device
         )
-        print("New light source pose:\n", new_pose)
+        # print("New light source pose:\n", new_pose)
 
         light_source = Cameras(
             camera_to_worlds=new_pose[None, :3, ...],
@@ -156,13 +157,13 @@ class CustomViewer(Viewer):
             camera_type=camera_type,
         )
 
-        # with torch.no_grad():
-        #     self.pipeline.model.update_light_source(
-        #         light_source,
-        #         variance_factor=variance_factor,
-        #         intensity=[red_intensity, green_intensity, blue_intensity],
-        #         cutoff=cutoff,
-        #     )
+        with torch.no_grad():
+            self.pipeline.model.compute_irradiance(
+                light_source,
+                variance_factor=variance_factor,
+                intensity=[red_intensity, green_intensity, blue_intensity],
+                cutoff=cutoff,
+            )
 
         cv_to_gl = torch.tensor(
             [

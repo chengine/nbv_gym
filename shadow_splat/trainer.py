@@ -11,7 +11,7 @@ from nerfstudio.engine.callbacks import TrainingCallbackAttributes
 from nerfstudio.viewer_legacy.server.viewer_state import ViewerLegacyState
 from nerfstudio.utils import writer, profiler
 
-from shadow_splat.viewer import CustomViewer
+from shadow_splat.viewer import ShadowSplatViewer
 
 
 class ShadowSplatTrainer(Trainer):
@@ -50,7 +50,7 @@ class ShadowSplatTrainer(Trainer):
             if datapath is None:
                 datapath = self.base_dir
             # Use our custom viewer instead of the standard one
-            self.viewer_state = CustomViewer(
+            self.viewer_state = ShadowSplatViewer(
                 self.config.viewer,
                 log_filename=viewer_log_path,
                 datapath=datapath,
