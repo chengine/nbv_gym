@@ -366,7 +366,7 @@ class ShadowSplatModel(SplatfactoModel):
             albedo_crop = torch.sigmoid(albedo_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
             sh_degree_to_use = None
 
-        # First 3 channels of render are albedo, next 3 are relit color (intensity)
+        # First 3 channels of render are albedo, next 3 are relit color (intensity), then shadow, then depth
         render, alpha, self.info = augmented_rasterization(
             means=means_crop,
             quats=quats_crop,  # rasterization does normalization internally
@@ -417,7 +417,7 @@ class ShadowSplatModel(SplatfactoModel):
                     + 0.7152 * relit_intensity[..., 1]
                     + 0.0722 * relit_intensity[..., 2]
                 )
-                relit_rgb = relit_intensity / (luminance + 1.0)[:, None]
+                relit_rgb = relit_intensity / (luminance + 1.0)[..., None]
             # Does linear tonemapping
             elif self.config.tone_mapping == "linear":
                 relit_rgb = torch.clamp(relit_intensity, min=0.0, max=1.0)
@@ -444,6 +444,7 @@ class ShadowSplatModel(SplatfactoModel):
             depth_im = torch.where(alpha > 0, depth_im, depth_im.detach().max()).squeeze(0)
 
             if light is not None:
+                # NOTE: currently broken
                 shadow_im = render[:, ..., -2:-1]
             else:
                 shadow_im = None
