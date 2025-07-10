@@ -701,8 +701,6 @@ def augmented_rasterization(
     sh_degree: Optional[int] = None,
     additional_channels: Optional[Tensor] = None, # [(C,) N, D2] or [(C,) N, K, D2]
     color_weights: Optional[Tensor] = None, # [(C,) N, 3],
-    tone_mapping: Literal["linear", "luminance", "reinhard"] = "linear",
-    gamma_correction: float = 2.2,
     packed: bool = True,
     tile_size: int = 16,
     backgrounds: Optional[Tensor] = None,
@@ -884,6 +882,7 @@ def augmented_rasterization(
         'flatten_ids', 'isect_offsets', 'width', 'height', 'tile_size'])
 
     """
+    # print('colors before', colors.isnan().any(), colors.isinf().any())
     meta = {}
 
     N = means.shape[0]
@@ -1035,6 +1034,8 @@ def augmented_rasterization(
             else:
                 # colors is already [C, N, D]
                 pass
+        # assert not torch.isnan(colors).any(), "NaN detected after indexing"
+
     else:
         # Colors are SH coefficients, with shape [N, K, 3] or [C, N, K, 3]
         camtoworlds = torch.inverse(viewmats)  # [C, 4, 4]
@@ -1047,7 +1048,9 @@ def augmented_rasterization(
             else:
                 # Turn [C, N, K, 3] into [nnz, 3]
                 shs = colors[camera_ids, gaussian_ids, :, :]  # [nnz, K, 3]
+            #assert not torch.isnan(colors).any(), "NaN detected before spherical_harmonics"
             colors = spherical_harmonics(sh_degree, dirs, shs, masks=masks)  # [nnz, 3]
+            #assert not torch.isnan(colors).any(), "NaN detected after spherical_harmonics"
         else:
             dirs = means[None, :, :] - camtoworlds[:, None, :3, 3]  # [C, N, 3]
             masks = (radii > 0).any(-1)  # [C, N]
@@ -1057,10 +1060,18 @@ def augmented_rasterization(
             else:
                 # colors is already [C, N, K, 3]
                 shs = colors
+            # print("dirs nan?", torch.isnan(dirs).any(), "inf?", torch.isinf(dirs).any())
+            # print("shs nan?", torch.isnan(shs).any(), "inf?", torch.isinf(shs).any())
+            # if masks is not None:
+            #     print("masks nan?", torch.isnan(masks).any(), "inf?", torch.isinf(masks).any())
+            # print("dirs shape:", dirs.shape, "min:", dirs.min().item(), "max:", dirs.max().item())
+            # print("dirs norm min/max:", dirs.norm(dim=-1).min().item(), dirs.norm(dim=-1).max().item())
+            # print("shs shape:", shs.shape, "min:", shs.min().item(), "max:", shs.max().item())
+            # print("shs nan:", torch.isnan(shs).any(), "inf:", torch.isinf(shs).any())
             colors = spherical_harmonics(sh_degree, dirs, shs, masks=masks)  # [C, N, 3]
+            # assert not torch.isnan(colors).any(), f"NaN detected after spherical_harmonics. {colors.isnan().sum()}"
         # make it apple-to-apple with Inria's CUDA Backend.
         colors = torch.clamp_min(colors + 0.5, 0.0)
-
     # If in distributed mode, we need to scatter the GSs to the destination ranks, based
     # on which cameras they are visible to, which we already figured out in the projection
     # stage.
@@ -1178,6 +1189,8 @@ def augmented_rasterization(
     else:  # RGB
         if color_weights is not None:
             # The absolute color is the albedo (base color of Gaussian), the fraction of light reflected in each channel, times the intensity of the light incident on the Gaussian
+            # print('colors', colors.isnan().any(), colors.isinf().any())
+            # print('color_weights', color_weights.isnan().any(), color_weights.isinf().any())
             relit_colors = colors * color_weights
             colors = torch.cat((colors, relit_colors), dim=-1)
     

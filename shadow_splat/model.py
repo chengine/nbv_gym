@@ -20,8 +20,7 @@ Gaussian Splatting implementation that combines many recent advancements.
 from __future__ import annotations
 import os
 
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-
+# os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple, Type, Union
 import torch
@@ -39,7 +38,7 @@ from shadow_splat.shadow_splat_rendering import (
     augmented_rasterization_2dgs,
     calculate_relighting_weights,
 )
-
+# torch.autograd.set_detect_anomaly(True)
 import math
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.models.splatfacto import SplatfactoModelConfig, SplatfactoModel
@@ -384,12 +383,8 @@ class ShadowSplatModel(SplatfactoModel):
             far_plane=1e10,
             render_mode=render_mode,
             sh_degree=sh_degree_to_use,
-            additional_channels=irradiance_fraction.reshape(-1, 1)
-            if irradiance_fraction is not None
-            else None,  # [(C,) N, D2] or [(C,) N, K, D2]
-            color_weights=irradiance,  # [(C,) N, 3],
-            tone_mapping="linear",
-            gamma_correction=2.2,
+            additional_channels=irradiance_fraction.reshape(-1, 1) if irradiance_fraction is not None else None, # [(C,) N, D2] or [(C,) N, K, D2]
+            color_weights=irradiance, # [(C,) N, 3],
             sparse_grad=False,
             absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
             rasterize_mode=self.config.rasterize_mode,

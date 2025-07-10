@@ -9,11 +9,14 @@ import numpy as np
 from torchmetrics.image import PeakSignalNoiseRatio
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from pytorch_msssim import SSIM
+import open3d as o3d
 
 # Model type
-model_type = "shadow-splat"  # "shadow-splat" or "splatfacto"
-dataset_name = "multi_light"  # "o3d_el45_az60" or "multi_light"
+model_type = "splatfacto" # "shadow-splat" or "splatfacto"
+dataset_name = "multi_light" # "o3d_el45_az60" or "multi_light" or "single_view_multi_light"
 albedo = False
+
+gt_path = "open3d_dataset/all.ply"        # Path to the point cloud
 
 # Looks at the directory and looks for the latest checkpoint
 config_path = Path(f"outputs/{dataset_name}/{model_type}/")
@@ -54,25 +57,35 @@ psnr_metric = PeakSignalNoiseRatio(data_range=1.0)
 ssim_metric = SSIM(data_range=1.0, size_average=True, channel=3)
 lpips_metric = LearnedPerceptualImagePatchSimilarity(normalize=True)
 
+# Load the ground truth point cloud
+gt_pcd = o3d.io.read_point_cloud(gt_path)
+pcd = pipeline.pipeline.model.means.detach().cpu().numpy()
+pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pcd))
+
+# Compute chamfer distance between the predicted and ground truth point clouds
+chamfer_dist_gt2pcd = np.asarray(gt_pcd.compute_point_cloud_distance(pcd)).mean()
+chamfer_dist_pcd2gt = np.asarray(pcd.compute_point_cloud_distance(gt_pcd)).mean()
+print(f"Chamfer distance (gt -> pcd): {chamfer_dist_gt2pcd}")
+print(f"Chamfer distance (pcd -> gt): {chamfer_dist_pcd2gt}")
+
 # Store metrics for each image
 metrics_data = []
 
 # Render from the training poses
 for idx in range(len(cameras)):
     if model_type == "shadow-splat":
-        outputs = pipeline.render(
-            cameras[idx : idx + 1],
-            light_sources[idx : idx + 1] if light_sources is not None else None,
-        )
+        outputs = pipeline.render(cameras[idx:idx+1], light_sources[idx:idx+1] if light_sources is not None else None)
+        rendered_img = outputs['rgb_relight'].squeeze().cpu()
     elif model_type == "splatfacto":
-        outputs = pipeline.render(cameras[idx : idx + 1])
+        outputs = pipeline.render(cameras[idx:idx+1])
+        rendered_img = outputs['rgb'].squeeze().cpu()
     elif model_type == "shadow-splat-albedo":
-        outputs = pipeline.render(cameras[idx : idx + 1], None)
+        outputs = pipeline.render(cameras[idx:idx+1], None)
+        rendered_img = outputs['rgb'].squeeze().cpu()
     else:
         raise ValueError(f"Invalid model type: {model_type}")
 
     # Get rendered and ground truth images
-    rendered_img = outputs["rgb_relight"].squeeze().cpu()
     gt_img = images[idx].squeeze().cpu()[..., :3]
 
     # Ensure images are in the correct format for metrics computation
@@ -105,12 +118,14 @@ for idx in range(len(cameras)):
 
     # Calculate average metrics
     avg_metrics = {
-        "avg_psnr": metrics_df["psnr"].mean(),
-        "avg_ssim": metrics_df["ssim"].mean(),
-        "avg_lpips": metrics_df["lpips"].mean(),
-        "std_psnr": metrics_df["psnr"].std(),
-        "std_ssim": metrics_df["ssim"].std(),
-        "std_lpips": metrics_df["lpips"].std(),
+        'avg_psnr': metrics_df['psnr'].mean(),
+        'avg_ssim': metrics_df['ssim'].mean(),
+        'avg_lpips': metrics_df['lpips'].mean(),
+        'std_psnr': metrics_df['psnr'].std(),
+        'std_ssim': metrics_df['ssim'].std(),
+        'std_lpips': metrics_df['lpips'].std(),
+        'chamfer_dist_gt2pcd': chamfer_dist_gt2pcd,
+        'chamfer_dist_pcd2gt': chamfer_dist_pcd2gt
     }
 
     # Save individual metrics to CSV
@@ -127,5 +142,8 @@ for idx in range(len(cameras)):
     print(f"Average PSNR: {avg_metrics['avg_psnr']:.4f} ± {avg_metrics['std_psnr']:.4f}")
     print(f"Average SSIM: {avg_metrics['avg_ssim']:.4f} ± {avg_metrics['std_ssim']:.4f}")
     print(f"Average LPIPS: {avg_metrics['avg_lpips']:.4f} ± {avg_metrics['std_lpips']:.4f}")
+    print(f"Chamfer distance (gt -> pcd): {avg_metrics['chamfer_dist_gt2pcd']:.4f}")
+    print(f"Chamfer distance (pcd -> gt): {avg_metrics['chamfer_dist_pcd2gt']:.4f}")
     print(f"Results saved to: {results_dir}")
-    print("=" * 50)
+    print("="*50)
+    print("\n")
