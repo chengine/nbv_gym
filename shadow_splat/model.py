@@ -38,7 +38,7 @@ from shadow_splat.shadow_splat_rendering import (
     augmented_rasterization_2dgs,
     calculate_relighting_weights,
 )
-# torch.autograd.set_detect_anomaly(True)
+torch.autograd.set_detect_anomaly(True)
 import math
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.models.splatfacto import SplatfactoModelConfig, SplatfactoModel
@@ -51,7 +51,6 @@ from nerfstudio.model_components.lib_bilagrid import (
 )
 from shadow_splat.util.nerfstudio import get_viewmat
 import matplotlib.pyplot as plt
-
 
 @dataclass
 class ShadowSplatModelConfig(SplatfactoModelConfig):
