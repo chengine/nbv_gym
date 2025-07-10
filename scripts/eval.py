@@ -13,7 +13,7 @@ import open3d as o3d
 
 # Model type
 model_type = "splatfacto" # "shadow-splat" or "splatfacto"
-dataset_name = "multi_light" # "o3d_el45_az60" or "multi_light" or "single_view_multi_light"
+dataset_name = "single_view_multi_light" # "o3d_el45_az60" or "multi_light" or "single_view_multi_light"
 albedo = False
 
 gt_path = "open3d_dataset/all.ply"        # Path to the point cloud
@@ -28,21 +28,49 @@ config_path = Path(f"{latest_folder}/config.yml")
 
 print("Loading model from: ", config_path)
 
-# Load pipeline
-pipeline = GaussianSplat(config_path, dataset_mode="train", device="cuda")
+if dataset_name == "single_view_multi_light":
 
-# Load the training cameras
-cameras = pipeline.get_cameras()
+    # Load pipeline
+    pipeline = GaussianSplat(config_path, dataset_mode="train", device="cuda")
 
-# Load the light source
-if not albedo:
-    light_sources = pipeline.get_light_source()
+    dataset_name_eval = "multi_light"
+    eval_config_path = Path(f"outputs/{dataset_name_eval}/{model_type}/")
+
+    # Get the folder with the most recent timestamp
+    latest_folder_eval = max(eval_config_path.glob("*"), key=os.path.getctime)
+
+    eval_config_path = Path(f"{latest_folder_eval}/config.yml")
+    eval_pipeline = GaussianSplat(eval_config_path, dataset_mode="train", device="cuda")
+
+    # Load the training cameras
+    cameras = eval_pipeline.get_cameras()
+
+    # Load the light source
+    if not albedo:
+        light_sources = eval_pipeline.get_light_source()
+    else:
+        light_sources = None
+        model_type = "shadow-splat-albedo"
+
+    # Load images
+    images = eval_pipeline.get_images()
 else:
-    light_sources = None
-    model_type = "shadow-splat-albedo"
+    
+        # Load pipeline
+    pipeline = GaussianSplat(config_path, dataset_mode="train", device="cuda")
 
-# Load images
-images = pipeline.get_images()
+    # Load the training cameras
+    cameras = pipeline.get_cameras()
+
+    # Load the light source
+    if not albedo:
+        light_sources = pipeline.get_light_source()
+    else:
+        light_sources = None
+        model_type = "shadow-splat-albedo"
+
+    # Load images
+    images = pipeline.get_images()
 
 print("Number of cameras: ", len(cameras))
 print("Number of light sources: ", len(light_sources) if light_sources is not None else 0)
@@ -75,7 +103,7 @@ metrics_data = []
 for idx in range(len(cameras)):
     if model_type == "shadow-splat":
         outputs = pipeline.render(cameras[idx:idx+1], light_sources[idx:idx+1] if light_sources is not None else None)
-        rendered_img = outputs['rgb_relight'].squeeze().cpu()
+        rendered_img = outputs['rgb'].squeeze().cpu()
     elif model_type == "splatfacto":
         outputs = pipeline.render(cameras[idx:idx+1])
         rendered_img = outputs['rgb'].squeeze().cpu()

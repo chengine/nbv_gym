@@ -1060,16 +1060,16 @@ def augmented_rasterization(
             else:
                 # colors is already [C, N, K, 3]
                 shs = colors
-            print("dirs nan?", torch.isnan(dirs).any(), "inf?", torch.isinf(dirs).any())
-            print("shs nan?", torch.isnan(shs).any(), "inf?", torch.isinf(shs).any())
-            if masks is not None:
-                print("masks nan?", torch.isnan(masks).any(), "inf?", torch.isinf(masks).any())
-            print("dirs shape:", dirs.shape, "min:", dirs.min().item(), "max:", dirs.max().item())
-            print("dirs norm min/max:", dirs.norm(dim=-1).min().item(), dirs.norm(dim=-1).max().item())
-            print("shs shape:", shs.shape, "min:", shs.min().item(), "max:", shs.max().item())
-            print("shs nan:", torch.isnan(shs).any(), "inf:", torch.isinf(shs).any())
+            # print("dirs nan?", torch.isnan(dirs).any(), "inf?", torch.isinf(dirs).any())
+            # print("shs nan?", torch.isnan(shs).any(), "inf?", torch.isinf(shs).any())
+            # if masks is not None:
+            #     print("masks nan?", torch.isnan(masks).any(), "inf?", torch.isinf(masks).any())
+            # print("dirs shape:", dirs.shape, "min:", dirs.min().item(), "max:", dirs.max().item())
+            # print("dirs norm min/max:", dirs.norm(dim=-1).min().item(), dirs.norm(dim=-1).max().item())
+            # print("shs shape:", shs.shape, "min:", shs.min().item(), "max:", shs.max().item())
+            # print("shs nan:", torch.isnan(shs).any(), "inf:", torch.isinf(shs).any())
             colors = spherical_harmonics(sh_degree, dirs, shs, masks=masks)  # [C, N, 3]
-            print("colors nan?", torch.isnan(colors).any(), "inf?", torch.isinf(colors).any())
+            # print("colors nan?", torch.isnan(colors).any(), "inf?", torch.isinf(colors).any())
             #assert not torch.isnan(colors).any(), f"NaN detected after spherical_harmonics. {colors.isnan().sum()}"
         # make it apple-to-apple with Inria's CUDA Backend.
         colors = torch.clamp_min(colors + 0.5, 0.0)

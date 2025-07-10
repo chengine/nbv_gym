@@ -23,7 +23,7 @@ shadow_splat = MethodSpecification(
         steps_per_eval_batch=0,
         steps_per_save=700,
         steps_per_eval_all_images=1000,
-        max_num_iterations=10000,
+        max_num_iterations=30000,
         mixed_precision=False,
         pipeline=ShadowSplatPipelineConfig(
             datamanager=ShadowSplatDataManagerConfig(
@@ -33,8 +33,8 @@ shadow_splat = MethodSpecification(
             model=ShadowSplatModelConfig(
                 # reset_alpha_every=1000000,
                 # cull_alpha_thresh=0.001,
-                warmup_length=100000,
-                refine_every=100000,
+                # warmup_length=100000,
+                # refine_every=100000,
             ),
         ),
         optimizers={
@@ -56,8 +56,8 @@ shadow_splat = MethodSpecification(
                 "scheduler": None,
             },
             "opacities": {
-                # "optimizer": AdamOptimizerConfig(lr=0.05, eps=1e-15),
-                "optimizer": AdamOptimizerConfig(lr=1e-8),
+                "optimizer": AdamOptimizerConfig(lr=0.05, eps=1e-15),
+                # "optimizer": AdamOptimizerConfig(lr=1e-8),
                 "scheduler": None,
             },
             "scales": {
