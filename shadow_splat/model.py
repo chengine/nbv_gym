@@ -349,6 +349,7 @@ class ShadowSplatModel(SplatfactoModel):
         if light is not None:
             # TODO: Implement light intrinsic optimization
             irradiance, irradiance_fraction = self.compute_irradiance(light)
+            print(f"max irradiance: {irradiance.max()}, min irradiance: {irradiance.min()}")
         elif self.irradiance is not None and self.irradiance.shape[0] == self.means.shape[0]:
             # NOTE: during training, the sizes occasionally mismatch right after training
             # For now we just display albedo in the viewer for this one frame as a workaround
