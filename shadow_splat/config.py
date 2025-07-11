@@ -31,6 +31,7 @@ shadow_splat = MethodSpecification(
                 cache_images_type="uint8",
             ),
             model=ShadowSplatModelConfig(
+                sh_degree=0,
                 # reset_alpha_every=1000000,
                 # cull_alpha_thresh=0.001,
                 # warmup_length=100000,

@@ -25,24 +25,26 @@ from gsplat.utils import depth_to_normal
 from nerfstudio.cameras.cameras import Cameras, CameraType
 import matplotlib.pyplot as plt
 
+
 def evaluate_logistic_distribution(
-        means2d: Tensor,        # [N, 2] where N is the number of gaussians in the frustum
-        depths: Tensor,         # [N] where N is the number of gaussians in the frustum
-        depth_image: Tensor,    # [H, W]
-        variance_image: Tensor, # [H, W]
-        variance_factor: Optional[float] = 1.0,
-        cutoff: Optional[float] = 0.3,
-        hard_cutoff: Optional[bool] = False,
+    means2d: Tensor,  # [N, 2] where N is the number of gaussians in the frustum
+    depths: Tensor,  # [N] where N is the number of gaussians in the frustum
+    depth_image: Tensor,  # [H, W]
+    variance_image: Tensor,  # [H, W]
+    variance_factor: Optional[float] = 1.0,
+    cutoff: Optional[float] = 0.3,
+    hard_cutoff: Optional[bool] = False,
 ):
-    
-    ### Only evaluates the logistic distribution for the gaussians in the furstum! Any logic 
+    ### Only evaluates the logistic distribution for the gaussians in the furstum! Any logic
     # that indexes into the total number of gaussians in the scene should be done outside of this function!
-    
+
     H, W = depth_image.shape
     N, _ = means2d.shape
 
     assert N == depths.shape[0], "Number of means and depths must match"
-    assert depth_image.shape == variance_image.shape, "Depth and variance images must have the same shape"
+    assert (
+        depth_image.shape == variance_image.shape
+    ), "Depth and variance images must have the same shape"
 
     # NOTE: These means correspond to Gaussians that are in the frustum!
     pixel_x = means2d[:, 0].long().clamp(0, W - 1)
@@ -54,9 +56,11 @@ def evaluate_logistic_distribution(
 
     # Add minimum variance threshold to prevent division by very small numbers
     variance = torch.clamp(variance_image_flattened, min=1e-8)
-    s = torch.sqrt(variance_factor / (math.pi)**2 * variance)  # n_pixels
+    s = torch.sqrt(variance_factor / (math.pi) ** 2 * variance)  # n_pixels
 
-    sigmoid_argument = (depths - depth_image_flattened[projected_pixel_ids]) / s[projected_pixel_ids]
+    sigmoid_argument = (depths - depth_image_flattened[projected_pixel_ids]) / s[
+        projected_pixel_ids
+    ]
 
     # print("depth diff", (depths - depth_image_flattened[projected_pixel_ids]).max(), (depths - depth_image_flattened[projected_pixel_ids]).min() )
 
@@ -74,13 +78,12 @@ def evaluate_logistic_distribution(
         lit_mask = sigmoid_weights > cutoff
         sigmoid_weights = torch.clamp(sigmoid_weights + lit_mask, 0.0, 1.0)
     else:
-        smooth_mask = torch.sigmoid(
-            (sigmoid_weights - cutoff) * 10.0
-        )  # 10.0 controls sharpness
+        smooth_mask = torch.sigmoid((sigmoid_weights - cutoff) * 10.0)  # 10.0 controls sharpness
         # Apply the smooth mask to create differentiable lighting weights
         sigmoid_weights = smooth_mask + (1.0 - smooth_mask) * sigmoid_weights
 
     return sigmoid_weights
+
 
 def calculate_relighting_weights(
     means: Tensor,  # [N, 3]
@@ -91,7 +94,7 @@ def calculate_relighting_weights(
     Ks: Tensor,  # [C, 3, 3]
     width: int,
     height: int,
-    light: Cameras, 
+    light: Cameras,
     variance_factor: float,
     intensity: List[float],
     cutoff: float,
@@ -109,11 +112,12 @@ def calculate_relighting_weights(
     channel_chunk: int = 32,
     distributed: bool = False,
     camera_model: Literal["pinhole", "ortho", "fisheye"] = "pinhole",
-    distloss: bool = False,     # 2DGS only
+    distloss: bool = False,  # 2DGS only
+    fix_variance: bool = False,
 ) -> Tuple[Tensor, Tensor, Dict]:
     """Compute the relighting weights for a given light source for the scene."""
 
-    N, _ = means.shape      # Number of gaussians in the scene
+    N, _ = means.shape  # Number of gaussians in the scene
     assert N == opacities.shape[0], "Number of means and opacities must match"
     assert N == scales.shape[0], "Number of means and scales must match"
     assert N == quats.shape[0], "Number of means and quaternions must match"
@@ -127,27 +131,31 @@ def calculate_relighting_weights(
         Ks,  # [C, 3, 3]
         width,
         height,
-        near_plane = near_plane,
-        far_plane = far_plane,
-        radius_clip = radius_clip,
-        eps2d = eps2d,
-        packed = True,
-        tile_size = tile_size,
-        depth_mode = depth_mode,
-        sparse_grad = sparse_grad,
-        absgrad = absgrad,
-        rasterize_mode = rasterize_mode,
-        channel_chunk = channel_chunk,
-        distributed = distributed,
-        camera_model = camera_model,
+        near_plane=near_plane,
+        far_plane=far_plane,
+        radius_clip=radius_clip,
+        eps2d=eps2d,
+        packed=True,
+        tile_size=tile_size,
+        depth_mode=depth_mode,
+        sparse_grad=sparse_grad,
+        absgrad=absgrad,
+        rasterize_mode=rasterize_mode,
+        channel_chunk=channel_chunk,
+        distributed=distributed,
+        camera_model=camera_model,
     )
-
-    # TODO: Implement 2DGS moment rasterization
-
     depth_image = moments[..., 0].squeeze()
-    depth_sqr_image = moments[..., 1].squeeze()
-    # variance_image = 1*torch.ones_like(depth_image) 
-    variance_image = depth_sqr_image - depth_image**2
+
+    if fix_variance:
+        # TODO: Implement fix_variance
+        variance_image = torch.ones(width, height).to(means.device)
+    else:
+        depth_sqr_image = moments[..., 1].squeeze()
+        if torch.isnan(depth_image).any() or torch.isnan(depth_sqr_image).any():
+            raise ValueError("Depth or depth squared is nan")
+        # variance_image = 1*torch.ones_like(depth_image)
+        variance_image = depth_sqr_image - depth_image**2
 
     # fig, ax = plt.subplots(1, 2, figsize=(15, 5))
     # ax[0].imshow(depth_image.detach().cpu().numpy())
@@ -157,10 +165,10 @@ def calculate_relighting_weights(
     # fig.colorbar(ax[1].imshow(variance_image.detach().cpu().numpy()), ax=ax[1])
     # plt.show()
 
-    depths = meta["depths"]     # Depths of each gaussian in frustum
-    means2d = meta["means2d"]   # 2D means of each gaussian in frustum
-    gaussian_ids = meta["gaussian_ids"] # Indices of the gaussians in the frustum
-    
+    depths = meta["depths"]  # Depths of each gaussian in frustum
+    means2d = meta["means2d"]  # 2D means of each gaussian in frustum
+    gaussian_ids = meta["gaussian_ids"]  # Indices of the gaussians in the frustum
+
     # # Compute 3D camera space coordinates once and reuse them
     # w2c = torch.eye(4, device=light.camera_to_worlds[0].device)
     # w2c[:3] = light.camera_to_worlds[0, :3]
@@ -171,18 +179,21 @@ def calculate_relighting_weights(
     # depths = -means_camera_space[:, 2]
     # depths = depths[meta["gaussian_ids"]]
 
-    #print(f"depths: {depths.shape}, means2d: {means2d.shape}, gaussian_ids: {gaussian_ids.shape}")
-    #print(f"depth_image: {depth_image.shape}, variance_image: {variance_image.shape}")
+    # print(f"depths: {depths.shape}, means2d: {means2d.shape}, gaussian_ids: {gaussian_ids.shape}")
+    # print(f"depth_image: {depth_image.shape}, variance_image: {variance_image.shape}")
     # This represents the fraction of light that is received by each gaussian in the frustum
     weights = evaluate_logistic_distribution(
-            means2d,        # [N, 2] where N is the number of gaussians in the frustum
-            depths,         # [N] where N is the number of gaussians in the frustum
-            depth_image,    # [H, W]
-            variance_image, # [H, W]
-            variance_factor,
-            cutoff,
-            hard_cutoff,
+        means2d,  # [N, 2] where N is the number of gaussians in the frustum
+        depths,  # [N] where N is the number of gaussians in the frustum
+        depth_image,  # [H, W]
+        variance_image,  # [H, W]
+        variance_factor,
+        cutoff,
+        hard_cutoff,
     )
+
+    if torch.isnan(weights).any():
+        raise ValueError("Weights are nan")
 
     # print("weights", weights.max(), weights.min(), weights.mean())
 
@@ -195,12 +206,13 @@ def calculate_relighting_weights(
         irradiance_fraction = torch.zeros_like(opacities)
 
     # The total intensity of the light that is received by each gaussian in the frustum is the product of the intensity of the light source and the fraction of light that is received by the gaussian
-    irradiance[gaussian_ids] = torch.stack([weights * intensity[0], 
-                                            weights * intensity[1], 
-                                            weights * intensity[2]], dim=-1)
+    irradiance[gaussian_ids] = torch.stack(
+        [weights * intensity[0], weights * intensity[1], weights * intensity[2]], dim=-1
+    )
     irradiance_fraction[gaussian_ids] = weights
 
     return irradiance, irradiance_fraction
+
 
 # Renders the accumulated or expected depth (first moment) and the accumulated
 # or expected variance (second moment). Will add higher moments as necessary.
@@ -229,7 +241,6 @@ def moment_rasterization(
     camera_model: Literal["pinhole", "ortho", "fisheye"] = "pinhole",
     covars: Optional[Tensor] = None,
 ) -> Tuple[Tensor, Tensor, Dict]:
-    
     # TODO: Rewrite documentation to reflect the moment rendering
 
     """Rasterize a set of 3D Gaussians (N) to a batch of image planes (C).
@@ -682,6 +693,7 @@ def moment_rasterization(
 
     return render_colors, render_alphas, meta
 
+
 # Regular rasterization, but allows to simultaneously render additional channels
 # TODO: Do we want these additional channels to be view dependent?
 def augmented_rasterization(
@@ -699,8 +711,8 @@ def augmented_rasterization(
     radius_clip: float = 0.0,
     eps2d: float = 0.3,
     sh_degree: Optional[int] = None,
-    additional_channels: Optional[Tensor] = None, # [(C,) N, D2] or [(C,) N, K, D2]
-    color_weights: Optional[Tensor] = None, # [(C,) N, 3],
+    additional_channels: Optional[Tensor] = None,  # [(C,) N, D2] or [(C,) N, K, D2]
+    color_weights: Optional[Tensor] = None,  # [(C,) N, 3],
     packed: bool = True,
     tile_size: int = 16,
     backgrounds: Optional[Tensor] = None,
@@ -925,22 +937,16 @@ def augmented_rasterization(
             colors.dim() == 3 and colors.shape[:2] == (C, N)
         ), colors.shape
         if distributed:
-            assert (
-                colors.dim() == 2
-            ), "Distributed mode only supports per-Gaussian colors."
+            assert colors.dim() == 2, "Distributed mode only supports per-Gaussian colors."
     else:
         # treat colors as SH coefficients, should be in shape [N, K, 3] or [C, N, K, 3]
         # Allowing for activating partial SH bands
-        assert (
-            colors.dim() == 3 and colors.shape[0] == N and colors.shape[2] == 3
-        ) or (
+        assert (colors.dim() == 3 and colors.shape[0] == N and colors.shape[2] == 3) or (
             colors.dim() == 4 and colors.shape[:2] == (C, N) and colors.shape[3] == 3
         ), colors.shape
         assert (sh_degree + 1) ** 2 <= colors.shape[-2], colors.shape
         if distributed:
-            assert (
-                colors.dim() == 3
-            ), "Distributed mode only supports per-Gaussian colors."
+            assert colors.dim() == 3, "Distributed mode only supports per-Gaussian colors."
 
     if absgrad:
         assert not distributed, "AbsGrad is not supported in distributed mode."
@@ -1048,7 +1054,7 @@ def augmented_rasterization(
             else:
                 # Turn [C, N, K, 3] into [nnz, 3]
                 shs = colors[camera_ids, gaussian_ids, :, :]  # [nnz, K, 3]
-            #assert not torch.isnan(colors).any(), "NaN detected before spherical_harmonics"
+            # assert not torch.isnan(colors).any(), "NaN detected before spherical_harmonics"
             colors = spherical_harmonics(sh_degree, dirs, shs, masks=masks)  # [nnz, 3]
             # assert not torch.isnan(colors).any(), "NaN detected after spherical_harmonics"
         else:
@@ -1070,7 +1076,7 @@ def augmented_rasterization(
             # print("shs nan:", torch.isnan(shs).any(), "inf:", torch.isinf(shs).any())
             colors = spherical_harmonics(sh_degree, dirs, shs, masks=masks)  # [C, N, 3]
             # print("colors nan?", torch.isnan(colors).any(), "inf?", torch.isinf(colors).any())
-            #assert not torch.isnan(colors).any(), f"NaN detected after spherical_harmonics. {colors.isnan().sum()}"
+            # assert not torch.isnan(colors).any(), f"NaN detected after spherical_harmonics. {colors.isnan().sum()}"
         # make it apple-to-apple with Inria's CUDA Backend.
         colors = torch.clamp_min(colors + 0.5, 0.0)
     # If in distributed mode, we need to scatter the GSs to the destination ranks, based
@@ -1165,7 +1171,7 @@ def augmented_rasterization(
             # The absolute color is the albedo (base color of Gaussian), the fraction of light reflected in each channel, times the intensity of the light incident on the Gaussian
             relit_colors = colors * color_weights
             colors = torch.cat((colors, relit_colors), dim=-1)
-    
+
         if additional_channels is not None:
             colors = torch.cat((colors, additional_channels, depths[..., None]), dim=-1)
             background_channels_pad_size = additional_channels.shape[-1] + 1
@@ -1175,11 +1181,20 @@ def augmented_rasterization(
 
         if backgrounds is not None and color_weights is not None:
             backgrounds = torch.cat(
-                [backgrounds, backgrounds, torch.zeros(C, background_channels_pad_size, device=backgrounds.device)], dim=-1
+                [
+                    backgrounds,
+                    backgrounds,
+                    torch.zeros(C, background_channels_pad_size, device=backgrounds.device),
+                ],
+                dim=-1,
             )
         elif backgrounds is not None and color_weights is None:
             backgrounds = torch.cat(
-                [backgrounds, torch.zeros(C, background_channels_pad_size, device=backgrounds.device)], dim=-1
+                [
+                    backgrounds,
+                    torch.zeros(C, background_channels_pad_size, device=backgrounds.device),
+                ],
+                dim=-1,
             )
 
     elif render_mode in ["D", "ED"]:
@@ -1194,22 +1209,33 @@ def augmented_rasterization(
             # print('color_weights', color_weights.isnan().any(), color_weights.isinf().any())
             relit_colors = colors * color_weights
             colors = torch.cat((colors, relit_colors), dim=-1)
-    
+
         if additional_channels is not None:
             colors = torch.cat((colors, additional_channels), dim=-1)
             background_channels_pad_size = additional_channels.shape[-1]
 
-        if backgrounds is not None and color_weights is not None and additional_channels is not None:
+        if (
+            backgrounds is not None
+            and color_weights is not None
+            and additional_channels is not None
+        ):
             backgrounds = torch.cat(
-                [backgrounds, backgrounds, torch.zeros(C, background_channels_pad_size, device=backgrounds.device)], dim=-1
+                [
+                    backgrounds,
+                    backgrounds,
+                    torch.zeros(C, background_channels_pad_size, device=backgrounds.device),
+                ],
+                dim=-1,
             )
         elif backgrounds is not None and color_weights is not None and additional_channels is None:
-            backgrounds = torch.cat(
-                [backgrounds, backgrounds], dim=-1
-            )
+            backgrounds = torch.cat([backgrounds, backgrounds], dim=-1)
         elif backgrounds is not None and color_weights is None and additional_channels is not None:
             backgrounds = torch.cat(
-                [backgrounds, torch.zeros(C, background_channels_pad_size, device=backgrounds.device)], dim=-1
+                [
+                    backgrounds,
+                    torch.zeros(C, background_channels_pad_size, device=backgrounds.device),
+                ],
+                dim=-1,
             )
 
     # Identify intersecting tiles
@@ -1301,6 +1327,7 @@ def augmented_rasterization(
         )
 
     return render_colors, render_alphas, meta
+
 
 # Renders the accumulated or expected depth (first moment) and the accumulated
 # or expected variance (second moment) for 2DGS. Will add higher moments as necessary.
@@ -1468,9 +1495,7 @@ def moment_rasterization_2dgs(
         opacities = opacities.repeat(C, 1)
         camera_ids, gaussian_ids = None, None
 
-    densify = torch.zeros_like(
-        means2d, dtype=means.dtype, requires_grad=True, device="cuda"
-    )
+    densify = torch.zeros_like(means2d, dtype=means.dtype, requires_grad=True, device="cuda")
     # Identify intersecting tiles
     tile_width = math.ceil(width / float(tile_size))
     tile_height = math.ceil(height / float(tile_size))
@@ -1565,6 +1590,7 @@ def moment_rasterization_2dgs(
         meta,
     )
 
+
 # Regular rasterization, but allows to simultaneously render additional channels for 2DGS
 # TODO: Do we want these additional channels to be view dependent?
 def augmented_rasterization_2dgs(
@@ -1582,8 +1608,8 @@ def augmented_rasterization_2dgs(
     radius_clip: float = 0.0,
     eps2d: float = 0.3,
     sh_degree: Optional[int] = None,
-    additional_channels: Optional[Tensor] = None, # [(C,) N, D2] or [(C,) N, K, D2]
-    color_weights: Optional[Tensor] = None, # [(C,) N, 3]
+    additional_channels: Optional[Tensor] = None,  # [(C,) N, D2] or [(C,) N, K, D2]
+    color_weights: Optional[Tensor] = None,  # [(C,) N, 3]
     tone_mapping: Literal["linear", "luminance", "reinhard"] = "linear",
     gamma_correction: float = 2.2,
     packed: bool = False,
@@ -1726,9 +1752,7 @@ def augmented_rasterization_2dgs(
         ), colors.shape
     else:
         # treat colors as SH coefficients. Allowing for activating partial SH bands
-        assert (
-            colors.dim() == 3 and colors.shape[0] == N and colors.shape[2] == 3
-        ), colors.shape
+        assert colors.dim() == 3 and colors.shape[0] == N and colors.shape[2] == 3, colors.shape
         assert (sh_degree + 1) ** 2 <= colors.shape[1], colors.shape
 
     # Compute Ray-Splat intersection transformation.
@@ -1764,9 +1788,7 @@ def augmented_rasterization_2dgs(
         opacities = opacities.repeat(C, 1)
         camera_ids, gaussian_ids = None, None
 
-    densify = torch.zeros_like(
-        means2d, dtype=means.dtype, requires_grad=True, device="cuda"
-    )
+    densify = torch.zeros_like(means2d, dtype=means.dtype, requires_grad=True, device="cuda")
     # Identify intersecting tiles
     tile_width = math.ceil(width / float(tile_size))
     tile_height = math.ceil(height / float(tile_size))
@@ -1786,9 +1808,7 @@ def augmented_rasterization_2dgs(
 
     # TODO: SH also suport N-D.
     # Compute the per-view colors
-    if not (
-        colors.dim() == 3 and sh_degree is None
-    ):  # silently support [C, N, D] color.
+    if not (colors.dim() == 3 and sh_degree is None):  # silently support [C, N, D] color.
         colors = (
             colors[gaussian_ids] if packed else colors.expand(C, *([-1] * colors.dim()))
         )  # [nnz, D] or [C, N, 3]
@@ -1814,7 +1834,7 @@ def augmented_rasterization_2dgs(
             # The absolute color is the albedo (base color of Gaussian), the fraction of light reflected in each channel, times the intensity of the light incident on the Gaussian
             relit_colors = colors * color_weights
             colors = torch.cat((colors, relit_colors), dim=-1)
-    
+
         if additional_channels is not None:
             colors = torch.cat((colors, additional_channels, depths[..., None]), dim=-1)
             background_channels_pad_size = additional_channels.shape[-1] + 1
@@ -1824,11 +1844,20 @@ def augmented_rasterization_2dgs(
 
         if backgrounds is not None and color_weights is not None:
             backgrounds = torch.cat(
-                [backgrounds, backgrounds, torch.zeros(C, background_channels_pad_size, device=backgrounds.device)], dim=-1
+                [
+                    backgrounds,
+                    backgrounds,
+                    torch.zeros(C, background_channels_pad_size, device=backgrounds.device),
+                ],
+                dim=-1,
             )
         elif backgrounds is not None and color_weights is None:
             backgrounds = torch.cat(
-                [backgrounds, torch.zeros(C, background_channels_pad_size, device=backgrounds.device)], dim=-1
+                [
+                    backgrounds,
+                    torch.zeros(C, background_channels_pad_size, device=backgrounds.device),
+                ],
+                dim=-1,
             )
 
     elif render_mode in ["D", "ED"]:
@@ -1841,22 +1870,33 @@ def augmented_rasterization_2dgs(
             # The absolute color is the albedo (base color of Gaussian), the fraction of light reflected in each channel, times the intensity of the light incident on the Gaussian
             relit_colors = colors * color_weights
             colors = torch.cat((colors, relit_colors), dim=-1)
-    
+
         if additional_channels is not None:
             colors = torch.cat((colors, additional_channels), dim=-1)
             background_channels_pad_size = additional_channels.shape[-1]
 
-        if backgrounds is not None and color_weights is not None and additional_channels is not None:
+        if (
+            backgrounds is not None
+            and color_weights is not None
+            and additional_channels is not None
+        ):
             backgrounds = torch.cat(
-                [backgrounds, backgrounds, torch.zeros(C, background_channels_pad_size, device=backgrounds.device)], dim=-1
+                [
+                    backgrounds,
+                    backgrounds,
+                    torch.zeros(C, background_channels_pad_size, device=backgrounds.device),
+                ],
+                dim=-1,
             )
         elif backgrounds is not None and color_weights is not None and additional_channels is None:
-            backgrounds = torch.cat(
-                [backgrounds, backgrounds], dim=-1
-            )
+            backgrounds = torch.cat([backgrounds, backgrounds], dim=-1)
         elif backgrounds is not None and color_weights is None and additional_channels is not None:
             backgrounds = torch.cat(
-                [backgrounds, torch.zeros(C, background_channels_pad_size, device=backgrounds.device)], dim=-1
+                [
+                    backgrounds,
+                    torch.zeros(C, background_channels_pad_size, device=backgrounds.device),
+                ],
+                dim=-1,
             )
 
     (

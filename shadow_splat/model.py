@@ -38,6 +38,7 @@ from shadow_splat.shadow_splat_rendering import (
     augmented_rasterization_2dgs,
     calculate_relighting_weights,
 )
+
 # torch.autograd.set_detect_anomaly(True)
 import math
 from nerfstudio.cameras.cameras import Cameras, CameraType
@@ -52,6 +53,7 @@ from nerfstudio.model_components.lib_bilagrid import (
 from shadow_splat.util.nerfstudio import get_viewmat
 import matplotlib.pyplot as plt
 
+
 @dataclass
 class ShadowSplatModelConfig(SplatfactoModelConfig):
     """Splatfacto Model Config, nerfstudio's implementation of Gaussian Splatting"""
@@ -63,6 +65,7 @@ class ShadowSplatModelConfig(SplatfactoModelConfig):
     )
     tone_mapping: Literal["linear", "luminance", "reinhard"] = "linear"
     gamma_correction: float = 1.0
+    fix_variance: bool = False
 
 
 class ShadowSplatModel(SplatfactoModel):
@@ -263,6 +266,7 @@ class ShadowSplatModel(SplatfactoModel):
             rasterize_mode=self.config.rasterize_mode,
             camera_model=light_model,
             distloss=False,  # 2DGS only
+            fix_variance=self.config.fix_variance,
         )
         self.irradiance = irradiance
         self.irradiance_fraction = irradiance_fraction
@@ -382,8 +386,10 @@ class ShadowSplatModel(SplatfactoModel):
             far_plane=1e10,
             render_mode=render_mode,
             sh_degree=sh_degree_to_use,
-            additional_channels=irradiance_fraction.reshape(-1, 1) if irradiance_fraction is not None else None, # [(C,) N, D2] or [(C,) N, K, D2]
-            color_weights=irradiance, # [(C,) N, 3],
+            additional_channels=(
+                irradiance_fraction.reshape(-1, 1) if irradiance_fraction is not None else None
+            ),  # [(C,) N, D2] or [(C,) N, K, D2]
+            color_weights=irradiance,  # [(C,) N, 3],
             sparse_grad=False,
             absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
             rasterize_mode=self.config.rasterize_mode,
@@ -424,6 +430,8 @@ class ShadowSplatModel(SplatfactoModel):
 
             # Does gamma correction # NOTE: leads to nans during training
             relit_rgb = relit_rgb ** (1.0 / self.config.gamma_correction)
+            if torch.isnan(relit_rgb).any():
+                raise ValueError("Relit rgb is nan")
         else:
             relit_rgb = albedo_rgb
 
