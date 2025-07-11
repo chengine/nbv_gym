@@ -70,16 +70,17 @@ class ShadowSplatDataParser(Nerfstudio):
         # print("dataparser | config.load_3D_points", self.config.load_3D_points)
         # if self.config.load_3D_points:  # NOTE: for some reason this is False even though we set it to True in the method config
         # print("dataparser | loading 3D points")
-        if "ply_file_path" in meta:
-            ply_file_path = data_dir / meta["ply_file_path"]
-            if ply_file_path:
-                sparse_points = self._load_3D_points(
-                    ply_file_path,
-                    dataparser_outputs.dataparser_transform,
-                    dataparser_outputs.dataparser_scale,
-                )
-                if sparse_points is not None:
-                    dataparser_outputs.metadata.update(sparse_points)
+        # print(dataparser_outputs.metadata)
+        # if "ply_file_path" in meta:
+        #     ply_file_path = data_dir / meta["ply_file_path"]
+        #     if ply_file_path:
+        #         sparse_points = self._load_3D_points(
+        #             ply_file_path,
+        #             dataparser_outputs.dataparser_transform,
+        #             dataparser_outputs.dataparser_scale,
+        #         )
+        #         if sparse_points is not None:
+        #             dataparser_outputs.metadata.update(sparse_points)
 
         # Get the same indices that were used for cameras in the parent method
         # This ensures lights and cameras have the same split
