@@ -1,0 +1,2 @@
+Repeat update_light_source
+  avg: 0.0307s, max: 0.2540s, min: 0.0279s

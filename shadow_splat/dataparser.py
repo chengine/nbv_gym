@@ -70,7 +70,6 @@ class ShadowSplatDataParser(Nerfstudio):
         # print("dataparser | config.load_3D_points", self.config.load_3D_points)
         # if self.config.load_3D_points:  # NOTE: for some reason this is False even though we set it to True in the method config
         # print("dataparser | loading 3D points")
-        # print(dataparser_outputs.metadata)
         # if "ply_file_path" in meta:
         #     ply_file_path = data_dir / meta["ply_file_path"]
         #     if ply_file_path:
