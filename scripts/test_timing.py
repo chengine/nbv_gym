@@ -134,11 +134,8 @@ if __name__ == "__main__":
     times = []
     for i in range(100):
         start_time = time.time()
-        shadow_meta = model.update_light_source(light)
+        shadow_meta = model.compute_irradiance(light)
         times.append(time.time() - start_time)
-
-    clear_shadow_meta(shadow_meta)
-    clear_model_memory(model)
 
     # Write result to file
     repeat_result = f"Repeat update_light_source\n  avg: {np.mean(times):.4f}s, max: {np.max(times):.4f}s, min: {np.min(times):.4f}s"
@@ -154,11 +151,8 @@ if __name__ == "__main__":
         light_pose = torch.tensor(transforms["frames"][idx]["light_pose"]).to(device)
         light.camera_to_worlds = light_pose.unsqueeze(0)
         start_time = time.time()
-        shadow_meta = model.update_light_source(light)
+        shadow_meta = model.compute_irradiance(light)
         times.append(time.time() - start_time)
-
-        clear_shadow_meta(shadow_meta)
-        clear_model_memory(model)
 
     # Write result to file
     different_result = f"Different update_light_source\n  avg: {np.mean(times):.4f}s, max: {np.max(times):.4f}s, min: {np.min(times):.4f}s"

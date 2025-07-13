@@ -20,8 +20,7 @@ Gaussian Splatting implementation that combines many recent advancements.
 from __future__ import annotations
 import os
 
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-
+# os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple, Type, Union
 import torch
@@ -32,109 +31,27 @@ try:
     from gsplat.rendering import rasterization
 except ImportError:
     print("Please install gsplat>=1.0.0")
+from shadow_splat.shadow_splat_rendering import (
+    moment_rasterization,
+    augmented_rasterization,
+    moment_rasterization_2dgs,
+    augmented_rasterization_2dgs,
+    calculate_relighting_weights,
+)
+
+# torch.autograd.set_detect_anomaly(True)
 import math
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.models.splatfacto import SplatfactoModelConfig, SplatfactoModel
 from nerfstudio.utils.spherical_harmonics import RGB2SH, SH2RGB
-
-from gsplat.cuda._wrapper import rasterize_to_indices_in_range
-from nerfacc import render_weight_from_alpha
-
+from nerfstudio.model_components.lib_bilagrid import (
+    BilateralGrid,
+    color_correct,
+    slice,
+    total_variation_loss,
+)
 from shadow_splat.util.nerfstudio import get_viewmat
-
-
-# @torch.compile
-def apply_weight_to_RGB(
-    input,
-    weights,
-    intensity,
-    tonemapping_type: Optional[Literal["linear", "reinhard", "luminance"]] = "linear",
-    gamma_correction: Optional[bool] = True,
-):
-    ### TODO: How to handle spherical harmonics???
-    if input.dim() == 3:  # higher order spherical harmonics
-        new_color = input
-    else:  # direct color
-        new_color = weights * SH2RGB(input)  # NOTE: THIS IS THE ORIGINAL LINEAR WEIGHTING
-        update_color_mask = weights.squeeze(-1) < 1.0
-
-        updated_color = new_color[update_color_mask]
-
-        # Apply tonemapping to the color
-        updated_color[:, 0] *= intensity[0]
-        updated_color[:, 1] *= intensity[1]
-        updated_color[:, 2] *= intensity[2]
-
-        # Does Reinhard tonemapping
-        if tonemapping_type == "reinhard":
-            updated_color /= updated_color + 1.0
-
-        # Does luminance tonemapping
-        elif tonemapping_type == "luminance":
-            luminance = (
-                0.2126 * updated_color[:, 0]
-                + 0.7152 * updated_color[:, 1]
-                + 0.0722 * updated_color[:, 2]
-            )
-            updated_color /= (luminance + 1.0)[:, None]
-
-        # Does linear tonemapping
-        elif tonemapping_type == "linear":
-            updated_color = torch.clamp(updated_color, min=0.0, max=1.0)
-
-        # Does gamma correction # NOTE: leads to nans during training
-        # if gamma_correction:
-        #     updated_color = updated_color ** (1.0 / 2.2)
-
-        new_color[update_color_mask] = updated_color
-        new_color = RGB2SH(new_color)
-
-    return new_color
-
-
-# @torch.compile
-def prepare_weights(meta):
-    C, N = meta["means2d"].shape[:2]
-    pixel_ids_x = meta["pixel_ids"] % meta["width"]
-    pixel_ids_y = meta["pixel_ids"] // meta["width"]
-    pixel_coords = torch.stack([pixel_ids_x, pixel_ids_y], dim=-1) + 0.5  # [M, 2]
-    deltas = pixel_coords - meta["means2d"][meta["camera_ids"], meta["gs_ids"]]  # [M, 2]
-
-    c = meta["conics"][meta["camera_ids"], meta["gs_ids"]]  # [M, 3]
-    sigmas = (
-        0.5 * (c[:, 0] * deltas[:, 0] ** 2 + c[:, 2] * deltas[:, 1] ** 2)
-        + c[:, 1] * deltas[:, 0] * deltas[:, 1]
-    )  # [M]
-
-    alphas = torch.clamp_max(
-        meta["opacities"][meta["camera_ids"], meta["gs_ids"]] * torch.exp(-sigmas), 0.999
-    )
-
-    indices = meta["camera_ids"] * meta["height"] * meta["width"] + meta["pixel_ids"]
-    total_pixels = C * meta["height"] * meta["width"]
-
-    return alphas, indices, total_pixels
-
-
-# @torch.compile
-def relighting_absorb_mode(meta, weights, device, reduce, reweighting_fn):
-    C, N = meta["means2d"].shape[:2]
-
-    ### (weights, pixel_ids, gs_ids)
-    ### We want to apply the weights to the gaussians in the scene. This is basically a scatter_reduce operation. Since there can be
-    # multiple weights attributed to a single gaussian, we have to determine how to reduce the weights. Several options are ['mean', 'max', 'min'].
-
-    # Initialize the weights to 1.0. This means that the Gaussians not rasterized are kept at albedo. NOTE: We may want to change this behavior so that
-    # when there is no albedo lighting, then the gaussians not rasterized are black.
-    weights_ = torch.ones(N, device=device)
-    weights_.scatter_reduce_(0, meta["gs_ids"], weights, reduce=reduce, include_self=False)
-
-    # Reweighting function uses the rendering weights and maps it through a function to handle how light is absorbed by the gaussians.
-    lighting_weights = reweighting_fn(weights_)
-
-    lighting_weights = lighting_weights.unsqueeze(-1)
-
-    return lighting_weights
+import matplotlib.pyplot as plt
 
 
 @dataclass
@@ -143,7 +60,12 @@ class ShadowSplatModelConfig(SplatfactoModelConfig):
 
     _target: Type = field(default_factory=lambda: ShadowSplatModel)
     # TODO: add shadow splat specific parameters here
-    compute_variance: bool = False
+    ambient: bool = (
+        True  # Controls whether Gaussians outside the light frustum are set to ambient or to black
+    )
+    tone_mapping: Literal["linear", "luminance", "reinhard"] = "linear"
+    gamma_correction: float = 1.0
+    fix_variance: bool = False
 
 
 class ShadowSplatModel(SplatfactoModel):
@@ -174,252 +96,17 @@ class ShadowSplatModel(SplatfactoModel):
             }
         )
 
-        self.shadow_fn = None
-        self.lighting_weights = None
+        self.irradiance = None
+        self.irradiance_fraction = None
 
-        ### TODO: Learn this lighting_fn!!!
-        # self.reweighting_param = torch.nn.Parameter(torch.randn(1, device='cuda'))
-        # self.reweighting_fn = lambda x: torch.pow(x, (torch.nn.functional.softplus(self.reweighting_param)))
-
-    def update_light_source(
-        self,
-        light_source: Cameras,
-        mask: Optional[torch.Tensor] = None,
-        reduce: Optional[Literal["mean", "amax", "amin"]] = "amax",
-        variance_factor: Optional[float] = None,
-        intensity: Optional[List[float]] = None,
-        cutoff: Optional[float] = None,
-    ):
-        """Update the light source, generating a new shadow function for the scene."""
-
-        # Use learnable parameters if not provided
-        if variance_factor is None:
-            variance_factor = torch.exp(self.light_params["variance_factor"])
-        if intensity is None:
-            intensity = torch.exp(self.light_params["intensity"])
-        if cutoff is None:
-            cutoff = torch.sigmoid(self.light_params["cutoff"])
-
-        ######
-        # Investigate if this is optimizing the light source pose
-        if self.training:
-            assert light_source.shape[0] == 1, "Only one camera at a time"
-            optimized_light_to_world = self.camera_optimizer.apply_to_camera(light_source)
-        else:
-            optimized_light_to_world = light_source.camera_to_worlds
-        # optimized_light_to_world = light_source.camera_to_worlds
-        #######
-
-        # cropping
-        if self.crop_box is not None and not self.training:
-            crop_ids = self.crop_box.within(self.means).squeeze()
-            if crop_ids.sum() == 0:
-                return self.get_empty_outputs(
-                    int(light_source.width.item()),
-                    int(light_source.height.item()),
-                    self.background_color,
-                )
-        else:
-            crop_ids = None
-
-        if crop_ids is not None:
-            opacities_crop = self.opacities[crop_ids]
-            means_crop = self.means[crop_ids]
-            features_dc_crop = self.features_dc[crop_ids]
-            features_rest_crop = self.features_rest[crop_ids]
-            scales_crop = self.scales[crop_ids]
-            quats_crop = self.quats[crop_ids]
-        else:
-            opacities_crop = self.opacities
-            means_crop = self.means
-            features_dc_crop = self.features_dc
-            features_rest_crop = self.features_rest
-            scales_crop = self.scales
-            quats_crop = self.quats
-
-        colors_crop = torch.cat((features_dc_crop[:, None, :], features_rest_crop), dim=1)
-
-        camera_scale_fac = self._get_downscale_factor()
-        light_source.rescale_output_resolution(1 / camera_scale_fac)
-        viewmat = get_viewmat(optimized_light_to_world)
-        K = light_source.get_intrinsics_matrices().cuda()
-        W, H = int(light_source.width.item()), int(light_source.height.item())
-        self.last_size = (H, W)
-        light_source.rescale_output_resolution(camera_scale_fac)  # type: ignore
-
-        if light_source.camera_type == CameraType.PERSPECTIVE.value:
-            camera_model = "pinhole"
-        elif light_source.camera_type == CameraType.ORTHOPHOTO.value:
-            camera_model = "ortho"
-        elif light_source.camera_type == CameraType.FISHEYE.value:
-            camera_model = "fisheye"
-        else:
-            raise ValueError("Unknown camera type: %s", light_source.camera_type)
-
-        # apply the compensation of screen space blurring to gaussians
-        if self.config.rasterize_mode not in ["antialiased", "classic"]:
-            raise ValueError("Unknown rasterize_mode: %s", self.config.rasterize_mode)
-
-        if self.config.sh_degree > 0:
-            sh_degree_to_use = min(
-                self.step // self.config.sh_degree_interval, self.config.sh_degree
-            )
-        else:
-            colors_crop = torch.sigmoid(colors_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
-            sh_degree_to_use = None
-
-        depth, alphas, meta = rasterization(
-            means=means_crop,
-            quats=quats_crop,  # rasterization does normalization internally
-            scales=torch.exp(scales_crop),
-            opacities=torch.sigmoid(opacities_crop).squeeze(-1),
-            colors=colors_crop,
-            viewmats=viewmat,  # [1, 4, 4]
-            Ks=K,  # [1, 3, 3]
-            width=W,
-            height=H,
-            packed=True,
-            near_plane=0.01,
-            far_plane=1e10,
-            render_mode="ED",
-            sh_degree=sh_degree_to_use,
-            sparse_grad=False,
-            absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
-            rasterize_mode=self.config.rasterize_mode,
-            # set some threshold to disregrad small gaussians for faster rendering.
-            # radius_clip=3.0,
-            camera_model=camera_model,
-        )
-
-        # Compute 3D camera space coordinates once and reuse them
-        w2c = torch.eye(4, device=light_source.camera_to_worlds[0].device)
-        w2c[:3] = light_source.camera_to_worlds[0, :3]
-        w2c = torch.linalg.inv(w2c)
-
-        # Transform all means to camera space
-        means_camera_space = (w2c[:3, :3] @ means_crop.T).T + w2c[:3, 3][None]
-
-        meta["means2d"] = meta["means2d"].unsqueeze(0)
-        meta["conics"] = meta["conics"].unsqueeze(0)
-        meta["opacities"] = meta["opacities"].unsqueeze(0)
-
-        # pixel_ids/gaussian ids are sorted in order of depth of gaussians
-        if self.config.compute_variance:
-            gs_ids, pixel_ids, camera_ids = rasterize_to_indices_in_range(
-                0,
-                1000,
-                torch.ones(1, meta["height"], meta["width"], device=self.device),
-                meta["means2d"],
-                meta["conics"],
-                meta["opacities"],
-                meta["width"],
-                meta["height"],
-                meta["tile_size"],
-                meta["isect_offsets"],
-                meta["flatten_ids"],
-            )
-
-            meta["gs_ids"] = gs_ids
-            meta["pixel_ids"] = pixel_ids
-            meta["camera_ids"] = camera_ids
-
-            alphas, indices, total_pixels = prepare_weights(meta)
-
-            # Returns the weights and the transmittances
-            weights, _ = render_weight_from_alpha(alphas, ray_indices=indices, n_rays=total_pixels)
-
-            ### TODO: FIND ALL GAUSSIAN PIXEL INTERSECTIONS IN THE PROJECTION STEP (NOT THE RASTERIZATION STEP)
-            ### TODO: REPLACE ADVANCED INDEXING WITH MULTIPLICATION AND ADDITION FOR FASTER COMPUTATION
-            # Calculate the distance of rasterized Gaussians to the light source to get logistic parameters
-            means_rasterized_camera = means_camera_space[gs_ids]
-            distances = -means_rasterized_camera[:, 2]  # torch.norm(diff, dim=-1)
-
-            # Use the weights to calculate the variance of the fitted logistic function for each ray
-            depth_flattened = depth.reshape(-1)[pixel_ids]
-            centered_distances_squared = (distances - depth_flattened) ** 2
-
-            # Sum up the centered distance for each ray
-            variance = torch.zeros(total_pixels, device=self.device)
-            variance.scatter_add_(0, pixel_ids, weights * centered_distances_squared)
-        else:
-            # NOTE: hardcode variance to test
-            total_pixels = meta["height"] * meta["width"]
-            variance = 0.04 * torch.ones(total_pixels, device=self.device)
-
-        # Add minimum variance threshold to prevent division by very small numbers
-        variance = torch.clamp(variance, min=1e-8)
-
-        s = torch.sqrt(variance_factor / (math.pi) ** 2 * variance)  # n_pixels
-
-        # Apply the logistic function CDF weighting to all projected Gaussians
-        xy = meta["means2d"].squeeze()  # shape [nnz, 2], in pixel coordinates
-        H, W = meta["height"], meta["width"]
-        pixel_x = xy[:, 0].long().clamp(0, W - 1)
-        pixel_y = xy[:, 1].long().clamp(0, H - 1)
-        projected_pixel_ids = pixel_y * W + pixel_x  # shape [nnz]
-        projected_gs_ids = meta["gaussian_ids"].squeeze()
-
-        means_projected_camera = means_camera_space[projected_gs_ids]
-        projected_gs_distances = -means_projected_camera[:, 2]
-
-        sigmoid_argument = (projected_gs_distances - depth.reshape(-1)[projected_pixel_ids]) / s[
-            projected_pixel_ids
-        ]
-
-        sigmoid_weights = 1.0 - torch.sigmoid(sigmoid_argument)
-
-        # Use learnable cutoff parameter for differentiable masking
-        if self.training:
-            smooth_mask = torch.sigmoid(
-                (sigmoid_weights - cutoff) * 10.0
-            )  # 10.0 controls sharpness
-            # Apply the smooth mask to create differentiable lighting weights
-            sigmoid_weights = smooth_mask + (1.0 - smooth_mask) * sigmoid_weights
-        else:
-            # During evaluation, use the provided cutoff for consistency
-            lit_mask = sigmoid_weights > cutoff
-            sigmoid_weights = torch.clamp(sigmoid_weights + lit_mask, 0.0, 1.0)
-
-        # Way to reduce sigmoid weights into n_gaussians
-        # NOTE: IF WE SET THE DEFAULT TO 1, THEN GAUSSIANS NOT IN THE FRUSTUM ARE WELL-LIT
-        weights_ = torch.ones(self.means.shape[0], device=self.device)
-        # TODO: Might need this if we find that only applying weighting to projected gaussians based only on their means is not sufficient
-        # for accuracy
-        # weights_.scatter_reduce_(0, projected_gs_ids, sigmoid_weights, reduce="amax", include_self=False)
-        weights_[projected_gs_ids] = sigmoid_weights
-        self.lighting_weights = weights_.unsqueeze(-1)
-
-        # During training, detach the lighting weights to prevent gradient issues
-        # if self.training:
-        #     self.lighting_weights = self.lighting_weights.detach()
-
-        self.shadow_fn = lambda x: apply_weight_to_RGB(x, self.lighting_weights, intensity)
-
-        shadow_meta = {
-            # "distances": distances,
-            # "depth_flattened": depth_flattened,
-            # "centered_distances_squared": centered_distances_squared,
-            "variance": variance,
-            "s": s,
-            "sigmoid_weights": sigmoid_weights,
-            "sigmoid_argument": sigmoid_argument,
-            "depth": depth,
-        }
-        return shadow_meta
-
+    # TODO: What's the best way to return features_dc/rest to reflect the shadows conditioned on a light source?
     @property
     def features_dc(self):
-        if self.shadow_fn is not None:
-            return self.shadow_fn(self.gauss_params["features_dc"])
-        else:
-            return self.gauss_params["features_dc"]
+        return self.gauss_params["features_dc"]
 
     @property
     def features_rest(self):
-        if self.shadow_fn is not None:
-            return self.shadow_fn(self.gauss_params["features_rest"])
-        else:
-            return self.gauss_params["features_rest"]
+        return self.gauss_params["features_rest"]
 
     @property
     def albedo_dc(self):
@@ -469,8 +156,6 @@ class ShadowSplatModel(SplatfactoModel):
             )
         else:
             raise ValueError(f"Unknown strategy {self.strategy}")
-        # NOTE: temporary hack
-        self.shadow_fn = None
 
     def get_light_param_groups(self) -> Dict[str, List[Parameter]]:
         return {
@@ -505,6 +190,88 @@ class ShadowSplatModel(SplatfactoModel):
         """
         return self.get_outputs(camera, light)
 
+    def compute_irradiance(
+        self,
+        light: Cameras,
+        variance_factor: Optional[float] = None,
+        intensity: Optional[float] = None,
+        cutoff: Optional[float] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Get the irradiance for a given camera and light source.
+
+        Args:
+            camera: The camera(s) for which output images are rendered
+            light: Optional light source camera for shadow computation
+        """
+        camera_scale_fac = self._get_downscale_factor()
+        opacities_crop = self.opacities
+        means_crop = self.means
+        scales_crop = self.scales
+        quats_crop = self.quats
+
+        # TODO: Implement light intrinsic optimization
+        light_camera_to_world = light.camera_to_worlds
+        light.rescale_output_resolution(1 / camera_scale_fac)
+        light_viewmat = get_viewmat(light_camera_to_world)
+        light_K = light.get_intrinsics_matrices().cuda()
+        light_W, light_H = int(light.width.item()), int(light.height.item())
+        self.light_last_size = (light_H, light_W)
+        light.rescale_output_resolution(camera_scale_fac)  # type: ignore
+
+        if light.camera_type == CameraType.PERSPECTIVE.value:
+            light_model = "pinhole"
+        elif light.camera_type == CameraType.ORTHOPHOTO.value:
+            light_model = "ortho"
+        elif light.camera_type == CameraType.FISHEYE.value:
+            light_model = "fisheye"
+        else:
+            raise ValueError("Unknown light type: %s", light.camera_type)
+
+        if self.training:
+            hard_cutoff = False
+        else:
+            hard_cutoff = True
+
+        # print lighting params values
+        if variance_factor is None:
+            variance_factor = torch.exp(self.light_params["variance_factor"])
+        if intensity is None:
+            intensity = torch.exp(self.light_params["intensity"])
+        if cutoff is None:
+            cutoff = torch.sigmoid(self.light_params["cutoff"])
+        # print(f"variance_factor: {variance_factor:.4f}")
+        # print(f"intensity: {intensity:.4f}")
+        # print(f"cutoff: {cutoff:.4f}")
+
+        irradiance, irradiance_fraction = calculate_relighting_weights(
+            means=means_crop,  # [N, 3]
+            quats=quats_crop,  # [N, 4]
+            scales=torch.exp(scales_crop),  # [N, 3]
+            opacities=torch.sigmoid(opacities_crop).squeeze(-1),  # [N]
+            viewmats=light_viewmat,  # [C, 4, 4]
+            Ks=light_K,  # [C, 3, 3]
+            width=light_W,
+            height=light_H,
+            light=light,
+            variance_factor=variance_factor,
+            intensity=intensity,
+            cutoff=cutoff,
+            hard_cutoff=hard_cutoff,
+            ambient=self.config.ambient,
+            near_plane=0.01,
+            far_plane=1e10,
+            depth_mode="absolute",
+            sparse_grad=False,
+            absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
+            rasterize_mode=self.config.rasterize_mode,
+            camera_model=light_model,
+            distloss=False,  # 2DGS only
+            fix_variance=self.config.fix_variance,
+        )
+        self.irradiance = irradiance
+        self.irradiance_fraction = irradiance_fraction
+        return irradiance, irradiance_fraction
+
     def get_outputs(
         self, camera: Cameras, light: Optional[Cameras] = None
     ) -> Dict[str, Union[torch.Tensor, List]]:
@@ -521,14 +288,344 @@ class ShadowSplatModel(SplatfactoModel):
             print("Called get_outputs with not a camera")
             return {}
 
+        if self.training:
+            assert camera.shape[0] == 1, "Only one camera at a time"
+            optimized_camera_to_world = self.camera_optimizer.apply_to_camera(camera)
+        else:
+            optimized_camera_to_world = camera.camera_to_worlds
+
+        # TODO: Implement multi-light support
         if light is not None:
-            self.update_light_source(
-                light,
-                variance_factor=torch.exp(self.light_params["variance_factor"]),
-                intensity=torch.exp(self.light_params["intensity"]),
-                cutoff=torch.sigmoid(self.light_params["cutoff"]),
+            assert light.shape[0] == 1, "Only one light at a time"
+
+        # cropping
+        if self.crop_box is not None and not self.training:
+            crop_ids = self.crop_box.within(self.means).squeeze()
+            if crop_ids.sum() == 0:
+                return self.get_empty_outputs(
+                    int(camera.width.item()), int(camera.height.item()), self.background_color
+                )
+        else:
+            crop_ids = None
+
+        if crop_ids is not None:
+            opacities_crop = self.opacities[crop_ids]
+            means_crop = self.means[crop_ids]
+            albedo_dc_crop = self.albedo_dc[crop_ids]
+            albedo_rest_crop = self.albedo_rest[crop_ids]
+            scales_crop = self.scales[crop_ids]
+            quats_crop = self.quats[crop_ids]
+        else:
+            opacities_crop = self.opacities
+            means_crop = self.means
+            albedo_dc_crop = self.albedo_dc
+            albedo_rest_crop = self.albedo_rest
+            scales_crop = self.scales
+            quats_crop = self.quats
+
+        albedo_crop = torch.cat((albedo_dc_crop[:, None, :], albedo_rest_crop), dim=1)
+
+        camera_scale_fac = self._get_downscale_factor()
+        camera.rescale_output_resolution(1 / camera_scale_fac)
+        viewmat = get_viewmat(optimized_camera_to_world)
+        K = camera.get_intrinsics_matrices().cuda()
+        W, H = int(camera.width.item()), int(camera.height.item())
+        self.last_size = (H, W)
+        camera.rescale_output_resolution(camera_scale_fac)  # type: ignore
+
+        # apply the compensation of screen space blurring to gaussians
+        if self.config.rasterize_mode not in ["antialiased", "classic"]:
+            raise ValueError("Unknown rasterize_mode: %s", self.config.rasterize_mode)
+
+        if camera.camera_type == CameraType.PERSPECTIVE.value:
+            camera_model = "pinhole"
+        elif camera.camera_type == CameraType.ORTHOPHOTO.value:
+            camera_model = "ortho"
+        elif camera.camera_type == CameraType.FISHEYE.value:
+            camera_model = "fisheye"
+        else:
+            raise ValueError("Unknown camera type: %s", camera.camera_type)
+
+        if light is not None:
+            # TODO: Implement light intrinsic optimization
+            irradiance, irradiance_fraction = self.compute_irradiance(light)
+            print(f"max irradiance: {irradiance.max()}, min irradiance: {irradiance.min()}")
+        elif self.irradiance is not None and self.irradiance.shape[0] == self.means.shape[0]:
+            # NOTE: during training, the sizes occasionally mismatch right after training
+            # For now we just display albedo in the viewer for this one frame as a workaround
+            irradiance = self.irradiance
+            irradiance_fraction = self.irradiance_fraction
+        else:
+            irradiance, irradiance_fraction = None, None
+
+        if self.config.output_depth_during_training or not self.training:
+            render_mode = "RGB+ED"
+        else:
+            render_mode = "RGB"
+
+        if self.config.sh_degree > 0:
+            sh_degree_to_use = min(
+                self.step // self.config.sh_degree_interval, self.config.sh_degree
             )
+        else:
+            albedo_crop = torch.sigmoid(albedo_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
+            sh_degree_to_use = None
 
-        return super().get_outputs(camera)
+        # First 3 channels of render are albedo, next 3 are relit color (intensity), then shadow, then depth
+        render, alpha, self.info = augmented_rasterization(
+            means=means_crop,
+            quats=quats_crop,  # rasterization does normalization internally
+            scales=torch.exp(scales_crop),
+            opacities=torch.sigmoid(opacities_crop).squeeze(-1),
+            colors=albedo_crop,
+            viewmats=viewmat,  # [1, 4, 4]
+            Ks=K,  # [1, 3, 3]
+            width=W,
+            height=H,
+            packed=False,
+            near_plane=0.01,
+            far_plane=1e10,
+            render_mode=render_mode,
+            sh_degree=sh_degree_to_use,
+            additional_channels=(
+                irradiance_fraction.reshape(-1, 1) if irradiance_fraction is not None else None
+            ),  # [(C,) N, D2] or [(C,) N, K, D2]
+            color_weights=irradiance,  # [(C,) N, 3],
+            sparse_grad=False,
+            absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
+            rasterize_mode=self.config.rasterize_mode,
+            camera_model=camera_model,
+            # set some threshold to disregrad small gaussians for faster rendering.
+            # radius_clip=3.0,
+        )
 
-    # TODO: modify loss and metrics
+        if self.training:
+            self.strategy.step_pre_backward(
+                self.gauss_params, self.optimizers, self.strategy_state, self.step, self.info
+            )
+        alpha = alpha[:, ...]
+
+        background = self._get_background_color()
+        albedo_rgb = render[:, ..., :3] + (1 - alpha) * background
+        albedo_rgb = torch.clamp(albedo_rgb, 0.0, 1.0)
+
+        if irradiance is not None:
+            # Apply tone mapping and gamma correction
+            relit_intensity = (
+                render[:, ..., 3:6] + (1 - alpha) * background
+            )  # NOTE: Should we be mixing with the background?
+
+            if self.config.tone_mapping == "reinhard":
+                relit_rgb = relit_intensity / (relit_intensity + 1.0)
+            # Does luminance tonemapping
+            elif self.config.tone_mapping == "luminance":
+                luminance = (
+                    0.2126 * relit_intensity[..., 0]
+                    + 0.7152 * relit_intensity[..., 1]
+                    + 0.0722 * relit_intensity[..., 2]
+                )
+                relit_rgb = relit_intensity / (luminance + 1.0)[..., None]
+            # Does linear tonemapping
+            elif self.config.tone_mapping == "linear":
+                relit_rgb = torch.clamp(relit_intensity, min=0.0, max=1.0)
+
+            # Does gamma correction # NOTE: leads to nans during training
+            relit_rgb = relit_rgb ** (1.0 / self.config.gamma_correction)
+            if torch.isnan(relit_rgb).any():
+                raise ValueError("Relit rgb is nan")
+        else:
+            relit_rgb = albedo_rgb
+
+        # apply bilateral grid
+        if self.config.use_bilateral_grid and self.training:
+            if camera.metadata is not None and "cam_idx" in camera.metadata:
+                albedo_rgb = self._apply_bilateral_grid(
+                    albedo_rgb, camera.metadata["cam_idx"], H, W
+                )
+
+                if light is not None:
+                    relit_rgb = self._apply_bilateral_grid(
+                        relit_rgb, camera.metadata["cam_idx"], H, W
+                    )
+
+        if render_mode == "RGB+ED":
+            depth_im = render[:, ..., -1:]
+            depth_im = torch.where(alpha > 0, depth_im, depth_im.detach().max()).squeeze(0)
+
+            if light is not None:
+                # NOTE: currently broken
+                shadow_im = render[:, ..., -2:-1]
+            else:
+                shadow_im = None
+        else:
+            depth_im = None
+            if light is not None:
+                shadow_im = render[:, ..., -1:]
+            else:
+                shadow_im = None
+
+        if background.shape[0] == 3 and not self.training:
+            background = background.expand(H, W, 3)
+
+        return {
+            "rgb": relit_rgb.squeeze(0),  # type: ignore
+            "albedo": albedo_rgb.squeeze(0),  # type: ignore
+            "depth": depth_im,  # type: ignore
+            "shadow": shadow_im,  # type: ignore
+            "accumulation": alpha.squeeze(0),  # type: ignore
+            "background": background,  # type: ignore
+        }  # type: ignore
+
+    ### NOTE: CHANGED ALL REFERENCES TO RGB TO RGB_RELIGHT!!!
+    def get_metrics_dict(self, outputs, batch) -> Dict[str, torch.Tensor]:
+        """Compute and returns metrics.
+
+        Args:
+            outputs: the output to compute loss dict to
+            batch: ground truth batch corresponding to outputs
+        """
+        gt_rgb = self.composite_with_background(
+            self.get_gt_img(batch["image"]), outputs["background"]
+        )
+        metrics_dict = {}
+        predicted_rgb = outputs["rgb"]
+
+        metrics_dict["psnr"] = self.psnr(predicted_rgb, gt_rgb)
+        if self.config.color_corrected_metrics:
+            cc_rgb = color_correct(predicted_rgb, gt_rgb)
+            metrics_dict["cc_psnr"] = self.psnr(cc_rgb, gt_rgb)
+
+        metrics_dict["gaussian_count"] = self.num_points
+
+        self.camera_optimizer.get_metrics_dict(metrics_dict)
+        return metrics_dict
+
+    def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
+        """Computes and returns the losses dict.
+
+        Args:
+            outputs: the output to compute loss dict to
+            batch: ground truth batch corresponding to outputs
+            metrics_dict: dictionary of metrics, some of which we can use for loss
+        """
+        gt_img = self.composite_with_background(
+            self.get_gt_img(batch["image"]), outputs["background"]
+        )
+        pred_img = outputs["rgb"]
+        # lit_mask = outputs["shadow_weights"] > self.light_params["cutoff"]
+        # lit_mask = torch.sigmoid(10 * (outputs["shadow_weights"] - self.light_params["cutoff"]))
+        # gt_img = gt_img * lit_mask
+        # pred_img = pred_img * lit_mask
+
+        # fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+        # ax[0].imshow(gt_img.cpu().numpy())
+        # ax[1].imshow(pred_img.detach().cpu().numpy())
+        # ax[2].imshow(outputs["rgb"].detach().cpu().numpy())
+        # # ax[3].imshow(outputs["shadow"])
+        # plt.show()
+
+        # Set masked part of both ground-truth and rendered image to black.
+        # This is a little bit sketchy for the SSIM loss.
+        if "mask" in batch:
+            # batch["mask"] : [H, W, 1]
+            mask = self._downscale_if_required(batch["mask"])
+            mask = mask.to(self.device)
+            assert mask.shape[:2] == gt_img.shape[:2] == pred_img.shape[:2]
+            gt_img = gt_img * mask
+            pred_img = pred_img * mask
+
+        Ll1 = torch.abs(gt_img - pred_img).mean()
+        simloss = 1 - self.ssim(
+            gt_img.permute(2, 0, 1)[None, ...], pred_img.permute(2, 0, 1)[None, ...]
+        )
+        if self.config.use_scale_regularization and self.step % 10 == 0:
+            scale_exp = torch.exp(self.scales)
+            scale_reg = (
+                torch.maximum(
+                    scale_exp.amax(dim=-1) / scale_exp.amin(dim=-1),
+                    torch.tensor(self.config.max_gauss_ratio),
+                )
+                - self.config.max_gauss_ratio
+            )
+            scale_reg = 0.1 * scale_reg.mean()
+        else:
+            scale_reg = torch.tensor(0.0).to(self.device)
+
+        loss_dict = {
+            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss,
+            "scale_reg": scale_reg,
+        }
+
+        # Losses for mcmc
+        if self.config.strategy == "mcmc":
+            if self.config.mcmc_opacity_reg > 0.0:
+                mcmc_opacity_reg = (
+                    self.config.mcmc_opacity_reg
+                    * torch.abs(torch.sigmoid(self.gauss_params["opacities"])).mean()
+                )
+                loss_dict["mcmc_opacity_reg"] = mcmc_opacity_reg
+            if self.config.mcmc_scale_reg > 0.0:
+                mcmc_scale_reg = (
+                    self.config.mcmc_scale_reg
+                    * torch.abs(torch.exp(self.gauss_params["scales"])).mean()
+                )
+                loss_dict["mcmc_scale_reg"] = mcmc_scale_reg
+
+        if self.training:
+            # Add loss from camera optimizer
+            self.camera_optimizer.get_loss_dict(loss_dict)
+            if self.config.use_bilateral_grid:
+                loss_dict["tv_loss"] = 10 * total_variation_loss(self.bil_grids.grids)
+
+        return loss_dict
+
+    def get_image_metrics_and_images(
+        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
+    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+        """Writes the test image outputs.
+
+        Args:
+            image_idx: Index of the image.
+            step: Current step.
+            batch: Batch of data.
+            outputs: Outputs of the model.
+
+        Returns:
+            A dictionary of metrics.
+        """
+        gt_rgb = self.composite_with_background(
+            self.get_gt_img(batch["image"]), outputs["background"]
+        )
+        predicted_rgb = outputs["rgb"]
+        cc_rgb = None
+
+        combined_rgb = torch.cat([gt_rgb, predicted_rgb], dim=1)
+
+        if self.config.color_corrected_metrics:
+            cc_rgb = color_correct(predicted_rgb, gt_rgb)
+            cc_rgb = torch.moveaxis(cc_rgb, -1, 0)[None, ...]
+
+        # Switch images from [H, W, C] to [1, C, H, W] for metrics computations
+        gt_rgb = torch.moveaxis(gt_rgb, -1, 0)[None, ...]
+        predicted_rgb = torch.moveaxis(predicted_rgb, -1, 0)[None, ...]
+
+        psnr = self.psnr(gt_rgb, predicted_rgb)
+        ssim = self.ssim(gt_rgb, predicted_rgb)
+        lpips = self.lpips(gt_rgb, predicted_rgb)
+
+        # all of these metrics will be logged as scalars
+        metrics_dict = {"psnr": float(psnr.item()), "ssim": float(ssim)}  # type: ignore
+        metrics_dict["lpips"] = float(lpips)
+
+        if self.config.color_corrected_metrics:
+            assert cc_rgb is not None
+            cc_psnr = self.psnr(gt_rgb, cc_rgb)
+            cc_ssim = self.ssim(gt_rgb, cc_rgb)
+            cc_lpips = self.lpips(gt_rgb, cc_rgb)
+            metrics_dict["cc_psnr"] = float(cc_psnr.item())
+            metrics_dict["cc_ssim"] = float(cc_ssim)
+            metrics_dict["cc_lpips"] = float(cc_lpips)
+
+        images_dict = {"img": combined_rgb}
+
+        return metrics_dict, images_dict

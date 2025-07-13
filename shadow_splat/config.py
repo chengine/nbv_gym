@@ -16,7 +16,6 @@ from shadow_splat.model_2dgs import ShadowSplat2DGSModelConfig
 # NOTE: The ShadowSplatTrainer import is needed for some reason to make the viewer work
 from shadow_splat.trainer import ShadowSplatTrainerConfig, ShadowSplatTrainer
 
-
 shadow_splat = MethodSpecification(
     ShadowSplatTrainerConfig(
         method_name="shadow-splat",
@@ -32,8 +31,11 @@ shadow_splat = MethodSpecification(
                 cache_images_type="uint8",
             ),
             model=ShadowSplatModelConfig(
+                sh_degree=0,
                 # reset_alpha_every=1000000,
                 # cull_alpha_thresh=0.001,
+                # warmup_length=100000,
+                # refine_every=100000,
             ),
         ),
         optimizers={
@@ -89,7 +91,6 @@ shadow_splat = MethodSpecification(
     ),
     description="Config for ShadowSplat",
 )
-
 
 shadow_splat_2dgs = MethodSpecification(
     ShadowSplatTrainerConfig(

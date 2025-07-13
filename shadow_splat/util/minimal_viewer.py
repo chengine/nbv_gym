@@ -97,7 +97,7 @@ class MinimalViewer:
             label="Focal length", min=0.0, max=3000.0, step=1.0, initial_value=1650
         )
         self.variance_factor_slider = self.viser_server.gui.add_slider(
-            label="Variance factor", min=0.0, max=1.0, step=0.01, initial_value=0.001
+            label="Variance factor", min=0.0, max=10.0, step=0.01, initial_value=0.001
         )
         self.intensity_slider = self.viser_server.gui.add_slider(
             label="Intensity", min=0.0, max=10.0, step=0.1, initial_value=1.0
@@ -176,7 +176,7 @@ class MinimalViewer:
 
         with torch.no_grad():
             start_time = time.time()
-            shadow_meta = self.model.update_light_source(
+            self.model.compute_irradiance(
                 light_source,
                 variance_factor=variance_factor,
                 intensity=intensity * np.ones(3),

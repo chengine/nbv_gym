@@ -1,0 +1,6 @@
+Repeat update_light_source
+  avg: 0.0038s, max: 0.1364s, min: 0.0024s
+Different update_light_source
+  avg: 0.0026s, max: 0.0030s, min: 0.0024s
+Rendering
+  avg: 0.0052s, max: 0.0269s, min: 0.0049s

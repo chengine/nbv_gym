@@ -79,7 +79,7 @@ if __name__ == "__main__":
     model.populate_modules()
 
     # Increase opacities
-    model.gauss_params["opacities"] = torch.logit(0.75 * torch.ones(model.num_points, 1))
+    # model.gauss_params["opacities"] = torch.logit(0.75 * torch.ones(model.num_points, 1))
 
     model.training = False
     model = model.to(device)

@@ -4,22 +4,32 @@ import numpy as np
 import json
 from pathlib import Path
 from mathutils import Matrix
+import argparse
 
 from shadow_splat.util.general import fibonacci_hemisphere_points
 from shadow_splat.util.logger import Logger
-from blender_util import set_camera_pose, get_camera_intrinsics, look_at_blender
+from blender_util import get_camera_intrinsics, look_at_blender, set_sun_direction
 
 # =============== Parameters ===============
 GENERATE_PLY = False
-NUM_VIEWS = 100
+NUM_VIEWS = 5
 RADIUS = 1.75
 MIN_ELEVATION_RAD = np.deg2rad(5.0)
 TARGET = (0, 0, 0.3)
-RENDER_DEPTH = True
+RENDER_DEPTH = False
 
-RENDERER = "cycles"
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--renderer",
+    type=str,
+    default="cycles",
+    choices=["cycles", "eevee"],
+    help="Blender render engine to use",
+)
+args = parser.parse_args()
+RENDERER = args.renderer
 BLENDER_FILE = "/home/addai/Blender/master_chief.blend"
-OUTPUT_FOLDER = Path(f"/home/addai/NeRF/shadow_splat/data/master_chief_{RENDERER}")
+OUTPUT_FOLDER = Path(f"/home/addai/NeRF/shadow_splat/data/master_chief_{RENDERER}_2_light")
 IMG_FOLDER = OUTPUT_FOLDER / "images"
 
 # =============== Main ===============
@@ -56,15 +66,17 @@ if __name__ == "__main__":
     # bpy.data.objects["Plane"].hide_render = True
 
     # Lights (currently only handle single Sun light)
-    light_obj = bpy.data.objects["Sun"]
-    light_pose = np.array(light_obj.matrix_world)
+    sun = bpy.data.objects["Sun"]
+    light_pose = np.array(sun.matrix_world)
+    W, H = 3000, 3000
+    focal_length = 1650
     light_intrinsics = {
-        "w": 2000,
-        "h": 2000,
-        "fx": 1650,
-        "fy": 1650,
-        "cx": 1000.0,
-        "cy": 1000.0,
+        "w": W,
+        "h": H,
+        "fx": focal_length,
+        "fy": focal_length,
+        "cx": W / 2.0,
+        "cy": H / 2.0,
     }
 
     # Set active camera
@@ -82,21 +94,33 @@ if __name__ == "__main__":
 
     frames = []
 
-    for i, location in Logger.tqdm(
-        enumerate(camera_locations), total=NUM_VIEWS, desc="Rendering views"
-    ):
-        # pose = set_camera_pose(camera, location, TARGET)
-        pose = look_at_blender(location, TARGET)
-        camera.matrix_world = Matrix(pose)
+    # Set lighting
+    for azimuth_deg in [0, 180]:
+        set_sun_direction(sun, azimuth_deg=azimuth_deg, elevation_deg=45)
+        light_pose = np.array(sun.matrix_world)
 
-        # Render image
-        file_path = os.path.join(IMG_FOLDER, f"view_{i:03d}.png")
-        bpy.context.scene.render.filepath = file_path
-        bpy.ops.render.render(write_still=True)
+        for i, location in Logger.tqdm(
+            enumerate(camera_locations), total=NUM_VIEWS, desc="Rendering views"
+        ):
+            # Set camera
+            pose = look_at_blender(location, TARGET)
+            camera.matrix_world = Matrix(pose)
 
-        frame_data = {"transform_matrix": pose.tolist(), "file_path": f"images/view_{i:03d}.png"}
-        frame_data["light_pose"] = light_pose.tolist()
-        frames.append(frame_data)
+            # # Set lighting
+            # set_sun_direction(sun, azimuth_deg=0, elevation_deg=45)
+            # light_pose = np.array(sun.matrix_world)
+
+            # Render image
+            file_path = os.path.join(IMG_FOLDER, f"view_{i:03d}_light_{azimuth_deg}.png")
+            bpy.context.scene.render.filepath = file_path
+            bpy.ops.render.render(write_still=True)
+
+            frame_data = {
+                "transform_matrix": pose.tolist(),
+                "file_path": f"images/view_{i:03d}.png",
+            }
+            frame_data["light_pose"] = light_pose.tolist()
+            frames.append(frame_data)
 
     data = {}
     data.update(intrinsics)

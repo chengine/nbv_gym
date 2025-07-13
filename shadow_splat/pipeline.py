@@ -26,6 +26,8 @@ class ShadowSplatPipelineConfig(VanillaPipelineConfig):
     """specifies the datamanager config"""
     model: ModelConfig = ShadowSplatModelConfig()
     """specifies the model config"""
+    disable_light: bool = False
+    """specifies whether to train without light"""
 
 
 class ShadowSplatPipeline(VanillaPipeline):
@@ -66,7 +68,10 @@ class ShadowSplatPipeline(VanillaPipeline):
         #     model_outputs = self._model(cameras, light)
         # else:
         #     model_outputs = self._model(cameras)
-        model_outputs = self._model(cameras, light)
+        if self.config.disable_light:
+            model_outputs = self._model(cameras)
+        else:
+            model_outputs = self._model(cameras, light)
         metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
         loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
 
@@ -89,7 +94,10 @@ class ShadowSplatPipeline(VanillaPipeline):
         """
         self.eval()
         ray_bundle, batch, light = self.datamanager.next_eval(step)
-        model_outputs = self.model(ray_bundle, light)
+        if self.config.disable_light:
+            model_outputs = self.model(ray_bundle)
+        else:
+            model_outputs = self.model(ray_bundle, light)
         metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
         loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
         self.train()
@@ -105,7 +113,10 @@ class ShadowSplatPipeline(VanillaPipeline):
         """
         self.eval()
         camera, batch, light = self.datamanager.next_eval_image(step)
-        outputs = self.model(camera, light)
+        if self.config.disable_light:
+            outputs = self.model(camera)
+        else:
+            outputs = self.model(camera, light)
         metrics_dict, images_dict = self.model.get_image_metrics_and_images(outputs, batch)
         assert "num_rays" not in metrics_dict
         metrics_dict["num_rays"] = (camera.height * camera.width * camera.size).item()

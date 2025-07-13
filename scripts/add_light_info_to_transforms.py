@@ -8,14 +8,14 @@ import os
 import numpy as np
 from pathlib import Path
 
-data_path = Path(os.path.expanduser("~/NeRF/shadow_splat/data/master_chief_cycles/"))
+data_path = Path(os.path.expanduser("/home/shared/data_nerfstudio/nerfstudio-data/sculpture"))
 transforms_path = data_path / "transforms.json"
 
 with open(transforms_path, "r") as f:
     transforms = json.load(f)
 
 # Add light intrinsics
-W, H = 2000, 2000
+W, H = 3000, 3000
 transforms["light_intrinsics"] = {
     "w": W,
     "h": H,
@@ -29,10 +29,10 @@ transforms["light_intrinsics"] = {
 for frame in transforms["frames"]:
     # frame["light_pose"] = np.eye(4).tolist()
     frame["light_pose"] = [
-        [-0.27690861, -0.84461385, 0.45820203, 0.50663298],
-        [0.72507936, -0.49657366, -0.4771525, -0.32427847],
-        [0.63054067, 0.20010521, 0.74991757, 1.25609708],
-        [0.0, 0.0, 0.0, 1.0],
+        [0.6388, 0.4168, -0.6467, -0.6467],
+        [-0.7694, 0.3460, -0.5369, -0.5369],
+        [0.0000, 0.8406, 0.5417, 0.5417],
+        [0.0000, 0.0000, 0.0000, 1.0000],
     ]
 
 # Save updated transforms
