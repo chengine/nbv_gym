@@ -349,7 +349,7 @@ class ShadowSplatModel(SplatfactoModel):
         if light is not None:
             # TODO: Implement light intrinsic optimization
             irradiance, irradiance_fraction = self.compute_irradiance(light)
-            print(f"max irradiance: {irradiance.max()}, min irradiance: {irradiance.min()}")
+            # print(f"max irradiance: {irradiance.max()}, min irradiance: {irradiance.min()}")
         elif self.irradiance is not None and self.irradiance.shape[0] == self.means.shape[0]:
             # NOTE: during training, the sizes occasionally mismatch right after training
             # For now we just display albedo in the viewer for this one frame as a workaround
@@ -508,6 +508,7 @@ class ShadowSplatModel(SplatfactoModel):
             batch: ground truth batch corresponding to outputs
             metrics_dict: dictionary of metrics, some of which we can use for loss
         """
+        # print(self.get_gt_img(batch["image"]).shape)
         gt_img = self.composite_with_background(
             self.get_gt_img(batch["image"]), outputs["background"]
         )
@@ -524,9 +525,13 @@ class ShadowSplatModel(SplatfactoModel):
         # # ax[3].imshow(outputs["shadow"])
         # plt.show()
 
+        # Check if the gt img has nans
+        # print(gt_img.shape)
+
         # Set masked part of both ground-truth and rendered image to black.
         # This is a little bit sketchy for the SSIM loss.
         if "mask" in batch:
+            print("Using mask")
             # batch["mask"] : [H, W, 1]
             mask = self._downscale_if_required(batch["mask"])
             mask = mask.to(self.device)

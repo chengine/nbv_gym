@@ -1,2 +1,0 @@
-Repeat update_light_source
-  avg: 0.0303s, max: 0.2378s, min: 0.0279s

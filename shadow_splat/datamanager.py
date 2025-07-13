@@ -95,13 +95,13 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
 
         # TODO: Add functionality for RGBA images
         data = deepcopy(self.cached_train[image_idx])
-        data["image"] = data["image"].to(self.device)[..., :3]
+        # data["image"] = data["image"].to(self.device)[..., :3]
+        data["image"] = data["image"].to(self.device)
 
         assert len(self.train_dataset.cameras.shape) == 1, "Assumes single batch dimension"
         cameras = self.train_dataset.cameras[image_idx : image_idx + 1].to(self.device)
         if cameras.metadata is None:
             cameras.metadata = {}
-
         cameras.metadata["cam_idx"] = image_idx
 
         # NOTE: Added
