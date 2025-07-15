@@ -1734,7 +1734,7 @@ def augmented_rasterization_2dgs(
 
     if additional_channels is not None:
         assert additional_channels.shape[0] == N, additional_channels.shape
-        additional_channels = additional_channels[None].expand(C, -1, -1)
+        # additional_channels = additional_channels[None].expand(C, -1, -1)
 
     if sh_degree is None:
         # treat colors as post-activation values, should be in shape [..., N, D] or [..., C, N, D]
@@ -1918,7 +1918,6 @@ def augmented_rasterization_2dgs(
                 ],
                 dim=-1,
             )
-
     (
         render_colors,
         render_alphas,

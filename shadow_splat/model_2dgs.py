@@ -85,7 +85,7 @@ class ShadowSplat2DGSModel(Splatfacto2DGSModel):
         **kwargs,
     ):
         self.seed_points = seed_points
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, seed_points=seed_points, **kwargs)
 
     def populate_modules(self):
         super().populate_modules()
@@ -281,7 +281,7 @@ class ShadowSplat2DGSModel(Splatfacto2DGSModel):
             scales_crop = self.scales
             quats_crop = self.quats
 
-        albedo_crop = torch.cat((albedo_dc_crop, albedo_rest_crop), dim=1)
+        albedo_crop = torch.cat((albedo_dc_crop[..., None, :], albedo_rest_crop), dim=1)
 
         camera_scale_fac = self._get_downscale_factor()
         camera.rescale_output_resolution(1 / camera_scale_fac)
