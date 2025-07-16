@@ -76,14 +76,6 @@ def evaluate_logistic_distribution(
         projected_pixel_ids
     ]
 
-    # print("depth diff", (depths - depth_image_flattened[projected_pixel_ids]).max(), (depths - depth_image_flattened[projected_pixel_ids]).min() )
-
-    # print("depths", depths.max(), depths.min())
-    # print(depth_image_flattened.max(), depth_image_flattened.min())
-    # print(projected_pixel_ids.max(), projected_pixel_ids.min())
-    # print(s.max(), s.min())
-    # print(sigmoid_argument.max(), sigmoid_argument.min())
-
     sigmoid_weights = 1.0 - torch.sigmoid(sigmoid_argument)
 
     # Use learnable cutoff parameter for differentiable masking
@@ -108,7 +100,6 @@ def calculate_relighting_weights(
     Ks: Tensor,  # [C, 3, 3]
     width: int,
     height: int,
-    light: Cameras,
     variance_factor: float,
     intensity: List[float],
     cutoff: float,
@@ -119,15 +110,15 @@ def calculate_relighting_weights(
     radius_clip: float = 0.0,
     eps2d: float = 0.3,
     tile_size: int = 16,
-    depth_mode: Literal["expected", "absolute", "median"] = "absolute",
     sparse_grad: bool = False,
     absgrad: bool = False,
     rasterize_mode: Literal["classic", "antialiased"] = "classic",
     channel_chunk: int = 32,
     distributed: bool = False,
     camera_model: Literal["pinhole", "ortho", "fisheye"] = "pinhole",
-    distloss: bool = False,  # 2DGS only
     fix_variance: bool = False,
+    use_2dgs: bool = False,
+    distloss: bool = False,  # 2DGS only
 ) -> Tuple[Tensor, Tensor, Dict]:
     """Compute the relighting weights for a given light source for the scene."""
 
@@ -136,65 +127,70 @@ def calculate_relighting_weights(
     assert N == scales.shape[0], "Number of means and scales must match"
     assert N == quats.shape[0], "Number of means and quaternions must match"
 
-    moments, alphas, meta = moment_rasterization(
-        means,  # [N, 3]
-        quats,  # [N, 4]
-        scales,  # [N, 3]
-        opacities,  # [N]
-        viewmats,  # [C, 4, 4]
-        Ks,  # [C, 3, 3]
-        width,
-        height,
-        near_plane=near_plane,
-        far_plane=far_plane,
-        radius_clip=radius_clip,
-        eps2d=eps2d,
-        packed=True,
-        tile_size=tile_size,
-        depth_mode=depth_mode,
-        sparse_grad=sparse_grad,
-        absgrad=absgrad,
-        rasterize_mode=rasterize_mode,
-        channel_chunk=channel_chunk,
-        distributed=distributed,
-        camera_model=camera_model,
-    )
+    if not use_2dgs:
+        moments, alphas, meta = moment_rasterization(
+            means,  # [N, 3]
+            quats,  # [N, 4]
+            scales,  # [N, 3]
+            opacities,  # [N]
+            viewmats,  # [C, 4, 4]
+            Ks,  # [C, 3, 3]
+            width,
+            height,
+            near_plane=near_plane,
+            far_plane=far_plane,
+            radius_clip=radius_clip,
+            eps2d=eps2d,
+            packed=True,
+            tile_size=tile_size,
+            sparse_grad=sparse_grad,
+            absgrad=absgrad,
+            rasterize_mode=rasterize_mode,
+            channel_chunk=channel_chunk,
+            distributed=distributed,
+            camera_model=camera_model,
+        )
+    else:
+        (moments, alphas, normals, normals_from_depth, distort, median, meta) = (
+            moment_rasterization_2dgs(
+                means,
+                quats,
+                scales,
+                opacities,
+                viewmats,
+                Ks,
+                width,
+                height,
+                near_plane=near_plane,
+                far_plane=far_plane,
+                radius_clip=radius_clip,
+                eps2d=eps2d,
+                packed=True,
+                tile_size=tile_size,
+                sparse_grad=sparse_grad,
+                absgrad=absgrad,
+                distloss=distloss,
+            )
+        )
+
+    assert not torch.isnan(moments[..., 1]).any(), "Depth squared is nan"
+    assert not torch.isnan(moments[..., 0]).any(), "Depth is nan"
+    assert not torch.isinf(moments[..., 1]).any(), "Depth squared is inf"
+    assert not torch.isinf(moments[..., 0]).any(), "Depth is inf"
+
     depth_image = moments[..., 0].squeeze()
 
     if fix_variance:
         # TODO: Implement fix_variance
-        variance_image = torch.ones(width, height).to(means.device)
+        variance_image = torch.ones_like(depth_image)
     else:
         depth_sqr_image = moments[..., 1].squeeze()
-        if torch.isnan(depth_image).any() or torch.isnan(depth_sqr_image).any():
-            raise ValueError("Depth or depth squared is nan")
-        # variance_image = 1*torch.ones_like(depth_image)
         variance_image = depth_sqr_image - depth_image**2
-
-    # fig, ax = plt.subplots(1, 2, figsize=(15, 5))
-    # ax[0].imshow(depth_image.detach().cpu().numpy())
-    # ax[1].imshow(variance_image.detach().cpu().numpy())
-    # # Add colorbar
-    # fig.colorbar(ax[0].imshow(depth_image.detach().cpu().numpy()), ax=ax[0])
-    # fig.colorbar(ax[1].imshow(variance_image.detach().cpu().numpy()), ax=ax[1])
-    # plt.show()
 
     depths = meta["depths"]  # Depths of each gaussian in frustum
     means2d = meta["means2d"]  # 2D means of each gaussian in frustum
     gaussian_ids = meta["gaussian_ids"]  # Indices of the gaussians in the frustum
 
-    # # Compute 3D camera space coordinates once and reuse them
-    # w2c = torch.eye(4, device=light.camera_to_worlds[0].device)
-    # w2c[:3] = light.camera_to_worlds[0, :3]
-    # w2c = torch.linalg.inv(w2c)
-
-    # # Transform all means to camera space
-    # means_camera_space = (w2c[:3, :3] @ means.T).T + w2c[:3, 3][None]
-    # depths = -means_camera_space[:, 2]
-    # depths = depths[meta["gaussian_ids"]]
-
-    # print(f"depths: {depths.shape}, means2d: {means2d.shape}, gaussian_ids: {gaussian_ids.shape}")
-    # print(f"depth_image: {depth_image.shape}, variance_image: {variance_image.shape}")
     # This represents the fraction of light that is received by each gaussian in the frustum
     weights = evaluate_logistic_distribution(
         means2d,  # [N, 2] where N is the number of gaussians in the frustum
@@ -206,12 +202,9 @@ def calculate_relighting_weights(
         hard_cutoff,
     )
 
-    if torch.isnan(weights).any():
-        raise ValueError("Weights are nan")
+    assert not torch.isnan(weights).any(), "Weights are nan"
+    assert not torch.isinf(weights).any(), "Weights are inf"
 
-    # print("weights", weights.max(), weights.min(), weights.mean())
-
-    # TODO: May want to implement different weightings for different channels (i.e. R is different from G is different from B)
     if ambient:
         irradiance = torch.ones_like(means)
         irradiance_fraction = torch.ones_like(opacities)
@@ -220,6 +213,16 @@ def calculate_relighting_weights(
         irradiance_fraction = torch.zeros_like(opacities)
 
     # The total intensity of the light that is received by each gaussian in the frustum is the product of the intensity of the light source and the fraction of light that is received by the gaussian
+    # Additionally, if 2DGS, then a BRDF function is applied.
+    if use_2dgs:
+        cam2worlds = torch.inverse(viewmats)
+        gaussian_normals = meta["normals"]
+        gaussian_normals = gaussian_normals / torch.norm(gaussian_normals, dim=-1, keepdim=True)
+        incident_dir = cam2worlds[meta["camera_ids"], :3, 3] - means[gaussian_ids, :]
+        incident_dir = incident_dir / torch.norm(incident_dir, dim=-1, keepdim=True)
+        cosine_angle = torch.sum(gaussian_normals * incident_dir, dim=-1)
+        weights = weights * torch.relu(cosine_angle)
+
     irradiance[gaussian_ids] = torch.stack(
         [weights * intensity[0], weights * intensity[1], weights * intensity[2]], dim=-1
     )
@@ -246,7 +249,6 @@ def moment_rasterization(
     packed: bool = True,
     tile_size: int = 16,
     backgrounds: Optional[Tensor] = None,
-    depth_mode: Literal["expected", "absolute"] = "absolute",
     sparse_grad: bool = False,
     absgrad: bool = False,
     rasterize_mode: Literal["classic", "antialiased"] = "classic",
@@ -547,9 +549,9 @@ def moment_rasterization(
             (radii,) = all_to_all_tensor_list(
                 world_size, [radii], cnts, output_splits=collected_splits
             )
-            (means2d, depths, conics, opacities, colors) = all_to_all_tensor_list(
+            (means2d, depths, conics, opacities) = all_to_all_tensor_list(
                 world_size,
-                [means2d, depths, conics, opacities, colors],
+                [means2d, depths, conics, opacities],
                 cnts,
                 output_splits=collected_splits,
             )
@@ -599,14 +601,13 @@ def moment_rasterization(
             )
             radii = reshape_view(C, radii, N_world)
 
-            (means2d, depths, conics, opacities, colors) = all_to_all_tensor_list(
+            (means2d, depths, conics, opacities) = all_to_all_tensor_list(
                 world_size,
                 [
                     means2d.flatten(0, 1),
                     depths.flatten(0, 1),
                     conics.flatten(0, 1),
                     opacities.flatten(0, 1),
-                    colors.flatten(0, 1),
                 ],
                 splits=[C_i * N for C_i in C_world],
                 output_splits=[C * N_i for N_i in N_world],
@@ -615,7 +616,6 @@ def moment_rasterization(
             depths = reshape_view(C, depths, N_world)
             conics = reshape_view(C, conics, N_world)
             opacities = reshape_view(C, opacities, N_world)
-            colors = reshape_view(C, colors, N_world)
 
     # Rasterize to pixels
     colors = torch.stack((depths, depths**2), dim=-1)
@@ -702,7 +702,6 @@ def moment_rasterization(
         )
 
     # We use expected depth
-    # if depth_mode == "expected":
     render_colors = render_colors / render_alphas.clamp(min=1e-10)
 
     return render_colors, render_alphas, meta
@@ -1054,7 +1053,6 @@ def augmented_rasterization(
             else:
                 # colors is already [C, N, D]
                 pass
-        # assert not torch.isnan(colors).any(), "NaN detected after indexing"
 
     else:
         # Colors are SH coefficients, with shape [N, K, 3] or [C, N, K, 3]
@@ -1068,9 +1066,7 @@ def augmented_rasterization(
             else:
                 # Turn [C, N, K, 3] into [nnz, 3]
                 shs = colors[camera_ids, gaussian_ids, :, :]  # [nnz, K, 3]
-            # assert not torch.isnan(colors).any(), "NaN detected before spherical_harmonics"
             colors = spherical_harmonics(sh_degree, dirs, shs, masks=masks)  # [nnz, 3]
-            # assert not torch.isnan(colors).any(), "NaN detected after spherical_harmonics"
         else:
             dirs = means[None, :, :] - camtoworlds[:, None, :3, 3]  # [C, N, 3]
             masks = (radii > 0).any(-1)  # [C, N]
@@ -1080,17 +1076,7 @@ def augmented_rasterization(
             else:
                 # colors is already [C, N, K, 3]
                 shs = colors
-            # print("dirs nan?", torch.isnan(dirs).any(), "inf?", torch.isinf(dirs).any())
-            # print("shs nan?", torch.isnan(shs).any(), "inf?", torch.isinf(shs).any())
-            # if masks is not None:
-            #     print("masks nan?", torch.isnan(masks).any(), "inf?", torch.isinf(masks).any())
-            # print("dirs shape:", dirs.shape, "min:", dirs.min().item(), "max:", dirs.max().item())
-            # print("dirs norm min/max:", dirs.norm(dim=-1).min().item(), dirs.norm(dim=-1).max().item())
-            # print("shs shape:", shs.shape, "min:", shs.min().item(), "max:", shs.max().item())
-            # print("shs nan:", torch.isnan(shs).any(), "inf:", torch.isinf(shs).any())
             colors = spherical_harmonics(sh_degree, dirs, shs, masks=masks)  # [C, N, 3]
-            # print("colors nan?", torch.isnan(colors).any(), "inf?", torch.isinf(colors).any())
-            # assert not torch.isnan(colors).any(), f"NaN detected after spherical_harmonics. {colors.isnan().sum()}"
         # make it apple-to-apple with Inria's CUDA Backend.
         colors = torch.clamp_min(colors + 0.5, 0.0)
     # If in distributed mode, we need to scatter the GSs to the destination ranks, based
@@ -1219,8 +1205,6 @@ def augmented_rasterization(
     else:  # RGB
         if color_weights is not None:
             # The absolute color is the albedo (base color of Gaussian), the fraction of light reflected in each channel, times the intensity of the light incident on the Gaussian
-            # print('colors', colors.isnan().any(), colors.isinf().any())
-            # print('color_weights', color_weights.isnan().any(), color_weights.isinf().any())
             relit_colors = colors * color_weights
             colors = torch.cat((colors, relit_colors), dim=-1)
 
@@ -1358,7 +1342,7 @@ def moment_rasterization_2dgs(
     far_plane: float = 1e10,
     radius_clip: float = 0.0,
     eps2d: float = 0.3,
-    packed: bool = False,
+    packed: bool = True,
     tile_size: int = 16,
     backgrounds: Optional[Tensor] = None,
     sparse_grad: bool = False,
@@ -1495,6 +1479,7 @@ def moment_rasterization_2dgs(
 
     if packed:
         (
+            _,  # batch_ids
             camera_ids,
             gaussian_ids,
             radii,
@@ -1554,16 +1539,15 @@ def moment_rasterization_2dgs(
         distloss=distloss,
     )
     render_normals_from_depth = None
-    if depth_mode == "expected":
-        # normalize the accumulated depth to get the expected depth
-        render_colors = render_colors / render_alphas.clamp(min=1e-10)
 
-        depth_for_normal = render_colors[..., 0]
+    # normalize the accumulated depth to get the expected depth
+    render_colors = render_colors / render_alphas.clamp(min=1e-10)
+
+    if depth_mode == "expected":
+        depth_for_normal = render_colors[..., 0:1]
 
     elif depth_mode == "median":
         depth_for_normal = render_median
-
-    # TODO: Implement the absolute depth mode
 
     render_normals_from_depth = depth_to_normal(
         depth_for_normal, torch.linalg.inv(viewmats), Ks
@@ -1624,8 +1608,6 @@ def augmented_rasterization_2dgs(
     sh_degree: Optional[int] = None,
     additional_channels: Optional[Tensor] = None,  # [(C,) N, D2] or [(C,) N, K, D2]
     color_weights: Optional[Tensor] = None,  # [(C,) N, 3]
-    tone_mapping: Literal["linear", "luminance", "reinhard"] = "linear",
-    gamma_correction: float = 2.2,
     packed: bool = False,
     tile_size: int = 16,
     backgrounds: Optional[Tensor] = None,
@@ -1736,8 +1718,15 @@ def augmented_rasterization_2dgs(
 
     """
 
-    N = means.shape[0]
-    C = viewmats.shape[0]
+    batch_dims = means.shape[:-2]
+    num_batch_dims = len(batch_dims)
+    B = math.prod(batch_dims)
+    N = means.shape[-2]
+    C = viewmats.shape[-3]
+    I = B * C
+    device = means.device
+    channels = colors.shape[-1]
+
     assert means.shape == (N, 3), means.shape
     assert quats.shape == (N, 4), quats.shape
     assert scales.shape == (N, 3), scales.shape
@@ -1757,17 +1746,26 @@ def augmented_rasterization_2dgs(
 
     if additional_channels is not None:
         assert additional_channels.shape[0] == N, additional_channels.shape
+        # additional_channels = additional_channels[None].expand(C, -1, -1)
 
     if sh_degree is None:
-        # treat colors as post-activation values
-        # colors should be in shape [N, D] or (C, N, D) (silently support)
-        assert (colors.dim() == 2 and colors.shape[0] == N) or (
-            colors.dim() == 3 and colors.shape[:2] == (C, N)
+        # treat colors as post-activation values, should be in shape [..., N, D] or [..., C, N, D]
+        assert (colors.dim() == num_batch_dims + 2 and colors.shape[:-1] == batch_dims + (N,)) or (
+            colors.dim() == num_batch_dims + 3 and colors.shape[:-1] == batch_dims + (C, N)
         ), colors.shape
     else:
-        # treat colors as SH coefficients. Allowing for activating partial SH bands
-        assert colors.dim() == 3 and colors.shape[0] == N and colors.shape[2] == 3, colors.shape
-        assert (sh_degree + 1) ** 2 <= colors.shape[1], colors.shape
+        # treat colors as SH coefficients, should be in shape [..., N, K, 3] or [..., C, N, K, 3]
+        # Allowing for activating partial SH bands
+        assert (
+            colors.dim() == num_batch_dims + 3
+            and colors.shape[:-2] == batch_dims + (N,)
+            and colors.shape[-1] == 3
+        ) or (
+            colors.dim() == num_batch_dims + 4
+            and colors.shape[:-2] == batch_dims + (C, N)
+            and colors.shape[-1] == 3
+        ), colors.shape
+        assert (sh_degree + 1) ** 2 <= colors.shape[-2], colors.shape
 
     # Compute Ray-Splat intersection transformation.
     proj_results = fully_fused_projection_2dgs(
@@ -1788,6 +1786,7 @@ def augmented_rasterization_2dgs(
 
     if packed:
         (
+            batch_ids,
             camera_ids,
             gaussian_ids,
             radii,
@@ -1796,14 +1795,18 @@ def augmented_rasterization_2dgs(
             ray_transforms,
             normals,
         ) = proj_results
-        opacities = opacities[gaussian_ids]
+        opacities = opacities.view(B, N)[batch_ids, gaussian_ids]
+        image_ids = batch_ids * C + camera_ids
     else:
         radii, means2d, depths, ray_transforms, normals = proj_results
-        opacities = opacities.repeat(C, 1)
+        opacities = torch.broadcast_to(opacities[..., None, :], batch_dims + (C, N))  # [..., C, N]
         camera_ids, gaussian_ids = None, None
+        image_ids = None
 
-    densify = torch.zeros_like(means2d, dtype=means.dtype, requires_grad=True, device="cuda")
-    # Identify intersecting tiles
+    densify = torch.zeros_like(
+        means2d, dtype=means.dtype, requires_grad=True, device="cuda"
+    )  # Identify intersecting tiles
+
     tile_width = math.ceil(width / float(tile_size))
     tile_height = math.ceil(height / float(tile_size))
     tiles_per_gauss, isect_ids, flatten_ids = isect_tiles(
@@ -1814,34 +1817,44 @@ def augmented_rasterization_2dgs(
         tile_width,
         tile_height,
         packed=packed,
-        n_images=C,
+        n_images=I,
         image_ids=camera_ids,
         gaussian_ids=gaussian_ids,
     )
     isect_offsets = isect_offset_encode(isect_ids, C, tile_width, tile_height)
+    isect_offsets = isect_offsets.reshape(batch_dims + (C, tile_height, tile_width))
 
     # TODO: SH also suport N-D.
     # Compute the per-view colors
-    if not (colors.dim() == 3 and sh_degree is None):  # silently support [C, N, D] color.
-        colors = (
-            colors[gaussian_ids] if packed else colors.expand(C, *([-1] * colors.dim()))
-        )  # [nnz, D] or [C, N, 3]
-    else:
-        if packed:
-            colors = colors[camera_ids, gaussian_ids, :]
+    # if not (colors.dim() == 3 and sh_degree is None):  # silently support [C, N, D] color.
+    #     colors = (
+    #         colors[gaussian_ids] if packed else colors.expand(C, *([-1] * colors.dim()))
+    #     )  # [nnz, D] or [C, N, 3]
+    # else:
+    #     if packed:
+    #         colors = colors[camera_ids, gaussian_ids, :]
+
     if sh_degree is not None:  # SH coefficients
         camtoworlds = torch.inverse(viewmats)
         if packed:
-            dirs = means[gaussian_ids, :] - camtoworlds[camera_ids, :3, 3]
+            dirs = means[..., gaussian_ids, :] - camtoworlds[..., camera_ids, :3, 3]
         else:
-            dirs = means[None, :, :] - camtoworlds[:, None, :3, 3]
+            dirs = means[..., None, :, :] - camtoworlds[..., None, :3, 3]
+
+        if colors.dim() == num_batch_dims + 3:
+            # Turn [..., N, K, 3] into [..., C, N, K, 3]
+            shs = torch.broadcast_to(
+                colors[..., None, :, :, :], batch_dims + (C, N, -1, 3)
+            )  # [..., C, N, K, 3]
+        else:
+            # colors is already [..., C, N, K, 3]
+            shs = colors
         colors = spherical_harmonics(
-            sh_degree, dirs, colors, masks=radii > 0
-        )  # [nnz, D] or [C, N, 3]
+            sh_degree, dirs, shs, masks=(radii > 0).all(dim=-1)
+        )  # [nnz, D] or [..., C, N, 3]
         # make it apple-to-apple with Inria's CUDA Backend.
         colors = torch.clamp_min(colors + 0.5, 0.0)
 
-    # Rasterize to pixels
     # Rasterize to pixels
     if render_mode in ["RGB+D", "RGB+ED"]:
         if color_weights is not None:
@@ -1912,7 +1925,6 @@ def augmented_rasterization_2dgs(
                 ],
                 dim=-1,
             )
-
     (
         render_colors,
         render_alphas,
@@ -1980,7 +1992,9 @@ def augmented_rasterization_2dgs(
         "gradient_2dgs": densify,  # This holds the gradient used for densification for 2dgs
     }
 
-    render_normals = render_normals @ torch.linalg.inv(viewmats)[0, :3, :3].T
+    render_normals = torch.einsum(
+        "...ij,...hwj->...hwi", torch.linalg.inv(viewmats)[..., :3, :3], render_normals
+    )
 
     return (
         render_colors,

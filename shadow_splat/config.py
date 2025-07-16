@@ -107,7 +107,9 @@ shadow_splat_2dgs = MethodSpecification(
                 dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
                 cache_images_type="uint8",
             ),
-            model=ShadowSplat2DGSModelConfig(),
+            model=ShadowSplat2DGSModelConfig(
+                # sh_degree=0,
+            ),
         ),
         optimizers={
             "means": {

@@ -32,10 +32,7 @@ try:
 except ImportError:
     print("Please install gsplat>=1.0.0")
 from shadow_splat.shadow_splat_rendering import (
-    moment_rasterization,
     augmented_rasterization,
-    moment_rasterization_2dgs,
-    augmented_rasterization_2dgs,
     calculate_relighting_weights,
 )
 
@@ -260,7 +257,6 @@ class ShadowSplatModel(SplatfactoModel):
             Ks=light_K,  # [C, 3, 3]
             width=light_W,
             height=light_H,
-            light=light,
             variance_factor=variance_factor,
             intensity=intensity,
             cutoff=cutoff,
@@ -268,7 +264,6 @@ class ShadowSplatModel(SplatfactoModel):
             ambient=self.config.ambient,
             near_plane=0.01,
             far_plane=1e10,
-            depth_mode="absolute",
             sparse_grad=False,
             absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
             rasterize_mode=self.config.rasterize_mode,
@@ -483,163 +478,3 @@ class ShadowSplatModel(SplatfactoModel):
             "accumulation": alpha.squeeze(0),  # type: ignore
             "background": background,  # type: ignore
         }  # type: ignore
-
-    ### NOTE: CHANGED ALL REFERENCES TO RGB TO RGB_RELIGHT!!!
-    def get_metrics_dict(self, outputs, batch) -> Dict[str, torch.Tensor]:
-        """Compute and returns metrics.
-
-        Args:
-            outputs: the output to compute loss dict to
-            batch: ground truth batch corresponding to outputs
-        """
-        gt_rgb = self.composite_with_background(
-            self.get_gt_img(batch["image"]), outputs["background"]
-        )
-        metrics_dict = {}
-        predicted_rgb = outputs["rgb"]
-
-        metrics_dict["psnr"] = self.psnr(predicted_rgb, gt_rgb)
-        if self.config.color_corrected_metrics:
-            cc_rgb = color_correct(predicted_rgb, gt_rgb)
-            metrics_dict["cc_psnr"] = self.psnr(cc_rgb, gt_rgb)
-
-        metrics_dict["gaussian_count"] = self.num_points
-
-        self.camera_optimizer.get_metrics_dict(metrics_dict)
-        return metrics_dict
-
-    def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
-        """Computes and returns the losses dict.
-
-        Args:
-            outputs: the output to compute loss dict to
-            batch: ground truth batch corresponding to outputs
-            metrics_dict: dictionary of metrics, some of which we can use for loss
-        """
-        # TODO: handle alpha channel emptiness supervision
-        # print(self.get_gt_img(batch["image"]).shape)
-        gt_img = self.composite_with_background(
-            self.get_gt_img(batch["image"]), outputs["background"]
-        )
-        pred_img = outputs["rgb"]
-        # lit_mask = outputs["shadow_weights"] > self.light_params["cutoff"]
-        # lit_mask = torch.sigmoid(10 * (outputs["shadow_weights"] - self.light_params["cutoff"]))
-        # gt_img = gt_img * lit_mask
-        # pred_img = pred_img * lit_mask
-
-        # fig, ax = plt.subplots(1, 3, figsize=(15, 5))
-        # ax[0].imshow(gt_img.cpu().numpy())
-        # ax[1].imshow(pred_img.detach().cpu().numpy())
-        # ax[2].imshow(outputs["rgb"].detach().cpu().numpy())
-        # # ax[3].imshow(outputs["shadow"])
-        # plt.show()
-
-        # Check if the gt img has nans
-        # print(gt_img.shape)
-
-        # Set masked part of both ground-truth and rendered image to black.
-        # This is a little bit sketchy for the SSIM loss.
-        if "mask" in batch:
-            print("Using mask")
-            # batch["mask"] : [H, W, 1]
-            mask = self._downscale_if_required(batch["mask"])
-            mask = mask.to(self.device)
-            assert mask.shape[:2] == gt_img.shape[:2] == pred_img.shape[:2]
-            gt_img = gt_img * mask
-            pred_img = pred_img * mask
-
-        Ll1 = torch.abs(gt_img - pred_img).mean()
-        simloss = 1 - self.ssim(
-            gt_img.permute(2, 0, 1)[None, ...], pred_img.permute(2, 0, 1)[None, ...]
-        )
-        if self.config.use_scale_regularization and self.step % 10 == 0:
-            scale_exp = torch.exp(self.scales)
-            scale_reg = (
-                torch.maximum(
-                    scale_exp.amax(dim=-1) / scale_exp.amin(dim=-1),
-                    torch.tensor(self.config.max_gauss_ratio),
-                )
-                - self.config.max_gauss_ratio
-            )
-            scale_reg = 0.1 * scale_reg.mean()
-        else:
-            scale_reg = torch.tensor(0.0).to(self.device)
-
-        loss_dict = {
-            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss,
-            "scale_reg": scale_reg,
-        }
-
-        # Losses for mcmc
-        if self.config.strategy == "mcmc":
-            if self.config.mcmc_opacity_reg > 0.0:
-                mcmc_opacity_reg = (
-                    self.config.mcmc_opacity_reg
-                    * torch.abs(torch.sigmoid(self.gauss_params["opacities"])).mean()
-                )
-                loss_dict["mcmc_opacity_reg"] = mcmc_opacity_reg
-            if self.config.mcmc_scale_reg > 0.0:
-                mcmc_scale_reg = (
-                    self.config.mcmc_scale_reg
-                    * torch.abs(torch.exp(self.gauss_params["scales"])).mean()
-                )
-                loss_dict["mcmc_scale_reg"] = mcmc_scale_reg
-
-        if self.training:
-            # Add loss from camera optimizer
-            self.camera_optimizer.get_loss_dict(loss_dict)
-            if self.config.use_bilateral_grid:
-                loss_dict["tv_loss"] = 10 * total_variation_loss(self.bil_grids.grids)
-
-        return loss_dict
-
-    def get_image_metrics_and_images(
-        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
-    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
-        """Writes the test image outputs.
-
-        Args:
-            image_idx: Index of the image.
-            step: Current step.
-            batch: Batch of data.
-            outputs: Outputs of the model.
-
-        Returns:
-            A dictionary of metrics.
-        """
-        gt_rgb = self.composite_with_background(
-            self.get_gt_img(batch["image"]), outputs["background"]
-        )
-        predicted_rgb = outputs["rgb"]
-        cc_rgb = None
-
-        combined_rgb = torch.cat([gt_rgb, predicted_rgb], dim=1)
-
-        if self.config.color_corrected_metrics:
-            cc_rgb = color_correct(predicted_rgb, gt_rgb)
-            cc_rgb = torch.moveaxis(cc_rgb, -1, 0)[None, ...]
-
-        # Switch images from [H, W, C] to [1, C, H, W] for metrics computations
-        gt_rgb = torch.moveaxis(gt_rgb, -1, 0)[None, ...]
-        predicted_rgb = torch.moveaxis(predicted_rgb, -1, 0)[None, ...]
-
-        psnr = self.psnr(gt_rgb, predicted_rgb)
-        ssim = self.ssim(gt_rgb, predicted_rgb)
-        lpips = self.lpips(gt_rgb, predicted_rgb)
-
-        # all of these metrics will be logged as scalars
-        metrics_dict = {"psnr": float(psnr.item()), "ssim": float(ssim)}  # type: ignore
-        metrics_dict["lpips"] = float(lpips)
-
-        if self.config.color_corrected_metrics:
-            assert cc_rgb is not None
-            cc_psnr = self.psnr(gt_rgb, cc_rgb)
-            cc_ssim = self.ssim(gt_rgb, cc_rgb)
-            cc_lpips = self.lpips(gt_rgb, cc_rgb)
-            metrics_dict["cc_psnr"] = float(cc_psnr.item())
-            metrics_dict["cc_ssim"] = float(cc_ssim)
-            metrics_dict["cc_lpips"] = float(cc_lpips)
-
-        images_dict = {"img": combined_rgb}
-
-        return metrics_dict, images_dict
