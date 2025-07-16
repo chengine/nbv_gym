@@ -239,9 +239,17 @@ class ShadowSplatModel(SplatfactoModel):
             intensity = torch.exp(self.light_params["intensity"])
         if cutoff is None:
             cutoff = torch.sigmoid(self.light_params["cutoff"])
-        # print(f"variance_factor: {variance_factor:.4f}")
-        # print(f"intensity: {intensity:.4f}")
-        # print(f"cutoff: {cutoff:.4f}")
+        print(f"variance_factor: {variance_factor}")
+        print(f"intensity: {intensity}")
+        print(f"cutoff: {cutoff}")
+
+        # Check for NaN values in the input tensors
+        if torch.isnan(means_crop).any():
+            raise ValueError("NaN values detected in means_crop")
+        if torch.isnan(quats_crop).any():
+            raise ValueError("NaN values detected in quats_crop")
+        if torch.isnan(scales_crop).any():
+            raise ValueError("NaN values detected in scales_crop")
 
         irradiance, irradiance_fraction = calculate_relighting_weights(
             means=means_crop,  # [N, 3]
@@ -430,7 +438,7 @@ class ShadowSplatModel(SplatfactoModel):
                 relit_rgb = torch.clamp(relit_intensity, min=0.0, max=1.0)
 
             # Does gamma correction # NOTE: leads to nans during training
-            relit_rgb = relit_rgb ** (1.0 / self.config.gamma_correction)
+            # relit_rgb = relit_rgb ** (1.0 / self.config.gamma_correction)
             if torch.isnan(relit_rgb).any():
                 raise ValueError("Relit rgb is nan")
         else:
@@ -508,6 +516,7 @@ class ShadowSplatModel(SplatfactoModel):
             batch: ground truth batch corresponding to outputs
             metrics_dict: dictionary of metrics, some of which we can use for loss
         """
+        # TODO: handle alpha channel emptiness supervision
         # print(self.get_gt_img(batch["image"]).shape)
         gt_img = self.composite_with_background(
             self.get_gt_img(batch["image"]), outputs["background"]

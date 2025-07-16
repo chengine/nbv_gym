@@ -46,6 +46,20 @@ def evaluate_logistic_distribution(
         depth_image.shape == variance_image.shape
     ), "Depth and variance images must have the same shape"
 
+    # Check inputs for NaN values
+    if torch.isnan(means2d).any():
+        raise ValueError("NaN values detected in means2d")
+    if torch.isnan(depths).any():
+        raise ValueError("NaN values detected in depths")
+    if torch.isnan(depth_image).any():
+        raise ValueError("NaN values detected in depth_image")
+    if torch.isnan(variance_image).any():
+        raise ValueError("NaN values detected in variance_image")
+    if variance_factor is not None and math.isnan(variance_factor):
+        raise ValueError("NaN value detected in variance_factor")
+    if cutoff is not None and math.isnan(cutoff):
+        raise ValueError("NaN value detected in cutoff")
+
     # NOTE: These means correspond to Gaussians that are in the frustum!
     pixel_x = means2d[:, 0].long().clamp(0, W - 1)
     pixel_y = means2d[:, 1].long().clamp(0, H - 1)

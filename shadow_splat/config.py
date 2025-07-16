@@ -32,6 +32,7 @@ shadow_splat = MethodSpecification(
             ),
             model=ShadowSplatModelConfig(
                 sh_degree=0,
+                random_scale=0.5,
                 # reset_alpha_every=1000000,
                 # cull_alpha_thresh=0.001,
                 # warmup_length=100000,
