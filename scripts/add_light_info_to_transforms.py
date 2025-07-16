@@ -8,8 +8,8 @@ import os
 import numpy as np
 from pathlib import Path
 
-data_path = Path(os.path.expanduser("/home/shared/data_nerfstudio/nerfstudio-data/sculpture"))
-transforms_path = data_path / "transforms.json"
+data_path = Path(os.path.expanduser("/home/shared/data_nerfstudio/ShadowSplat/tandt/ignatius"))
+transforms_path = data_path / "transforms_original.json"
 
 with open(transforms_path, "r") as f:
     transforms = json.load(f)
@@ -29,9 +29,9 @@ transforms["light_intrinsics"] = {
 for frame in transforms["frames"]:
     # frame["light_pose"] = np.eye(4).tolist()
     frame["light_pose"] = [
-        [0.6388, 0.4168, -0.6467, -0.6467],
-        [-0.7694, 0.3460, -0.5369, -0.5369],
-        [0.0000, 0.8406, 0.5417, 0.5417],
+        [0.9212, 0.3241, -0.2153, -0.2153],
+        [-0.3891, 0.7673, -0.5098, -0.5098],
+        [0.0000, 0.5534, 0.8329, 0.8329],
         [0.0000, 0.0000, 0.0000, 1.0000],
     ]
 

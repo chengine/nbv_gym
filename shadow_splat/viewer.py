@@ -184,7 +184,7 @@ class ShadowSplatViewer(Viewer):
         new_pose = camera_to_world_transform(az_rad, el_rad, origin, radius).to(
             self.pipeline.device
         )
-        # print("New light source pose:\n", new_pose)
+        print("New light source pose:\n", new_pose)
 
         light_source = Cameras(
             camera_to_worlds=new_pose[None, :3, ...],

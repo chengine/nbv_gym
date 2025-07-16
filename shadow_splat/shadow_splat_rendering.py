@@ -121,9 +121,9 @@ def chebyshev_weighting(
     variance = torch.clamp(variance_image_flattened, min=1e-8)
     variance_per_gaussian = variance[projected_pixel_ids]
 
-    weights = variance_per_gaussian / (
-        variance_per_gaussian + (depths - depth_image_flattened[projected_pixel_ids]) ** 2
-    )
+    depth_diff = depths - depth_image_flattened[projected_pixel_ids]
+    weights = variance_per_gaussian / (variance_per_gaussian + depth_diff**2)
+    weights[depth_diff < 0] = 1.0
 
     return weights
 

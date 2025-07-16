@@ -236,9 +236,9 @@ class ShadowSplatModel(SplatfactoModel):
             intensity = torch.exp(self.light_params["intensity"])
         if cutoff is None:
             cutoff = torch.sigmoid(self.light_params["cutoff"])
-        print(f"variance_factor: {variance_factor}")
-        print(f"intensity: {intensity}")
-        print(f"cutoff: {cutoff}")
+        # print(f"variance_factor: {variance_factor}")
+        # print(f"intensity: {intensity}")
+        # print(f"cutoff: {cutoff}")
 
         # Check for NaN values in the input tensors
         if torch.isnan(means_crop).any():
