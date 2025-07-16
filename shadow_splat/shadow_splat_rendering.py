@@ -26,7 +26,7 @@ from nerfstudio.cameras.cameras import Cameras, CameraType
 import matplotlib.pyplot as plt
 
 
-def evaluate_logistic_distribution(
+def logistic_weighting(
     means2d: Tensor,  # [N, 2] where N is the number of gaussians in the frustum
     depths: Tensor,  # [N] where N is the number of gaussians in the frustum
     depth_image: Tensor,  # [H, W]
@@ -35,8 +35,8 @@ def evaluate_logistic_distribution(
     cutoff: Optional[float] = 0.3,
     hard_cutoff: Optional[bool] = False,
 ):
-    ### Only evaluates the logistic distribution for the gaussians in the furstum! Any logic
-    # that indexes into the total number of gaussians in the scene should be done outside of this function!
+    # NOTE: Only evaluates the logistic distribution for the gaussians in the frustum!
+    # Any logic that indexes into the total number of gaussians in the scene should be done outside of this function!
 
     H, W = depth_image.shape
     N, _ = means2d.shape
@@ -70,7 +70,8 @@ def evaluate_logistic_distribution(
 
     # Add minimum variance threshold to prevent division by very small numbers
     variance = torch.clamp(variance_image_flattened, min=1e-8)
-    s = torch.sqrt(variance_factor / (math.pi) ** 2 * variance)  # n_pixels
+    # s = torch.sqrt(variance_factor / (math.pi) ** 2 * variance)  # n_pixels
+    s = variance_factor * torch.sqrt(3 * variance) / math.pi
 
     sigmoid_argument = (depths - depth_image_flattened[projected_pixel_ids]) / s[
         projected_pixel_ids
@@ -89,6 +90,42 @@ def evaluate_logistic_distribution(
         sigmoid_weights = smooth_mask + (1.0 - smooth_mask) * sigmoid_weights
 
     return sigmoid_weights
+
+
+def chebyshev_weighting(
+    means2d: Tensor,  # [N, 2] where N is the number of gaussians in the frustum
+    depths: Tensor,  # [N] where N is the number of gaussians in the frustum
+    depth_image: Tensor,  # [H, W]
+    variance_image: Tensor,  # [H, W]
+    variance_factor: Optional[float] = 1.0,
+    cutoff: Optional[float] = 0.3,
+    hard_cutoff: Optional[bool] = False,
+):
+    H, W = depth_image.shape
+    N, _ = means2d.shape
+
+    assert N == depths.shape[0], "Number of means and depths must match"
+    assert (
+        depth_image.shape == variance_image.shape
+    ), "Depth and variance images must have the same shape"
+
+    # NOTE: These means correspond to Gaussians that are in the frustum!
+    pixel_x = means2d[:, 0].long().clamp(0, W - 1)
+    pixel_y = means2d[:, 1].long().clamp(0, H - 1)
+    projected_pixel_ids = pixel_y * W + pixel_x  # shape [nnz]
+
+    depth_image_flattened = depth_image.reshape(-1)
+    variance_image_flattened = variance_image.reshape(-1)
+
+    # Add minimum variance threshold to prevent division by very small numbers
+    variance = torch.clamp(variance_image_flattened, min=1e-8)
+    variance_per_gaussian = variance[projected_pixel_ids]
+
+    weights = variance_per_gaussian / (
+        variance_per_gaussian + (depths - depth_image_flattened[projected_pixel_ids]) ** 2
+    )
+
+    return weights
 
 
 def calculate_relighting_weights(
@@ -192,7 +229,8 @@ def calculate_relighting_weights(
     gaussian_ids = meta["gaussian_ids"]  # Indices of the gaussians in the frustum
 
     # This represents the fraction of light that is received by each gaussian in the frustum
-    weights = evaluate_logistic_distribution(
+    # weights = logistic_weighting(
+    weights = chebyshev_weighting(
         means2d,  # [N, 2] where N is the number of gaussians in the frustum
         depths,  # [N] where N is the number of gaussians in the frustum
         depth_image,  # [H, W]
@@ -232,7 +270,7 @@ def calculate_relighting_weights(
 
 
 # Renders the accumulated or expected depth (first moment) and the accumulated
-# or expected variance (second moment). Will add higher moments as necessary.
+# or expected depth squared (second moment). Will add higher moments as necessary.
 def moment_rasterization(
     means: Tensor,  # [N, 3]
     quats: Tensor,  # [N, 4]
@@ -618,7 +656,7 @@ def moment_rasterization(
             opacities = reshape_view(C, opacities, N_world)
 
     # Rasterize to pixels
-    colors = torch.stack((depths, depths**2), dim=-1)
+    moments = torch.stack((depths, depths**2), dim=-1)
     if backgrounds is not None:
         backgrounds = torch.zeros(C, 2, device=backgrounds.device)
 
@@ -656,21 +694,21 @@ def moment_rasterization(
     )
 
     # print("rank", world_rank, "Before rasterize_to_pixels")
-    if colors.shape[-1] > channel_chunk:
+    if moments.shape[-1] > channel_chunk:
         # slice into chunks
-        n_chunks = (colors.shape[-1] + channel_chunk - 1) // channel_chunk
-        render_colors, render_alphas = [], []
+        n_chunks = (moments.shape[-1] + channel_chunk - 1) // channel_chunk
+        render_moments, render_alphas = [], []
         for i in range(n_chunks):
-            colors_chunk = colors[..., i * channel_chunk : (i + 1) * channel_chunk]
+            moments_chunk = moments[..., i * channel_chunk : (i + 1) * channel_chunk]
             backgrounds_chunk = (
                 backgrounds[..., i * channel_chunk : (i + 1) * channel_chunk]
                 if backgrounds is not None
                 else None
             )
-            render_colors_, render_alphas_ = rasterize_to_pixels(
+            render_moments_, render_alphas_ = rasterize_to_pixels(
                 means2d,
                 conics,
-                colors_chunk,
+                moments_chunk,
                 opacities,
                 width,
                 height,
@@ -681,15 +719,15 @@ def moment_rasterization(
                 packed=packed,
                 absgrad=absgrad,
             )
-            render_colors.append(render_colors_)
+            render_moments.append(render_moments_)
             render_alphas.append(render_alphas_)
-        render_colors = torch.cat(render_colors, dim=-1)
+        render_moments = torch.cat(render_moments, dim=-1)
         render_alphas = render_alphas[0]  # discard the rest
     else:
-        render_colors, render_alphas = rasterize_to_pixels(
+        render_moments, render_alphas = rasterize_to_pixels(
             means2d,
             conics,
-            colors,
+            moments,
             opacities,
             width,
             height,
@@ -702,9 +740,9 @@ def moment_rasterization(
         )
 
     # We use expected depth
-    render_colors = render_colors / render_alphas.clamp(min=1e-10)
+    render_moments = render_moments / render_alphas.clamp(min=1e-10)
 
-    return render_colors, render_alphas, meta
+    return render_moments, render_alphas, meta
 
 
 # Regular rasterization, but allows to simultaneously render additional channels
