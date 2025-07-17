@@ -106,6 +106,7 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
 
         # NOTE: Added
         light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
+        self.current_light = light
 
         return cameras, data, light
 

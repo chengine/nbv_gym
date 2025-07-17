@@ -1,5 +1,8 @@
 """Custom viewer for Shadow Splat"""
 
+from typing import Optional
+
+import time
 import numpy as np
 import torch
 import viser
@@ -7,6 +10,8 @@ import viser.transforms as tf
 from nerfstudio.viewer.viewer import Viewer
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.models.splatfacto import SplatfactoModel
+from nerfstudio.utils.writer import GLOBAL_BUFFER, EventName
+from nerfstudio.viewer.render_state_machine import RenderAction
 
 from shadow_splat.model import ShadowSplatModel, ShadowSplatModelConfig
 
@@ -22,6 +27,10 @@ class ShadowSplatViewer(Viewer):
         if type(pipeline.model) is SplatfactoModel:
             print("model is splatfacto, converting to shadow splat")
             self._convert_model(pipeline)
+
+        # print(dir(pipeline))
+        self.training_lights = pipeline.datamanager.train_dataparser_outputs.lights
+        # print(pipe
 
         # Initialize the parent Viewer class
         super().__init__(*args, **kwargs)
@@ -152,6 +161,65 @@ class ShadowSplatViewer(Viewer):
             position=(0.0, 0.0, 0.0),
             visible=False,
         )
+
+    def update_scene(self, step: int, num_rays_per_batch: Optional[int] = None) -> None:
+        """updates the scene based on the graph weights
+
+        Args:
+            step: iteration step of training
+            num_rays_per_batch: number of rays per batch, used during training
+        """
+        self.step = step
+
+        if len(self.render_statemachines) == 0:
+            return
+        # this stops training while moving to make the response smoother
+        while time.time() - self.last_move_time < 0.1:
+            time.sleep(0.05)
+        if (
+            self.trainer is not None
+            and self.trainer.training_state == "training"
+            and self.train_util != 1
+        ):
+            if (
+                EventName.TRAIN_RAYS_PER_SEC.value in GLOBAL_BUFFER["events"]
+                and EventName.VIS_RAYS_PER_SEC.value in GLOBAL_BUFFER["events"]
+            ):
+                train_s = GLOBAL_BUFFER["events"][EventName.TRAIN_RAYS_PER_SEC.value]["avg"]
+                vis_s = GLOBAL_BUFFER["events"][EventName.VIS_RAYS_PER_SEC.value]["avg"]
+                train_util = self.train_util
+                vis_n = self.control_panel.max_res**2
+                train_n = num_rays_per_batch
+                train_time = train_n / train_s
+                vis_time = vis_n / vis_s
+
+                render_freq = train_util * vis_time / (train_time - train_util * train_time)
+            else:
+                render_freq = 30
+            if step > self.last_step + render_freq:
+                self.last_step = step
+                clients = self.viser_server.get_clients()
+                for id in clients:
+                    camera_state = self.get_camera_state(clients[id])
+                    if camera_state is not None:
+                        self.render_statemachines[id].action(RenderAction("step", camera_state))
+                self.update_camera_poses()
+                self.update_training_light_source_frustum()
+                self.update_step(step)
+
+    def update_training_light_source_frustum(self):
+        current_light = self.pipeline.datamanager.current_light
+        dimension = current_light.width.item()
+        focal_length = current_light.fx.item()
+        light_source_pose_cv = current_light.camera_to_worlds.squeeze()
+        self.light_source_visualizer.fov = 2 * np.arctan2(dimension, (2 * focal_length))
+        self.light_source_visualizer.position = light_source_pose_cv[:3, 3].cpu().numpy()
+
+        # Convert the opengl light source rotation into the opencv viser format
+        self.light_source_visualizer.wxyz = tf.SO3.from_matrix(
+            light_source_pose_cv[:3, :3].cpu().numpy()
+        ).wxyz
+        self.light_source_visualizer.visible = True
 
     def update_light_source_pose(self, event):
         """Update the light source pose based on slider input."""

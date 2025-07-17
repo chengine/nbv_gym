@@ -243,12 +243,8 @@ def calculate_relighting_weights(
     assert not torch.isnan(weights).any(), "Weights are nan"
     assert not torch.isinf(weights).any(), "Weights are inf"
 
-    if ambient:
-        irradiance = torch.ones_like(means)
-        irradiance_fraction = torch.ones_like(opacities)
-    else:
-        irradiance = torch.zeros_like(means)
-        irradiance_fraction = torch.zeros_like(opacities)
+    irradiance = torch.zeros_like(means)
+    irradiance_fraction = torch.zeros_like(opacities)
 
     # The total intensity of the light that is received by each gaussian in the frustum is the product of the intensity of the light source and the fraction of light that is received by the gaussian
     # Additionally, if 2DGS, then a BRDF function is applied.
@@ -265,6 +261,9 @@ def calculate_relighting_weights(
         [weights * intensity[0], weights * intensity[1], weights * intensity[2]], dim=-1
     )
     irradiance_fraction[gaussian_ids] = weights
+
+    if ambient:
+        irradiance += cutoff  # cutoff is in intensity space
 
     return irradiance, irradiance_fraction
 

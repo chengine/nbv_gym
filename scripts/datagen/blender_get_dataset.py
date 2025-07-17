@@ -12,7 +12,7 @@ from blender_util import get_camera_intrinsics, look_at_blender, set_sun_directi
 
 # =============== Parameters ===============
 GENERATE_PLY = False
-NUM_VIEWS = 5
+NUM_VIEWS = 100
 RADIUS = 1.75
 MIN_ELEVATION_RAD = np.deg2rad(5.0)
 TARGET = (0, 0, 0.3)
@@ -29,7 +29,7 @@ parser.add_argument(
 args = parser.parse_args()
 RENDERER = args.renderer
 BLENDER_FILE = "/home/addai/Blender/master_chief.blend"
-OUTPUT_FOLDER = Path(f"/home/addai/NeRF/shadow_splat/data/master_chief_{RENDERER}_2_light")
+OUTPUT_FOLDER = Path("/home/addai/NeRF/shadow_splat/data/master_chief_multi_light")
 IMG_FOLDER = OUTPUT_FOLDER / "images"
 
 # =============== Main ===============
@@ -73,8 +73,8 @@ if __name__ == "__main__":
     light_intrinsics = {
         "w": W,
         "h": H,
-        "fx": focal_length,
-        "fy": focal_length,
+        "fl_x": focal_length,
+        "fl_y": focal_length,
         "cx": W / 2.0,
         "cy": H / 2.0,
     }
@@ -95,35 +95,35 @@ if __name__ == "__main__":
     frames = []
 
     # Set lighting
-    for azimuth_deg in [0, 180]:
-        set_sun_direction(sun, azimuth_deg=azimuth_deg, elevation_deg=45)
+    for azimuth_deg in [45, 135, 225, 315]:
+        set_sun_direction(sun, azimuth_deg=azimuth_deg, elevation_deg=-45)
         light_pose = np.array(sun.matrix_world)
 
         for i, location in Logger.tqdm(
-            enumerate(camera_locations), total=NUM_VIEWS, desc="Rendering views"
+            enumerate(camera_locations),
+            total=NUM_VIEWS,
+            desc=f"Rendering views, azimuth: {azimuth_deg}°",
         ):
             # Set camera
             pose = look_at_blender(location, TARGET)
             camera.matrix_world = Matrix(pose)
 
-            # # Set lighting
-            # set_sun_direction(sun, azimuth_deg=0, elevation_deg=45)
-            # light_pose = np.array(sun.matrix_world)
-
             # Render image
-            file_path = os.path.join(IMG_FOLDER, f"view_{i:03d}_light_{azimuth_deg}.png")
+            img_name = f"view_{i:03d}_light_{azimuth_deg}.png"
+            file_path = os.path.join(IMG_FOLDER, img_name)
             bpy.context.scene.render.filepath = file_path
             bpy.ops.render.render(write_still=True)
 
             frame_data = {
                 "transform_matrix": pose.tolist(),
-                "file_path": f"images/view_{i:03d}.png",
+                "file_path": f"images/{img_name}",
             }
             frame_data["light_pose"] = light_pose.tolist()
             frames.append(frame_data)
 
     data = {}
     data.update(intrinsics)
+    data["light_intrinsics"] = light_intrinsics
     data["ply_file_path"] = "../models/master_chief_all.ply"
     data["frames"] = frames
 

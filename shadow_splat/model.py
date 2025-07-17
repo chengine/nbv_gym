@@ -88,8 +88,9 @@ class ShadowSplatModel(SplatfactoModel):
         self.light_params = torch.nn.ParameterDict(
             {
                 "intensity": torch.nn.Parameter(torch.log(torch.ones(3))),
-                "cutoff": torch.nn.Parameter(torch.log(torch.tensor(0.5))),
-                "variance_factor": torch.nn.Parameter(torch.logit(torch.tensor(0.01))),
+                "cutoff": torch.nn.Parameter(torch.logit(torch.tensor(0.5))),
+                "variance_factor": torch.nn.Parameter(torch.log(torch.tensor(0.01))),
+                "ambient_intensity": torch.nn.Parameter(torch.log(torch.tensor(0.01))),
             }
         )
 
@@ -156,7 +157,8 @@ class ShadowSplatModel(SplatfactoModel):
 
     def get_light_param_groups(self) -> Dict[str, List[Parameter]]:
         return {
-            name: [self.light_params[name]] for name in ["intensity", "cutoff", "variance_factor"]
+            name: [self.light_params[name]]
+            for name in ["intensity", "cutoff", "variance_factor", "ambient_intensity"]
         }
 
     def get_param_groups(self) -> Dict[str, List[Parameter]]:
@@ -352,7 +354,13 @@ class ShadowSplatModel(SplatfactoModel):
         if light is not None:
             # TODO: Implement light intrinsic optimization
             irradiance, irradiance_fraction = self.compute_irradiance(light)
-            # print(f"max irradiance: {irradiance.max()}, min irradiance: {irradiance.min()}")
+            print(
+                f"mean irradiance fraction: {irradiance_fraction.mean()}, max irradiance fraction: {irradiance_fraction.max()}, min irradiance fraction: {irradiance_fraction.min()}"
+            )
+            shadow_irradiance_fraction = irradiance_fraction[irradiance_fraction < 0.5]
+            print(
+                f"mean shadow irradiance fraction: {shadow_irradiance_fraction.mean()}, max shadow irradiance fraction: {shadow_irradiance_fraction.max()}, min shadow irradiance fraction: {shadow_irradiance_fraction.min()}"
+            )
         elif self.irradiance is not None and self.irradiance.shape[0] == self.means.shape[0]:
             # NOTE: during training, the sizes occasionally mismatch right after training
             # For now we just display albedo in the viewer for this one frame as a workaround
@@ -360,6 +368,11 @@ class ShadowSplatModel(SplatfactoModel):
             irradiance_fraction = self.irradiance_fraction
         else:
             irradiance, irradiance_fraction = None, None
+
+        # if irradiance is not None:
+        #     ambient_intensity = torch.exp(self.light_params["ambient_intensity"])
+        #     # print(f"ambient_intensity: {ambient_intensity}")
+        #     irradiance += ambient_intensity
 
         if self.config.output_depth_during_training or not self.training:
             render_mode = "RGB+ED"
@@ -478,3 +491,83 @@ class ShadowSplatModel(SplatfactoModel):
             "accumulation": alpha.squeeze(0),  # type: ignore
             "background": background,  # type: ignore
         }  # type: ignore
+
+    def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
+        """Computes and returns the losses dict.
+
+        Args:
+            outputs: the output to compute loss dict to
+            batch: ground truth batch corresponding to outputs
+            metrics_dict: dictionary of metrics, some of which we can use for loss
+        """
+        gt_img = self.composite_with_background(
+            self.get_gt_img(batch["image"]), outputs["background"]
+        )
+        pred_img = outputs["rgb"]
+
+        # albedo_img = outputs["albedo"]
+        # error = (pred_img - albedo_img).abs().mean()
+        # print(f"error: {error}")
+        # fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+        # ax1.imshow(gt_img.detach().cpu().numpy())
+        # ax1.set_title("Ground Truth")
+        # ax2.imshow(albedo_img.detach().cpu().numpy())
+        # ax2.set_title("Albedo")
+        # ax3.imshow(pred_img.detach().cpu().numpy())
+        # ax3.set_title("Relit")
+        # plt.show()
+
+        # Set masked part of both ground-truth and rendered image to black.
+        # This is a little bit sketchy for the SSIM loss.
+        if "mask" in batch:
+            # batch["mask"] : [H, W, 1]
+            mask = self._downscale_if_required(batch["mask"])
+            mask = mask.to(self.device)
+            assert mask.shape[:2] == gt_img.shape[:2] == pred_img.shape[:2]
+            gt_img = gt_img * mask
+            pred_img = pred_img * mask
+
+        Ll1 = torch.abs(gt_img - pred_img).mean()
+        simloss = 1 - self.ssim(
+            gt_img.permute(2, 0, 1)[None, ...], pred_img.permute(2, 0, 1)[None, ...]
+        )
+        if self.config.use_scale_regularization and self.step % 10 == 0:
+            scale_exp = torch.exp(self.scales)
+            scale_reg = (
+                torch.maximum(
+                    scale_exp.amax(dim=-1) / scale_exp.amin(dim=-1),
+                    torch.tensor(self.config.max_gauss_ratio),
+                )
+                - self.config.max_gauss_ratio
+            )
+            scale_reg = 0.1 * scale_reg.mean()
+        else:
+            scale_reg = torch.tensor(0.0).to(self.device)
+
+        loss_dict = {
+            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss,
+            "scale_reg": scale_reg,
+        }
+
+        # Losses for mcmc
+        if self.config.strategy == "mcmc":
+            if self.config.mcmc_opacity_reg > 0.0:
+                mcmc_opacity_reg = (
+                    self.config.mcmc_opacity_reg
+                    * torch.abs(torch.sigmoid(self.gauss_params["opacities"])).mean()
+                )
+                loss_dict["mcmc_opacity_reg"] = mcmc_opacity_reg
+            if self.config.mcmc_scale_reg > 0.0:
+                mcmc_scale_reg = (
+                    self.config.mcmc_scale_reg
+                    * torch.abs(torch.exp(self.gauss_params["scales"])).mean()
+                )
+                loss_dict["mcmc_scale_reg"] = mcmc_scale_reg
+
+        if self.training:
+            # Add loss from camera optimizer
+            self.camera_optimizer.get_loss_dict(loss_dict)
+            if self.config.use_bilateral_grid:
+                loss_dict["tv_loss"] = 10 * total_variation_loss(self.bil_grids.grids)
+
+        return loss_dict
