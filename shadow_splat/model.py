@@ -352,13 +352,6 @@ class ShadowSplatModel(SplatfactoModel):
         if light is not None:
             # TODO: Implement light intrinsic optimization
             irradiance, irradiance_fraction = self.compute_irradiance(light)
-            # print(
-            #     f"mean irradiance fraction: {irradiance_fraction.mean()}, max irradiance fraction: {irradiance_fraction.max()}, min irradiance fraction: {irradiance_fraction.min()}"
-            # )
-            # shadow_irradiance_fraction = irradiance_fraction[irradiance_fraction < 0.5]
-            # print(
-            #     f"mean shadow irradiance fraction: {shadow_irradiance_fraction.mean()}, max shadow irradiance fraction: {shadow_irradiance_fraction.max()}, min shadow irradiance fraction: {shadow_irradiance_fraction.min()}"
-            # )
         elif self.irradiance is not None and self.irradiance.shape[0] == self.means.shape[0]:
             # NOTE: during training, the sizes occasionally mismatch right after training
             # For now we just display albedo in the viewer for this one frame as a workaround
@@ -366,11 +359,6 @@ class ShadowSplatModel(SplatfactoModel):
             irradiance_fraction = self.irradiance_fraction
         else:
             irradiance, irradiance_fraction = None, None
-
-        # if irradiance is not None:
-        #     ambient_intensity = torch.exp(self.light_params["ambient_intensity"])
-        #     # print(f"ambient_intensity: {ambient_intensity}")
-        #     irradiance += ambient_intensity
 
         if self.config.output_depth_during_training or not self.training:
             render_mode = "RGB+ED"
@@ -466,17 +454,16 @@ class ShadowSplatModel(SplatfactoModel):
             depth_im = render[:, ..., -1:]
             depth_im = torch.where(alpha > 0, depth_im, depth_im.detach().max()).squeeze(0)
 
-            if light is not None:
-                # NOTE: currently broken
+            if irradiance is not None:
                 shadow_im = render[:, ..., -2:-1]
             else:
-                shadow_im = None
+                shadow_im = torch.zeros_like(render[:, ..., -1:])
         else:
             depth_im = None
-            if light is not None:
+            if irradiance is not None:
                 shadow_im = render[:, ..., -1:]
             else:
-                shadow_im = None
+                shadow_im = torch.zeros_like(render[:, ..., -1:])
 
         if background.shape[0] == 3 and not self.training:
             background = background.expand(H, W, 3)
@@ -485,7 +472,7 @@ class ShadowSplatModel(SplatfactoModel):
             "rgb": relit_rgb.squeeze(0),  # type: ignore
             "albedo": albedo_rgb.squeeze(0),  # type: ignore
             "depth": depth_im,  # type: ignore
-            "shadow": shadow_im,  # type: ignore
+            "shadow": shadow_im.squeeze(0),  # type: ignore
             "accumulation": alpha.squeeze(0),  # type: ignore
             "background": background,  # type: ignore
         }  # type: ignore
@@ -503,17 +490,10 @@ class ShadowSplatModel(SplatfactoModel):
         )
         pred_img = outputs["rgb"]
 
-        # albedo_img = outputs["albedo"]
-        # error = (pred_img - albedo_img).abs().mean()
-        # print(f"error: {error}")
-        # fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
-        # ax1.imshow(gt_img.detach().cpu().numpy())
-        # ax1.set_title("Ground Truth")
-        # ax2.imshow(albedo_img.detach().cpu().numpy())
-        # ax2.set_title("Albedo")
-        # ax3.imshow(pred_img.detach().cpu().numpy())
-        # ax3.set_title("Relit")
-        # plt.show()
+        # ====== ALBEDO TV LOSS ======
+        albedo_img = outputs["albedo"]
+        albedo_tv_loss = 0.01 * total_variation_loss(albedo_img)
+        # ====== ALBEDO TV LOSS ======
 
         # Set masked part of both ground-truth and rendered image to black.
         # This is a little bit sketchy for the SSIM loss.
@@ -545,6 +525,7 @@ class ShadowSplatModel(SplatfactoModel):
         loss_dict = {
             "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss,
             "scale_reg": scale_reg,
+            "albedo_tv_loss": albedo_tv_loss,
         }
 
         # Losses for mcmc
@@ -569,3 +550,58 @@ class ShadowSplatModel(SplatfactoModel):
                 loss_dict["tv_loss"] = 10 * total_variation_loss(self.bil_grids.grids)
 
         return loss_dict
+
+    def get_image_metrics_and_images(
+        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
+    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+        """Writes the test image outputs.
+
+        Args:
+            image_idx: Index of the image.
+            step: Current step.
+            batch: Batch of data.
+            outputs: Outputs of the model.
+
+        Returns:
+            A dictionary of metrics.
+        """
+        gt_rgb = self.composite_with_background(
+            self.get_gt_img(batch["image"]), outputs["background"]
+        )
+        predicted_rgb = outputs["rgb"]
+        cc_rgb = None
+
+        combined_rgb = torch.cat([gt_rgb, predicted_rgb], dim=1)
+
+        if self.config.color_corrected_metrics:
+            cc_rgb = color_correct(predicted_rgb, gt_rgb)
+            cc_rgb = torch.moveaxis(cc_rgb, -1, 0)[None, ...]
+
+        # Switch images from [H, W, C] to [1, C, H, W] for metrics computations
+        gt_rgb = torch.moveaxis(gt_rgb, -1, 0)[None, ...]
+        predicted_rgb = torch.moveaxis(predicted_rgb, -1, 0)[None, ...]
+
+        psnr = self.psnr(gt_rgb, predicted_rgb)
+        ssim = self.ssim(gt_rgb, predicted_rgb)
+        lpips = self.lpips(gt_rgb, predicted_rgb)
+
+        # all of these metrics will be logged as scalars
+        metrics_dict = {"psnr": float(psnr.item()), "ssim": float(ssim)}  # type: ignore
+        metrics_dict["lpips"] = float(lpips)
+
+        if self.config.color_corrected_metrics:
+            assert cc_rgb is not None
+            cc_psnr = self.psnr(gt_rgb, cc_rgb)
+            cc_ssim = self.ssim(gt_rgb, cc_rgb)
+            cc_lpips = self.lpips(gt_rgb, cc_rgb)
+            metrics_dict["cc_psnr"] = float(cc_psnr.item())
+            metrics_dict["cc_ssim"] = float(cc_ssim)
+            metrics_dict["cc_lpips"] = float(cc_lpips)
+
+        images_dict = {
+            "img": combined_rgb,
+            "albedo": outputs["albedo"],
+            "shadow": outputs["shadow"],
+        }
+
+        return metrics_dict, images_dict

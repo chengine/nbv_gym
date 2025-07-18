@@ -117,7 +117,7 @@ def chebyshev_weighting(
     depth_image_flattened = depth_image.reshape(-1)
     variance_image_flattened = variance_image.reshape(-1)
 
-    # # Visualize depth and variance images
+    # Visualize depth and variance images
     # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
     # ax1.imshow(depth_image.detach().cpu().numpy())
     # ax1.set_title("Depth Image")
@@ -271,7 +271,6 @@ def calculate_relighting_weights(
     irradiance_fraction[gaussian_ids] = weights
 
     if ambient:
-        # print(f"cutoff: {cutoff}")
         irradiance += cutoff  # cutoff is in intensity space
 
     return irradiance, irradiance_fraction
