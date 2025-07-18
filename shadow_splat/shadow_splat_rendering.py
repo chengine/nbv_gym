@@ -117,6 +117,14 @@ def chebyshev_weighting(
     depth_image_flattened = depth_image.reshape(-1)
     variance_image_flattened = variance_image.reshape(-1)
 
+    # # Visualize depth and variance images
+    # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+    # ax1.imshow(depth_image.detach().cpu().numpy())
+    # ax1.set_title("Depth Image")
+    # ax2.imshow(variance_image.detach().cpu().numpy())
+    # ax2.set_title("Variance Image")
+    # plt.show()
+
     # Add minimum variance threshold to prevent division by very small numbers
     variance = torch.clamp(variance_image_flattened, min=1e-8)
     variance_per_gaussian = variance[projected_pixel_ids]

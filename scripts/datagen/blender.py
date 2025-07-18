@@ -9,7 +9,7 @@ import numpy as np
 from mathutils import Matrix
 
 
-class Blender:
+class BlenderScene:
     def __init__(self, scene_path: str | Path):
         """
         Initialize the Blender class.
@@ -27,10 +27,6 @@ class Blender:
         # Camera settings
         self.camera = bpy.context.scene.camera
         self.camera.data.lens = 35  # 35 mm (~52.5 deg FOV)
-
-        # Render layers
-        self.scene.use_nodes = True
-        self.tree = self.scene.node_tree
 
     def render(self, file_path: str | Path):
         """Render the scene and save the image to the given file path."""

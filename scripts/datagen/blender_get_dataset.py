@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from mathutils import Matrix
 import argparse
+import time
 
 from shadow_splat.util.general import fibonacci_hemisphere_points
 from shadow_splat.util.logger import Logger
@@ -14,11 +15,12 @@ from blender_util import (
     set_sun_direction,
     set_sun_direction_and_location,
 )
+from blender import BlenderScene
 
 # =============== Parameters ===============
 GENERATE_PLY = False
 NUM_VIEWS = 100
-RADIUS = 1.75
+RADIUS = 1000
 MIN_ELEVATION_RAD = np.deg2rad(5.0)
 TARGET = (0, 0, 0.3)
 RENDER_DEPTH = False
@@ -33,8 +35,10 @@ parser.add_argument(
 )
 args = parser.parse_args()
 RENDERER = args.renderer
-BLENDER_FILE = "/home/addai/Blender/master_chief.blend"
-OUTPUT_FOLDER = Path("/home/addai/NeRF/shadow_splat/data/master_chief_multi_light")
+# BLENDER_FILE = "/home/addai/Blender/master_chief.blend"
+BLENDER_FILE = "/home/addai/Blender/Perseverance_Rover.blend"
+# OUTPUT_FOLDER = Path("/home/addai/NeRF/shadow_splat/data/master_chief_multi_light")
+OUTPUT_FOLDER = Path("/home/addai/NeRF/shadow_splat/data/perseverance")
 IMG_FOLDER = OUTPUT_FOLDER / "images"
 
 # =============== Main ===============
@@ -56,7 +60,11 @@ if __name__ == "__main__":
 
     # Render settings
     if RENDERER == "eevee":
+        # NOTE: shadows are currently not working with eevee thru bpy
         bpy.context.scene.render.engine = "BLENDER_EEVEE"
+        bpy.context.scene.eevee.use_soft_shadows = True
+        bpy.context.scene.eevee.shadow_cube_size = "4096"
+        bpy.context.scene.eevee.shadow_cascade_size = "4096"
     elif RENDERER == "cycles":
         bpy.context.scene.render.engine = "CYCLES"
     else:
@@ -72,6 +80,9 @@ if __name__ == "__main__":
 
     # Lights (currently only handle single Sun light)
     sun = bpy.data.objects["Sun"]
+
+    sun.data.use_shadow = True
+
     light_pose = np.array(sun.matrix_world)
     W, H = 5000, 5000
     focal_length = 1250.0
@@ -99,10 +110,15 @@ if __name__ == "__main__":
 
     frames = []
 
+    start_time = time.time()
+
     # Set lighting
-    for azimuth_deg in [45, 135, 225, 315]:
+    # for azimuth_deg in [45, 135, 225, 315]:
+    for azimuth_deg in [45]:
         # set_sun_direction(sun, azimuth_deg=azimuth_deg, elevation_deg=-45)
-        set_sun_direction_and_location(sun, azimuth_deg=azimuth_deg, elevation_deg=-45, R=3.5)
+        set_sun_direction_and_location(
+            sun, azimuth_deg=azimuth_deg, elevation_deg=-45, R=2 * RADIUS
+        )
         bpy.context.view_layer.update()
         light_pose = np.array(sun.matrix_world)
 
@@ -117,9 +133,9 @@ if __name__ == "__main__":
 
             # Render image
             img_name = f"view_{i:03d}_light_{azimuth_deg}.png"
-            # file_path = os.path.join(IMG_FOLDER, img_name)
-            # bpy.context.scene.render.filepath = file_path
-            # bpy.ops.render.render(write_still=True)
+            file_path = os.path.join(IMG_FOLDER, img_name)
+            bpy.context.scene.render.filepath = file_path
+            bpy.ops.render.render(write_still=True)
 
             frame_data = {
                 "transform_matrix": pose.tolist(),
@@ -131,10 +147,11 @@ if __name__ == "__main__":
     data = {}
     data.update(intrinsics)
     data["light_intrinsics"] = light_intrinsics
-    data["ply_file_path"] = "../models/all_points_poisson_200000.ply"
+    # data["ply_file_path"] = "../models/all_points_poisson_200000.ply"
     data["frames"] = frames
 
     with open(os.path.join(OUTPUT_FOLDER, "transforms.json"), "w") as f:
         json.dump(data, f, indent=4)
 
     print("Rendering complete. Images and intrinsic matrices saved.")
+    print(f"Time taken: {time.time() - start_time} seconds")

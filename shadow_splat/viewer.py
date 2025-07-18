@@ -46,10 +46,10 @@ class ShadowSplatViewer(Viewer):
             initial_variance_factor = torch.exp(
                 pipeline.model.light_params["variance_factor"]
             ).item()
-            initial_cutoff = torch.sigmoid(pipeline.model.light_params["cutoff"]).item()
+            initial_cutoff = torch.exp(pipeline.model.light_params["cutoff"]).item()
             initial_intensity = (
                 torch.exp(pipeline.model.light_params["intensity"]).detach().cpu().numpy()
-            )
+            ) * np.ones(3)
             self._add_light_source_slider(
                 initial_variance_factor=initial_variance_factor,
                 initial_cutoff=initial_cutoff,
@@ -82,10 +82,10 @@ class ShadowSplatViewer(Viewer):
             label="Radius", min=0.0, max=10.0, step=0.1, initial_value=1.0
         )
         self.dim_slider = self.viser_server.gui.add_slider(
-            label="Dimension", min=0.0, max=3000.0, step=1.0, initial_value=2000
+            label="Dimension", min=0.0, max=5000.0, step=1.0, initial_value=2000
         )
         self.focal_length_slider = self.viser_server.gui.add_slider(
-            label="Focal length", min=0.0, max=3000.0, step=1.0, initial_value=1650
+            label="Focal length", min=0.0, max=3000.0, step=1.0, initial_value=1250
         )
         self.variance_factor_slider = self.viser_server.gui.add_slider(
             label="Variance factor",
@@ -212,6 +212,14 @@ class ShadowSplatViewer(Viewer):
         dimension = current_light.width.item()
         focal_length = current_light.fx.item()
         self.light_source_visualizer.fov = 2 * np.arctan2(dimension, (2 * focal_length))
+
+        # Update light params
+        # self.cutoff_slider.value = torch.exp(self.pipeline.model.light_params["cutoff"]).item()
+        # self.intensity_slider.value = (
+        #     torch.exp(self.pipeline.model.light_params["intensity"]).detach().cpu().numpy()[0]
+        # )
+        # self.dim_slider.value = dimension
+        # self.focal_length_slider.value = focal_length
 
         # Nerfstudio conversion
         c2w = current_light.camera_to_worlds.squeeze().cpu().numpy()

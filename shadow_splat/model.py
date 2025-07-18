@@ -87,7 +87,8 @@ class ShadowSplatModel(SplatfactoModel):
 
         self.light_params = torch.nn.ParameterDict(
             {
-                "intensity": torch.nn.Parameter(torch.log(torch.ones(3))),
+                # "intensity": torch.nn.Parameter(torch.log(torch.ones(3))),
+                "intensity": torch.nn.Parameter(torch.log(torch.tensor(1.0))),
                 "cutoff": torch.nn.Parameter(torch.log(torch.tensor(0.01))),
                 "variance_factor": torch.nn.Parameter(torch.log(torch.tensor(0.01))),
                 "ambient_intensity": torch.nn.Parameter(torch.log(torch.tensor(0.01))),
@@ -235,12 +236,9 @@ class ShadowSplatModel(SplatfactoModel):
         if variance_factor is None:
             variance_factor = torch.exp(self.light_params["variance_factor"])
         if intensity is None:
-            intensity = torch.exp(self.light_params["intensity"])
+            intensity = torch.exp(self.light_params["intensity"]) * torch.ones(3).to(self.device)
         if cutoff is None:
             cutoff = torch.exp(self.light_params["cutoff"])
-        # print(f"variance_factor: {variance_factor}")
-        # print(f"intensity: {intensity}")
-        # print(f"cutoff: {cutoff}")
 
         # Check for NaN values in the input tensors
         if torch.isnan(means_crop).any():
