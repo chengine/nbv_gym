@@ -109,10 +109,12 @@ class ShadowSplatDataParser(Nerfstudio):
 
         light_poses = torch.from_numpy(np.array(light_poses).astype(np.float32))
         # Transform light poses with dataparser transform and scale
-        # transform_4x4 = torch.eye(4)
-        # transform_4x4[:3, :4] = dataparser_outputs.dataparser_transform
-        # light_poses = light_poses @ transform_4x4
-        # light_poses[:, :3, 3] *= dataparser_outputs.dataparser_scale
+        transform_4x4 = torch.eye(4)
+        transform_4x4[:3, :4] = dataparser_outputs.dataparser_transform
+        light_poses = light_poses @ transform_4x4
+        light_poses[:, :3, 3] *= dataparser_outputs.dataparser_scale
+        # Shift Z
+        # light_poses[:, 2, 3] += 0.1
 
         lights = Cameras(
             fx=meta["light_intrinsics"]["fl_x"],

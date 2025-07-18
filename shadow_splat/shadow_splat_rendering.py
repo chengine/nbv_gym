@@ -263,6 +263,7 @@ def calculate_relighting_weights(
     irradiance_fraction[gaussian_ids] = weights
 
     if ambient:
+        # print(f"cutoff: {cutoff}")
         irradiance += cutoff  # cutoff is in intensity space
 
     return irradiance, irradiance_fraction

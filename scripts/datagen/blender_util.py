@@ -22,6 +22,23 @@ def set_sun_direction(sun, azimuth_deg, elevation_deg):
     sun.rotation_euler = rot_quat.to_euler()
 
 
+def set_sun_direction_and_location(sun, azimuth_deg, elevation_deg, R):
+    # 1. Compute light direction (from sun toward origin)
+    azimuth = np.radians(azimuth_deg)
+    elevation = np.radians(elevation_deg)
+    x = np.cos(elevation) * np.cos(azimuth)
+    y = np.cos(elevation) * np.sin(azimuth)
+    z = np.sin(elevation)
+    direction = Vector((x, y, z))
+
+    # 2. Set rotation so sun points toward -Z
+    rot_quat = direction.to_track_quat("-Z", "Y")
+    sun.rotation_euler = rot_quat.to_euler()
+
+    # 3. Set location: put sun "behind" the origin, distance R away, so the light points toward origin
+    sun.location = -R * direction.normalized()
+
+
 def blender_mesh_to_open3d(obj_name: str) -> o3d.geometry.TriangleMesh:
     # Get the Blender object
     obj = bpy.data.objects[obj_name]

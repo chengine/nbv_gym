@@ -8,7 +8,12 @@ import argparse
 
 from shadow_splat.util.general import fibonacci_hemisphere_points
 from shadow_splat.util.logger import Logger
-from blender_util import get_camera_intrinsics, look_at_blender, set_sun_direction
+from blender_util import (
+    get_camera_intrinsics,
+    look_at_blender,
+    set_sun_direction,
+    set_sun_direction_and_location,
+)
 
 # =============== Parameters ===============
 GENERATE_PLY = False
@@ -68,8 +73,8 @@ if __name__ == "__main__":
     # Lights (currently only handle single Sun light)
     sun = bpy.data.objects["Sun"]
     light_pose = np.array(sun.matrix_world)
-    W, H = 3000, 3000
-    focal_length = 1650
+    W, H = 5000, 5000
+    focal_length = 1250.0
     light_intrinsics = {
         "w": W,
         "h": H,
@@ -96,7 +101,9 @@ if __name__ == "__main__":
 
     # Set lighting
     for azimuth_deg in [45, 135, 225, 315]:
-        set_sun_direction(sun, azimuth_deg=azimuth_deg, elevation_deg=-45)
+        # set_sun_direction(sun, azimuth_deg=azimuth_deg, elevation_deg=-45)
+        set_sun_direction_and_location(sun, azimuth_deg=azimuth_deg, elevation_deg=-45, R=3.5)
+        bpy.context.view_layer.update()
         light_pose = np.array(sun.matrix_world)
 
         for i, location in Logger.tqdm(
@@ -110,9 +117,9 @@ if __name__ == "__main__":
 
             # Render image
             img_name = f"view_{i:03d}_light_{azimuth_deg}.png"
-            file_path = os.path.join(IMG_FOLDER, img_name)
-            bpy.context.scene.render.filepath = file_path
-            bpy.ops.render.render(write_still=True)
+            # file_path = os.path.join(IMG_FOLDER, img_name)
+            # bpy.context.scene.render.filepath = file_path
+            # bpy.ops.render.render(write_still=True)
 
             frame_data = {
                 "transform_matrix": pose.tolist(),
@@ -124,7 +131,7 @@ if __name__ == "__main__":
     data = {}
     data.update(intrinsics)
     data["light_intrinsics"] = light_intrinsics
-    data["ply_file_path"] = "../models/master_chief_all.ply"
+    data["ply_file_path"] = "../models/all_points_poisson_200000.ply"
     data["frames"] = frames
 
     with open(os.path.join(OUTPUT_FOLDER, "transforms.json"), "w") as f:

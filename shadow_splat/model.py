@@ -88,7 +88,7 @@ class ShadowSplatModel(SplatfactoModel):
         self.light_params = torch.nn.ParameterDict(
             {
                 "intensity": torch.nn.Parameter(torch.log(torch.ones(3))),
-                "cutoff": torch.nn.Parameter(torch.logit(torch.tensor(0.5))),
+                "cutoff": torch.nn.Parameter(torch.log(torch.tensor(0.01))),
                 "variance_factor": torch.nn.Parameter(torch.log(torch.tensor(0.01))),
                 "ambient_intensity": torch.nn.Parameter(torch.log(torch.tensor(0.01))),
             }
@@ -237,7 +237,7 @@ class ShadowSplatModel(SplatfactoModel):
         if intensity is None:
             intensity = torch.exp(self.light_params["intensity"])
         if cutoff is None:
-            cutoff = torch.sigmoid(self.light_params["cutoff"])
+            cutoff = torch.exp(self.light_params["cutoff"])
         # print(f"variance_factor: {variance_factor}")
         # print(f"intensity: {intensity}")
         # print(f"cutoff: {cutoff}")
@@ -354,13 +354,13 @@ class ShadowSplatModel(SplatfactoModel):
         if light is not None:
             # TODO: Implement light intrinsic optimization
             irradiance, irradiance_fraction = self.compute_irradiance(light)
-            print(
-                f"mean irradiance fraction: {irradiance_fraction.mean()}, max irradiance fraction: {irradiance_fraction.max()}, min irradiance fraction: {irradiance_fraction.min()}"
-            )
-            shadow_irradiance_fraction = irradiance_fraction[irradiance_fraction < 0.5]
-            print(
-                f"mean shadow irradiance fraction: {shadow_irradiance_fraction.mean()}, max shadow irradiance fraction: {shadow_irradiance_fraction.max()}, min shadow irradiance fraction: {shadow_irradiance_fraction.min()}"
-            )
+            # print(
+            #     f"mean irradiance fraction: {irradiance_fraction.mean()}, max irradiance fraction: {irradiance_fraction.max()}, min irradiance fraction: {irradiance_fraction.min()}"
+            # )
+            # shadow_irradiance_fraction = irradiance_fraction[irradiance_fraction < 0.5]
+            # print(
+            #     f"mean shadow irradiance fraction: {shadow_irradiance_fraction.mean()}, max shadow irradiance fraction: {shadow_irradiance_fraction.max()}, min shadow irradiance fraction: {shadow_irradiance_fraction.min()}"
+            # )
         elif self.irradiance is not None and self.irradiance.shape[0] == self.means.shape[0]:
             # NOTE: during training, the sizes occasionally mismatch right after training
             # For now we just display albedo in the viewer for this one frame as a workaround

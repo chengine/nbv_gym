@@ -26,6 +26,7 @@ class Blender:
 
         # Camera settings
         self.camera = bpy.context.scene.camera
+        self.camera.data.lens = 35  # 35 mm (~52.5 deg FOV)
 
         # Render layers
         self.scene.use_nodes = True

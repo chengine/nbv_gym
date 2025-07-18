@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import viser
 import viser.transforms as tf
-from nerfstudio.viewer.viewer import Viewer
+from nerfstudio.viewer.viewer import Viewer, VISER_NERFSTUDIO_SCALE_RATIO
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.models.splatfacto import SplatfactoModel
 from nerfstudio.utils.writer import GLOBAL_BUFFER, EventName
@@ -211,14 +211,15 @@ class ShadowSplatViewer(Viewer):
         current_light = self.pipeline.datamanager.current_light
         dimension = current_light.width.item()
         focal_length = current_light.fx.item()
-        light_source_pose_cv = current_light.camera_to_worlds.squeeze()
         self.light_source_visualizer.fov = 2 * np.arctan2(dimension, (2 * focal_length))
-        self.light_source_visualizer.position = light_source_pose_cv[:3, 3].cpu().numpy()
 
-        # Convert the opengl light source rotation into the opencv viser format
-        self.light_source_visualizer.wxyz = tf.SO3.from_matrix(
-            light_source_pose_cv[:3, :3].cpu().numpy()
-        ).wxyz
+        # Nerfstudio conversion
+        c2w = current_light.camera_to_worlds.squeeze().cpu().numpy()
+        R = tf.SO3.from_matrix(c2w[:3, :3])  # type: ignore
+        R = R @ tf.SO3.from_x_radians(np.pi)
+        self.light_source_visualizer.position = c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO
+        self.light_source_visualizer.wxyz = R.wxyz
+
         self.light_source_visualizer.visible = True
 
     def update_light_source_pose(self, event):

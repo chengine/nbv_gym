@@ -6,14 +6,13 @@ import torch
 import time
 import numpy as np
 import argparse
+import open3d as o3d
 import json
 import matplotlib.pyplot as plt
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.data.scene_box import SceneBox
 
 from shadow_splat.model import ShadowSplatModel, ShadowSplatModelConfig
-
-# from shadow_splat.model_old import ShadowSplatModel, ShadowSplatModelConfig
 from shadow_splat.util.minimal_viewer import MinimalViewer
 from shadow_splat.util.dem import bilinear_interpolate, upsample_dem_torch
 
@@ -25,7 +24,11 @@ parser.add_argument(
     "--mode", type=str, default="viewer", choices=["viewer", "render"], help="Mode to run in"
 )
 parser.add_argument(
-    "--dataset", type=str, default="open3d", choices=["LAC", "open3d"], help="Dataset to use"
+    "--dataset",
+    type=str,
+    default="open3d",
+    choices=["LAC", "open3d", "master_chief"],
+    help="Dataset to use",
 )
 args = parser.parse_args()
 MODE = args.mode
@@ -50,20 +53,27 @@ def get_seed_points():
         x_vals = (j_coords / (W - 1)) * (2 * MAX_VAL) - MAX_VAL
         y_vals = (i_coords / (H - 1)) * (2 * MAX_VAL) - MAX_VAL
         extra_points = torch.stack([x_vals, y_vals, z_vals], dim=-1)
-
-        # Reshape to points
-        # dem_reshaped = dem.reshape(-1, 3)
-        # points = torch.cat([dem_reshaped, extra_points], dim=0).float().to(device)
         points = extra_points.float().to(device)
         points = (1 / MAX_VAL) * points
+        colors = 127 * torch.ones(points.shape[0], 3)
 
     elif DATASET == "open3d":
         data = np.load("data/open3d_env_points.npz")
         points = np.concatenate([data["surface_points"], data["rock_points"]], axis=0)
         points = torch.from_numpy(points).float().to(device)
         points = (1 / 30.0) * points
+        colors = 127 * torch.ones(points.shape[0], 3)
 
-    return points
+    elif DATASET == "master_chief":
+        pcd = o3d.io.read_point_cloud("data/models/all_points_poisson_2000000.ply")
+        points = np.asarray(pcd.points)
+        points = torch.from_numpy(points).float().to(device)
+        colors = np.asarray(pcd.colors)
+        colors = torch.from_numpy(colors).float().to(device)
+        colors = colors * 255.0
+        colors = colors.to(torch.uint8)
+
+    return points, colors
 
 
 if __name__ == "__main__":
@@ -72,14 +82,14 @@ if __name__ == "__main__":
     model = ShadowSplatModel(config, scene_box, num_train_data=100).to(device)
 
     # Initialize model points
-    points = get_seed_points()
+    points, colors = get_seed_points()
 
-    colors = 127 * torch.ones(points.shape[0], 3)
     model.seed_points = (points, colors)
     model.populate_modules()
 
     # Increase opacities
-    # model.gauss_params["opacities"] = torch.logit(0.75 * torch.ones(model.num_points, 1))
+    model.gauss_params["opacities"] = torch.logit(0.75 * torch.ones(model.num_points, 1))
+    # model.gauss_params["scales"] = torch.log(1e-2 * torch.ones(model.num_points, 3))
 
     model.training = False
     model = model.to(device)
@@ -93,54 +103,30 @@ if __name__ == "__main__":
             time.sleep(1.0)
 
     elif MODE == "render":
-        # TODO: get data from transforms instead of hardcoding
-        # transforms = json.load(open("/home/addai/BlueOrigin/lunar_slam/output/open3d_dataset/solar_progression_6/transforms.json"))
+        transforms = json.load(open("data/master_chief_multi_light/transforms.json"))
+        i = 40
+        print(f"Rendering {transforms['frames'][i]['file_path']}")
+        cam_pose = torch.tensor(transforms["frames"][i]["transform_matrix"])
+        light_pose = torch.tensor(transforms["frames"][i]["light_pose"])
 
-        # For solar_progression_6/view_0002_light_0004.png
-        cam_pose = torch.tensor(
-            [
-                [
-                    0.9961710408648277,
-                    -0.009231897826373096,
-                    0.0869369277396496,
-                    0.08693692773964962,
-                ],
-                [
-                    0.08742572471695988,
-                    0.10519271411966656,
-                    -0.9906014514192135,
-                    -0.9906014514192136,
-                ],
-                [-0.0, 0.994409002854792, 0.10559704087396808, 0.1055970408739681],
-                [0.0, 0.0, 0.0, 1.0],
-            ]
-        )
-        light_pose = torch.tensor(
-            [
-                [-0.8090169943749473, -0.34549150281252644, 0.4755282581475768, 0.4755282581475768],
-                [0.5877852522924732, -0.4755282581475768, 0.6545084971874736, 0.6545084971874736],
-                [0.0, 0.8090169943749475, 0.5877852522924732, 0.5877852522924732],
-                [0.0, 0.0, 0.0, 1.0],
-            ]
-        )
         camera = Cameras(
             camera_to_worlds=cam_pose.unsqueeze(0),
-            fx=1350.7389543325814,
-            fy=1350.7389543325814,
-            cx=640.0,
-            cy=360.0,
-            width=1280,
-            height=720,
+            fx=transforms["fl_x"],
+            fy=transforms["fl_y"],
+            cx=transforms["cx"],
+            cy=transforms["cy"],
+            width=int(transforms["w"]),
+            height=int(transforms["h"]),
             camera_type=CameraType.PERSPECTIVE,
         ).to(device)
         light = Cameras(
             camera_to_worlds=light_pose.unsqueeze(0),
-            fx=1650.0,
-            fy=1650.0,
-            cx=1000.0,
-            cy=1000.0,
-            width=2000,
-            height=2000,
+            fx=transforms["light_intrinsics"]["fl_x"],
+            fy=transforms["light_intrinsics"]["fl_y"],
+            cx=transforms["light_intrinsics"]["cx"],
+            cy=transforms["light_intrinsics"]["cy"],
+            width=int(transforms["light_intrinsics"]["w"]),
+            height=int(transforms["light_intrinsics"]["h"]),
             camera_type=CameraType.ORTHOPHOTO,
         ).to(device)
         start_time = time.time()

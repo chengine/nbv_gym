@@ -91,7 +91,7 @@ class MinimalViewer:
             label="Radius", min=0.0, max=10.0, step=0.1, initial_value=1.0
         )
         self.dim_slider = self.viser_server.gui.add_slider(
-            label="Dimension", min=0.0, max=3000.0, step=1.0, initial_value=2000
+            label="Dimension", min=0.0, max=10000.0, step=1.0, initial_value=2000
         )
         self.focal_length_slider = self.viser_server.gui.add_slider(
             label="Focal length", min=0.0, max=3000.0, step=1.0, initial_value=1650
