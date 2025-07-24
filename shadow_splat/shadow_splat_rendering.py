@@ -97,9 +97,6 @@ def chebyshev_weighting(
     depths: Tensor,  # [N] where N is the number of gaussians in the frustum
     depth_image: Tensor,  # [H, W]
     variance_image: Tensor,  # [H, W]
-    variance_factor: Optional[float] = 1.0,
-    cutoff: Optional[float] = 0.3,
-    hard_cutoff: Optional[bool] = False,
 ):
     H, W = depth_image.shape
     N, _ = means2d.shape
@@ -117,16 +114,8 @@ def chebyshev_weighting(
     depth_image_flattened = depth_image.reshape(-1)
     variance_image_flattened = variance_image.reshape(-1)
 
-    # Visualize depth and variance images
-    # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-    # ax1.imshow(depth_image.detach().cpu().numpy())
-    # ax1.set_title("Depth Image")
-    # ax2.imshow(variance_image.detach().cpu().numpy())
-    # ax2.set_title("Variance Image")
-    # plt.show()
-
     # Add minimum variance threshold to prevent division by very small numbers
-    variance = torch.clamp(variance_image_flattened, min=1e-8)
+    variance = torch.clamp(variance_image_flattened, min=1e-6)
     variance_per_gaussian = variance[projected_pixel_ids]
 
     depth_diff = depths - depth_image_flattened[projected_pixel_ids]
@@ -147,9 +136,8 @@ def calculate_relighting_weights(
     height: int,
     variance_factor: float,
     intensity: List[float],
-    cutoff: float,
-    hard_cutoff: bool = False,
-    ambient: bool = True,
+    ambient: Optional[float] = None,
+    background_ambient: Optional[float] = None,
     near_plane: float = 0.01,
     far_plane: float = 1e10,
     radius_clip: float = 0.0,
@@ -243,9 +231,6 @@ def calculate_relighting_weights(
         depths,  # [N] where N is the number of gaussians in the frustum
         depth_image,  # [H, W]
         variance_image,  # [H, W]
-        variance_factor,
-        cutoff,
-        hard_cutoff,
     )
 
     assert not torch.isnan(weights).any(), "Weights are nan"
@@ -270,8 +255,11 @@ def calculate_relighting_weights(
     )
     irradiance_fraction[gaussian_ids] = weights
 
-    if ambient:
-        irradiance += cutoff  # cutoff is in intensity space
+    if ambient is not None:
+        irradiance += ambient  # ambient is in intensity space
+    # if background_ambient is not None:
+    #     irradiance[~gaussian_ids] += background_ambient
+    # irradiance[~gaussian_ids] += intensity[0]
 
     return irradiance, irradiance_fraction
 

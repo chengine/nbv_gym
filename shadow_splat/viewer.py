@@ -28,10 +28,6 @@ class ShadowSplatViewer(Viewer):
             print("model is splatfacto, converting to shadow splat")
             self._convert_model(pipeline)
 
-        # print(dir(pipeline))
-        self.training_lights = pipeline.datamanager.train_dataparser_outputs.lights
-        # print(pipe
-
         # Initialize the parent Viewer class
         super().__init__(*args, **kwargs)
 
@@ -46,13 +42,17 @@ class ShadowSplatViewer(Viewer):
             initial_variance_factor = torch.exp(
                 pipeline.model.light_params["variance_factor"]
             ).item()
-            initial_cutoff = torch.exp(pipeline.model.light_params["cutoff"]).item()
+            initial_ambient = torch.exp(pipeline.model.light_params["ambient"]).item()
+            initial_background_ambient = torch.exp(
+                pipeline.model.light_params["background_ambient"]
+            ).item()
             initial_intensity = (
                 torch.exp(pipeline.model.light_params["intensity"]).detach().cpu().numpy()
             ) * np.ones(3)
             self._add_light_source_slider(
                 initial_variance_factor=initial_variance_factor,
-                initial_cutoff=initial_cutoff,
+                initial_ambient=initial_ambient,
+                initial_background_ambient=initial_background_ambient,
                 initial_intensity=initial_intensity,
             )
 
@@ -69,7 +69,11 @@ class ShadowSplatViewer(Viewer):
             pipeline._model = model
 
     def _add_light_source_slider(
-        self, initial_variance_factor=0.01, initial_cutoff=0.5, initial_intensity=np.ones(3)
+        self,
+        initial_variance_factor=0.01,
+        initial_ambient=0.01,
+        initial_background_ambient=0.01,
+        initial_intensity=np.ones(3),
     ):
         """Add a slider to the control panel for adjusting the light source position."""
         self.az_slider = self.viser_server.gui.add_slider(
@@ -94,8 +98,15 @@ class ShadowSplatViewer(Viewer):
             step=0.01,
             initial_value=initial_variance_factor,
         )
-        self.cutoff_slider = self.viser_server.gui.add_slider(
-            label="Cutoff", min=0.0, max=1.0, step=0.01, initial_value=initial_cutoff
+        self.ambient_slider = self.viser_server.gui.add_slider(
+            label="Ambient", min=0.0, max=1.0, step=0.01, initial_value=initial_ambient
+        )
+        self.background_ambient_slider = self.viser_server.gui.add_slider(
+            label="Background ambient",
+            min=0.0,
+            max=1.0,
+            step=0.01,
+            initial_value=initial_background_ambient,
         )
         if self.RGB_INTENSITY:
             self.red_intensity_slider = self.viser_server.gui.add_slider(
@@ -146,7 +157,8 @@ class ShadowSplatViewer(Viewer):
             self.blue_intensity_slider.on_update(self.update_light_source_pose)
         else:
             self.intensity_slider.on_update(self.update_light_source_pose)
-        self.cutoff_slider.on_update(self.update_light_source_pose)
+        self.ambient_slider.on_update(self.update_light_source_pose)
+        self.background_ambient_slider.on_update(self.update_light_source_pose)
         self.origin_input.on_update(self.update_light_source_pose)
         self.camera_type_select.on_update(self.update_light_source_pose)
 
@@ -239,7 +251,8 @@ class ShadowSplatViewer(Viewer):
         dimension = self.dim_slider.value
         focal_length = self.focal_length_slider.value
         variance_factor = self.variance_factor_slider.value
-        cutoff = self.cutoff_slider.value
+        ambient = self.ambient_slider.value
+        background_ambient = self.background_ambient_slider.value
         if self.RGB_INTENSITY:
             red_intensity = self.red_intensity_slider.value
             green_intensity = self.green_intensity_slider.value
@@ -279,7 +292,8 @@ class ShadowSplatViewer(Viewer):
                 light_source,
                 variance_factor=variance_factor,
                 intensity=intensity,
-                cutoff=cutoff,
+                ambient=ambient,
+                background_ambient=background_ambient,
             )
 
         cv_to_gl = torch.tensor(

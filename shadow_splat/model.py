@@ -57,9 +57,9 @@ class ShadowSplatModelConfig(SplatfactoModelConfig):
 
     _target: Type = field(default_factory=lambda: ShadowSplatModel)
     # TODO: add shadow splat specific parameters here
-    ambient: bool = (
-        True  # Controls whether Gaussians outside the light frustum are set to ambient or to black
-    )
+    # ambient: bool = (
+    #     True  # Controls whether Gaussians outside the light frustum are set to ambient or to black
+    # )
     tone_mapping: Literal["linear", "luminance", "reinhard"] = "linear"
     gamma_correction: float = 1.0
     fix_variance: bool = False
@@ -89,9 +89,9 @@ class ShadowSplatModel(SplatfactoModel):
             {
                 # "intensity": torch.nn.Parameter(torch.log(torch.ones(3))),
                 "intensity": torch.nn.Parameter(torch.log(torch.tensor(1.0))),
-                "cutoff": torch.nn.Parameter(torch.log(torch.tensor(0.01))),
+                "ambient": torch.nn.Parameter(torch.log(torch.tensor(0.01))),  # in frustum
+                "background_ambient": torch.nn.Parameter(torch.log(torch.tensor(1.0))),  # outside
                 "variance_factor": torch.nn.Parameter(torch.log(torch.tensor(0.01))),
-                "ambient_intensity": torch.nn.Parameter(torch.log(torch.tensor(0.01))),
             }
         )
 
@@ -159,7 +159,7 @@ class ShadowSplatModel(SplatfactoModel):
     def get_light_param_groups(self) -> Dict[str, List[Parameter]]:
         return {
             name: [self.light_params[name]]
-            for name in ["intensity", "cutoff", "variance_factor", "ambient_intensity"]
+            for name in ["intensity", "variance_factor", "ambient", "background_ambient"]
         }
 
     def get_param_groups(self) -> Dict[str, List[Parameter]]:
@@ -195,7 +195,8 @@ class ShadowSplatModel(SplatfactoModel):
         light: Cameras,
         variance_factor: Optional[float] = None,
         intensity: Optional[float] = None,
-        cutoff: Optional[float] = None,
+        ambient: Optional[float] = None,
+        background_ambient: Optional[float] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Get the irradiance for a given camera and light source.
 
@@ -227,18 +228,20 @@ class ShadowSplatModel(SplatfactoModel):
         else:
             raise ValueError("Unknown light type: %s", light.camera_type)
 
-        if self.training:
-            hard_cutoff = False
-        else:
-            hard_cutoff = True
+        # if self.training:
+        #     hard_cutoff = False
+        # else:
+        #     hard_cutoff = True
 
         # print lighting params values
         if variance_factor is None:
             variance_factor = torch.exp(self.light_params["variance_factor"])
         if intensity is None:
             intensity = torch.exp(self.light_params["intensity"]) * torch.ones(3).to(self.device)
-        if cutoff is None:
-            cutoff = torch.exp(self.light_params["cutoff"])
+        if ambient is None:
+            ambient = torch.exp(self.light_params["ambient"])
+        if background_ambient is None:
+            background_ambient = torch.exp(self.light_params["background_ambient"])
 
         # Check for NaN values in the input tensors
         if torch.isnan(means_crop).any():
@@ -259,9 +262,8 @@ class ShadowSplatModel(SplatfactoModel):
             height=light_H,
             variance_factor=variance_factor,
             intensity=intensity,
-            cutoff=cutoff,
-            hard_cutoff=hard_cutoff,
-            ambient=self.config.ambient,
+            ambient=ambient,
+            background_ambient=background_ambient,
             near_plane=0.01,
             far_plane=1e10,
             sparse_grad=False,
@@ -492,7 +494,7 @@ class ShadowSplatModel(SplatfactoModel):
 
         # ====== ALBEDO TV LOSS ======
         albedo_img = outputs["albedo"]
-        albedo_tv_loss = 0.01 * total_variation_loss(albedo_img)
+        albedo_tv_loss = 0.1 * total_variation_loss(albedo_img)
         # ====== ALBEDO TV LOSS ======
 
         # Set masked part of both ground-truth and rendered image to black.
@@ -565,43 +567,22 @@ class ShadowSplatModel(SplatfactoModel):
         Returns:
             A dictionary of metrics.
         """
-        gt_rgb = self.composite_with_background(
-            self.get_gt_img(batch["image"]), outputs["background"]
-        )
-        predicted_rgb = outputs["rgb"]
-        cc_rgb = None
-
-        combined_rgb = torch.cat([gt_rgb, predicted_rgb], dim=1)
-
-        if self.config.color_corrected_metrics:
-            cc_rgb = color_correct(predicted_rgb, gt_rgb)
-            cc_rgb = torch.moveaxis(cc_rgb, -1, 0)[None, ...]
-
-        # Switch images from [H, W, C] to [1, C, H, W] for metrics computations
-        gt_rgb = torch.moveaxis(gt_rgb, -1, 0)[None, ...]
-        predicted_rgb = torch.moveaxis(predicted_rgb, -1, 0)[None, ...]
-
-        psnr = self.psnr(gt_rgb, predicted_rgb)
-        ssim = self.ssim(gt_rgb, predicted_rgb)
-        lpips = self.lpips(gt_rgb, predicted_rgb)
-
-        # all of these metrics will be logged as scalars
-        metrics_dict = {"psnr": float(psnr.item()), "ssim": float(ssim)}  # type: ignore
-        metrics_dict["lpips"] = float(lpips)
-
-        if self.config.color_corrected_metrics:
-            assert cc_rgb is not None
-            cc_psnr = self.psnr(gt_rgb, cc_rgb)
-            cc_ssim = self.ssim(gt_rgb, cc_rgb)
-            cc_lpips = self.lpips(gt_rgb, cc_rgb)
-            metrics_dict["cc_psnr"] = float(cc_psnr.item())
-            metrics_dict["cc_ssim"] = float(cc_ssim)
-            metrics_dict["cc_lpips"] = float(cc_lpips)
-
-        images_dict = {
-            "img": combined_rgb,
-            "albedo": outputs["albedo"],
-            "shadow": outputs["shadow"],
-        }
+        metrics_dict, images_dict = super().get_image_metrics_and_images(outputs, batch)
+        shadow_rgb = outputs["shadow"].repeat(1, 1, 3)
+        combined_rgb = torch.cat([images_dict["img"], outputs["albedo"], shadow_rgb], dim=1)
+        images_dict["img"] = combined_rgb
 
         return metrics_dict, images_dict
+
+    def get_metrics_dict(self, outputs, batch) -> Dict[str, torch.Tensor]:
+        """Compute and returns metrics.
+
+        Args:
+            outputs: the output to compute loss dict to
+            batch: ground truth batch corresponding to outputs
+        """
+        metrics_dict = super().get_metrics_dict(outputs, batch)
+        metrics_dict["intensity"] = torch.exp(self.light_params["intensity"])
+        metrics_dict["ambient"] = torch.exp(self.light_params["ambient"])
+        metrics_dict["background_ambient"] = torch.exp(self.light_params["background_ambient"])
+        return metrics_dict

@@ -23,7 +23,7 @@ shadow_splat = MethodSpecification(
         steps_per_eval_batch=0,
         steps_per_save=700,
         steps_per_eval_all_images=1000,
-        max_num_iterations=30000,
+        max_num_iterations=10000,
         mixed_precision=False,
         pipeline=ShadowSplatPipelineConfig(
             datamanager=ShadowSplatDataManagerConfig(
@@ -81,12 +81,12 @@ shadow_splat = MethodSpecification(
                 ),
             },
             "intensity": {"optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15), "scheduler": None},
-            "cutoff": {"optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15), "scheduler": None},
-            "variance_factor": {
+            "ambient": {"optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15), "scheduler": None},
+            "background_ambient": {
                 "optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15),
                 "scheduler": None,
             },
-            "ambient_intensity": {
+            "variance_factor": {
                 "optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15),
                 "scheduler": None,
             },
