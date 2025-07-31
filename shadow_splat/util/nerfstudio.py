@@ -38,3 +38,17 @@ def get_viewmat(optimized_camera_to_world):
     viewmat[:, :3, :3] = R_inv
     viewmat[:, :3, 3:4] = T_inv
     return viewmat
+
+
+def composite_with_background(self, image, background) -> torch.Tensor:
+    """Composite the ground truth image with a background color when it has an alpha channel.
+
+    Args:
+        image: the image to composite
+        background: the background color
+    """
+    if image.shape[2] == 4:
+        alpha = image[..., -1].unsqueeze(-1).repeat((1, 1, 3))
+        return alpha * image[..., :3] + (1 - alpha) * background
+    else:
+        return image

@@ -8,8 +8,7 @@ import os
 import numpy as np
 from pathlib import Path
 
-data_path = Path(os.path.expanduser("/home/shared/data_nerfstudio/ShadowSplat/tandt/ignatius"))
-data_path = Path(os.path.expanduser("data/open3d_colmap"))
+data_path = Path(os.path.expanduser("/home/shared/data_nerfstudio/ShadowSplat/tandt/caterpillar"))
 transforms_path = data_path / "transforms_original.json"
 
 with open(transforms_path, "r") as f:
@@ -30,9 +29,9 @@ transforms["light_intrinsics"] = {
 for frame in transforms["frames"]:
     # frame["light_pose"] = np.eye(4).tolist()
     frame["light_pose"] = [
-        [-0.9715, -0.1675, 0.1675, 0.1675],
-        [0.2368, -0.6870, 0.6870, 0.6870],
-        [0.0000, 0.7071, 0.7071, 0.7071],
+        [0.9573, -0.1502, 0.2470, 0.2470],
+        [0.2890, 0.4973, -0.8180, -0.8180],
+        [-0.0000, 0.8545, 0.5195, 0.5195],
         [0.0000, 0.0000, 0.0000, 1.0000],
     ]
 
