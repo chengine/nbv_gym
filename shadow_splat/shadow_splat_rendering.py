@@ -223,15 +223,33 @@ def calculate_relighting_weights(
     depths = meta["depths"]  # Depths of each gaussian in frustum
     means2d = meta["means2d"]  # 2D means of each gaussian in frustum
     gaussian_ids = meta["gaussian_ids"]  # Indices of the gaussians in the frustum
+    conics = meta["conics"]
+
+    assert (meta["radii"] >= 0.0).all(), "Radii must be non-negative"
 
     # This represents the fraction of light that is received by each gaussian in the frustum
     # weights = logistic_weighting(
+    # weights = chebyshev_weighting(
+    #     means2d,  # [N, 2] where N is the number of gaussians in the frustum
+    #     depths,  # [N] where N is the number of gaussians in the frustum
+    #     depth_image,  # [H, W]
+    #     variance_image,  # [H, W]
+    # )
+
+    # Smoothing across whole Gaussian
+    # Sample points in axis directions of the Gaussian
+    sample_points = conics_to_semi_major_axis_points(means2d, conics)
+    sample_points = sample_points.reshape(-1, 2)
+    sample_depths = torch.repeat_interleave(depths, 5)
+
     weights = chebyshev_weighting(
-        means2d,  # [N, 2] where N is the number of gaussians in the frustum
-        depths,  # [N] where N is the number of gaussians in the frustum
+        sample_points,  # [N, 2] where N is the number of gaussians in the frustum
+        sample_depths,  # [N] where N is the number of gaussians in the frustum
         depth_image,  # [H, W]
         variance_image,  # [H, W]
     )
+    weights = weights.reshape(means2d.shape[0], 5)
+    weights = weights.mean(dim=1)
 
     assert not torch.isnan(weights).any(), "Weights are nan"
     assert not torch.isinf(weights).any(), "Weights are inf"
@@ -2038,3 +2056,68 @@ def augmented_rasterization_2dgs(
         render_median,
         meta,
     )
+
+
+def conics_to_semi_major_axis_points(
+    means2d: Tensor,  # [N, 2] - 2D means of Gaussians
+    conics: Tensor,   # [N, 3] - conic parameters [a, b, c] for covariance matrix [[a, b], [b, c]]
+    scale_factor: float = 1.0,  # Scale factor for the semi-major axis length
+) -> Tensor:
+    """
+    Convert Gaussian conics to sample points on the semi-major axis.
+    
+    Args:
+        means2d: 2D means of Gaussians [N, 2]
+        conics: Conic parameters [N, 3] representing covariance matrix [[a, b], [b, c]]
+        scale_factor: Scale factor for the semi-major axis length (default: 1.0)
+    
+    Returns:
+        Tensor of shape [N, 4, 2] containing 4 points per Gaussian:
+        - points[:, 0, :]: Point in negative direction along semi-major axis
+        - points[:, 1, :]: Point in positive direction along semi-major axis  
+        - points[:, 2, :]: Point in negative direction along semi-minor axis
+        - points[:, 3, :]: Point in positive direction along semi-minor axis
+    """
+    N = means2d.shape[0]
+    device = means2d.device
+    
+    # Extract covariance matrix parameters
+    a = conics[:, 0]  # [N]
+    b = conics[:, 1]  # [N] 
+    c = conics[:, 2]  # [N]
+    
+    # Construct covariance matrices
+    # [[a, b], [b, c]]
+    cov_matrices = torch.stack([
+        torch.stack([a, b], dim=1),  # [N, 2]
+        torch.stack([b, c], dim=1),  # [N, 2]
+    ], dim=2)  # [N, 2, 2]
+    
+    # Compute eigenvalues and eigenvectors
+    eigenvals, eigenvecs = torch.linalg.eigh(cov_matrices)  # [N, 2], [N, 2, 2]
+    
+    # Sort eigenvalues in descending order (largest first = semi-major axis)
+    # eigenvals are already sorted in ascending order from eigh, so reverse
+    eigenvals = torch.flip(eigenvals, dims=[1])  # [N, 2] - largest first
+    eigenvecs = torch.flip(eigenvecs, dims=[2])  # [N, 2, 2] - corresponding eigenvectors
+    
+    # Extract semi-major and semi-minor axes
+    semi_major_length = torch.sqrt(eigenvals[:, 0]) * scale_factor  # [N]
+    semi_minor_length = torch.sqrt(eigenvals[:, 1]) * scale_factor  # [N]
+    
+    semi_major_dir = eigenvecs[:, :, 0]  # [N, 2] - direction of semi-major axis
+    semi_minor_dir = eigenvecs[:, :, 1]  # [N, 2] - direction of semi-minor axis
+    
+    # Compute sample points
+    # Semi-major axis points (positive and negative directions)
+    major_pos = means2d + semi_major_length.unsqueeze(1) * semi_major_dir  # [N, 2]
+    major_neg = means2d - semi_major_length.unsqueeze(1) * semi_major_dir  # [N, 2]
+    
+    # Semi-minor axis points (positive and negative directions)  
+    minor_pos = means2d + semi_minor_length.unsqueeze(1) * semi_minor_dir  # [N, 2]
+    minor_neg = means2d - semi_minor_length.unsqueeze(1) * semi_minor_dir  # [N, 2]
+    
+    # Stack all points: [major_neg, major_pos, minor_neg, minor_pos]
+    sample_points = torch.stack([means2d, major_neg, major_pos, minor_neg, minor_pos], dim=1)  # [N, 5, 2]
+    
+    return sample_points

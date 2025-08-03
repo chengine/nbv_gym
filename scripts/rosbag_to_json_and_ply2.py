@@ -276,7 +276,8 @@ for out_idx, idx in enumerate(tqdm(downsampled_indices, desc="Processing frames"
         "file_path": f'images/rgb_{idx:04d}.png',
         "depth_path": f'depth/depth_{idx:04d}.png',
         "transform_matrix": cam_matrix.tolist(),
-        "light_pose": light_matrix.tolist()
+        "light_pose": light_matrix.tolist(),
+        "bag_idx": idx
     })
 
 print(f"Processed {len(frames)} frames.")
