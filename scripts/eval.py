@@ -19,9 +19,7 @@ ALBEDO = False
 
 # Model type
 model_type = "shadow-splat"  # "shadow-splat" or "splatfacto"
-dataset_name = (
-    "master_chief_cycles"  # "o3d_el45_az60" or "multi_light" or "single_view_multi_light"
-)
+dataset_name = "rains_chair"  # "o3d_el45_az60" or "multi_light" or "single_view_multi_light"
 
 if USE_GT_POINTS:
     gt_path = "open3d_dataset/all.ply"  # Path to the point cloud
@@ -125,7 +123,8 @@ if __name__ == "__main__":
             raise ValueError(f"Invalid model type: {model_type}")
 
         # Get rendered and ground truth images
-        gt_img = images[idx].squeeze().cpu()[..., :3]
+        gt_img = composite_with_background(images[idx], outputs["background"].cpu())
+        gt_img = gt_img.squeeze().cpu()[..., :3]
 
         # Ensure images are in the correct format for metrics computation
         # Convert from [H, W, C] to [1, C, H, W] for metrics
@@ -141,18 +140,8 @@ if __name__ == "__main__":
         metrics_data.append(
             {"image_idx": idx, "psnr": psnr_val, "ssim": ssim_val, "lpips": lpips_val}
         )
-
         print(f"Image {idx}: PSNR={psnr_val:.4f}, SSIM={ssim_val:.4f}, LPIPS={lpips_val:.4f}")
 
-        # fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-        # ax[0].imshow(rendered_img.numpy())
-        # ax[1].imshow(gt_img.numpy())
-        # ax[0].set_title("Rendered")
-        # ax[1].set_title("Ground truth")
-        # ax[0].axis("off")
-        # ax[1].axis("off")
-        # plt.savefig(results_dir / f"render_{idx}.png", bbox_inches="tight", pad_inches=0)
-        # plt.close()
         combined_img = np.concatenate([rendered_img.numpy(), gt_img.numpy()], axis=1)
         if combined_img.dtype != np.uint8:
             combined_img = np.clip(combined_img * 255, 0, 255).astype(np.uint8)
