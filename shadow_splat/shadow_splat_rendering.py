@@ -640,6 +640,7 @@ def chebyshev_weighting(
     depths: Tensor,  # [N] where N is the number of gaussians in the frustum
     depth_image: Tensor,  # [H, W]
     variance_image: Tensor,  # [H, W]
+    baseline: Optional[float] = None,
 ):
     H, W = depth_image.shape
     N, _ = means2d.shape
@@ -663,7 +664,11 @@ def chebyshev_weighting(
 
     depth_diff = depths - depth_image_flattened[projected_pixel_ids]
     weights = variance_per_gaussian / (variance_per_gaussian + torch.relu(depth_diff)**2)
-    # weights[depth_diff < 0] = 1.0
+
+    if baseline is not None:
+        weights_ambient = torch.stack([weights, torch.ones_like(weights) * baseline], dim=-1)
+        softmax_weights = torch.softmax( weights_ambient, dim=-1)
+        weights = torch.sum(softmax_weights * weights_ambient, dim=-1)
 
     return weights
 
@@ -796,6 +801,7 @@ def calculate_relighting_weights(
         sample_depths,  # [N] where N is the number of gaussians in the frustum
         depth_image,  # [H, W]
         variance_image,  # [H, W]
+        baseline=ambient
     )
     weights = weights.reshape(means2d.shape[0], 5)
     weights = weights.min(dim=1).values
@@ -817,8 +823,8 @@ def calculate_relighting_weights(
         cosine_angle = torch.sum(gaussian_normals * incident_dir, dim=-1)
         weights = weights * torch.relu(cosine_angle)
 
-    if ambient is not None:
-        weights = weights + ambient
+    # if ambient is not None:
+    #     weights = weights + ambient
 
     irradiance[gaussian_ids] = torch.stack(
         [weights * intensity[0], weights * intensity[1], weights * intensity[2]], dim=-1

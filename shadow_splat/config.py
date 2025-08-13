@@ -185,7 +185,7 @@ shadow_splat = MethodSpecification(
                 ),
             },
             "intensity": {"optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15), "scheduler": None},
-            "ambient": {"optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15), "scheduler": None},
+            "ambient": {"optimizer": AdamOptimizerConfig(lr=0.01, eps=1e-15), "scheduler": None},
             "background_ambient": {
                 "optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15),
                 "scheduler": None,

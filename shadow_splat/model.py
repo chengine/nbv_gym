@@ -690,7 +690,7 @@ class ShadowSplatModel(SplatfactoModel):
         self.light_params = torch.nn.ParameterDict(
             {
                 "intensity": torch.nn.Parameter(torch.log(torch.tensor(1.0))),
-                "ambient": torch.nn.Parameter(torch.logit(torch.tensor(0.0))),  # in frustum
+                "ambient": torch.nn.Parameter(torch.logit(torch.tensor(0.5))),  # in frustum
                 "background_ambient": torch.nn.Parameter(torch.log(torch.tensor(1.0))),  # outside
                 "variance_factor": torch.nn.Parameter(torch.log(torch.tensor(0.01))),
             }
