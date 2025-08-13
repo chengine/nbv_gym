@@ -739,9 +739,12 @@ def calculate_relighting_weights(
         cosine_angle = torch.sum(gaussian_normals * incident_dir, dim=-1)
         weights = weights * torch.relu(cosine_angle)
 
+    if ambient is not None:
+        weights = weights + ambient
+
     irradiance[gaussian_ids] = torch.stack(
         [weights * intensity[0], weights * intensity[1], weights * intensity[2]], dim=-1
-    ) + ambient
+    )
     irradiance_fraction[gaussian_ids] = weights
 
     # if ambient is not None:
@@ -2209,6 +2212,7 @@ def augmented_rasterization(
         camtoworlds = torch.inverse(viewmats)  # [C, 4, 4]
         if packed:
             dirs = means[gaussian_ids, :] - camtoworlds[camera_ids, :3, 3]  # [nnz, 3]
+            dirs = dirs / (torch.norm(dirs, dim=-1, keepdim=True) + 1e-10)
             masks = (radii > 0).any(-1)  # [nnz]
             if colors.dim() == 3:
                 # Turn [N, K, 3] into [nnz, 3]
@@ -2219,6 +2223,7 @@ def augmented_rasterization(
             colors = spherical_harmonics(sh_degree, dirs, shs, masks=masks)  # [nnz, 3]
         else:
             dirs = means[None, :, :] - camtoworlds[:, None, :3, 3]  # [C, N, 3]
+            dirs = dirs / (torch.norm(dirs, dim=-1, keepdim=True) + 1e-10)
             masks = (radii > 0).any(-1)  # [C, N]
             if colors.dim() == 3:
                 # Turn [N, K, 3] into [C, N, K, 3]
