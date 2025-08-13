@@ -866,7 +866,7 @@ class ShadowSplatModel(SplatfactoModel):
         if torch.isnan(scales_crop).any():
             raise ValueError("NaN values detected in scales_crop")
 
-        irradiance, irradiance_fraction = calculate_relighting_weights(
+        irradiance, irradiance_fraction, light_depth_image, light_variance_image = calculate_relighting_weights(
             means=means_crop,  # [N, 3]
             quats=quats_crop,  # [N, 4]
             scales=torch.exp(scales_crop),  # [N, 3]
@@ -890,7 +890,9 @@ class ShadowSplatModel(SplatfactoModel):
         )
         self.irradiance = irradiance
         self.irradiance_fraction = irradiance_fraction
-        return irradiance, irradiance_fraction
+        self.light_depth_image = light_depth_image
+        self.light_variance_image = light_variance_image
+        return irradiance, irradiance_fraction, light_depth_image, light_variance_image
 
     def get_outputs(
         self, camera: Cameras, light: Optional[Cameras] = None
@@ -968,14 +970,18 @@ class ShadowSplatModel(SplatfactoModel):
 
         if light is not None:
             # TODO: Implement light intrinsic optimization
-            irradiance, irradiance_fraction = self.compute_irradiance(light)
+            irradiance, irradiance_fraction, light_depth_image, light_variance_image = self.compute_irradiance(light)
         elif self.irradiance is not None and self.irradiance.shape[0] == self.means.shape[0]:
             # NOTE: during training, the sizes occasionally mismatch right after training
             # For now we just display albedo in the viewer for this one frame as a workaround
             irradiance = self.irradiance
             irradiance_fraction = self.irradiance_fraction
+            light_depth_image = self.light_depth_image
+            light_variance_image = self.light_variance_image
         else:
             irradiance, irradiance_fraction = None, None
+            light_depth_image = None
+            light_variance_image = None
 
         if self.config.output_depth_during_training or not self.training:
             render_mode = "RGB+ED"
@@ -1097,6 +1103,8 @@ class ShadowSplatModel(SplatfactoModel):
             "shadow": shadow_im.squeeze(0),  # type: ignore
             "accumulation": alpha.squeeze(0),  # type: ignore
             "background": background,  # type: ignore
+            "light_depth": light_depth_image.unsqueeze(-1) if light_depth_image is not None else torch.zeros_like(depth_im),  # type: ignore
+            "light_variance": light_variance_image.unsqueeze(-1) if light_variance_image is not None else torch.zeros_like(depth_im),  # type: ignore
         }  # type: ignore
 
     def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
@@ -1116,6 +1124,12 @@ class ShadowSplatModel(SplatfactoModel):
         albedo_img = outputs["albedo"]
         albedo_tv_loss = 0.1 * total_variation_loss(albedo_img)
         # ====== ALBEDO TV LOSS ======
+
+        # Variance loss #
+        light_variance_img = outputs["light_variance"]
+        light_depth_img = outputs["light_depth"]
+        light_tv_loss = torch.mean(light_variance_img) + total_variation_loss(light_depth_img)
+        # ====== Variance loss ======
 
         # Set masked part of both ground-truth and rendered image to black.
         # This is a little bit sketchy for the SSIM loss.
@@ -1145,9 +1159,10 @@ class ShadowSplatModel(SplatfactoModel):
             scale_reg = torch.tensor(0.0).to(self.device)
 
         loss_dict = {
-            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss,
+            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss + light_tv_loss,
             "scale_reg": scale_reg,
             "albedo_tv_loss": albedo_tv_loss,
+            "light_tv_loss": light_tv_loss,
         }
 
         # Losses for mcmc

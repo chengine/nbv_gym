@@ -24,6 +24,7 @@ from gsplat.distributed import (
 from gsplat.utils import depth_to_normal
 from nerfstudio.cameras.cameras import Cameras, CameraType
 import matplotlib.pyplot as plt
+from torchvision.transforms.functional import gaussian_blur
 
 def focal_bce(pred, target, alpha_pos=0.9, alpha_neg=0.1, gamma=2.0, eps=1e-6):
     # pred, target in [0,1]
@@ -562,7 +563,78 @@ def logistic_weighting(
 
     return sigmoid_weights
 
+# def gaussian_blur(img: torch.Tensor,
+#                   sigma: float = 1.5,
+#                   kernel_size: int | None = None,
+#                   padding: str = "reflect") -> torch.Tensor:
+#     """
+#     Gaussian blur for a single-channel image.
 
+#     Args:
+#         img: Tensor of shape (H, W), (1, H, W), or (1, 1, H, W). dtype float/half/double.
+#         sigma: Standard deviation of the Gaussian. If <= 0, returns img unchanged.
+#         kernel_size: Odd kernel size. If None, computed as 2*ceil(3*sigma)+1.
+#         padding: One of {'reflect','replicate','circular','constant'} for edge handling.
+
+#     Returns:
+#         Blurred tensor with the same shape as `img`.
+#     """
+#     if sigma <= 0:
+#         return img
+
+#     # Normalize input to (N=1, C=1, H, W)
+#     original_shape = img.shape
+#     if img.ndim == 2:           # (H, W)
+#         x = img.unsqueeze(0).unsqueeze(0)
+#     elif img.ndim == 3:         # (1, H, W) or (C, H, W) -> assume single channel
+#         if img.shape[0] != 1:
+#             raise ValueError("Expected single-channel input; got C != 1.")
+#         x = img.unsqueeze(0)
+#     elif img.ndim == 4:         # (N, C, H, W)
+#         if img.shape[0] != 1 or img.shape[1] != 1:
+#             raise ValueError("Expected single image with single channel: (1,1,H,W).")
+#         x = img
+#     else:
+#         raise ValueError("Input must have shape (H,W), (1,H,W), or (1,1,H,W).")
+
+#     device, dtype = x.device, x.dtype
+
+#     # Determine kernel size (odd)
+#     if kernel_size is None:
+#         radius = max(1, int(math.ceil(3 * sigma)))
+#         k = 2 * radius + 1
+#     else:
+#         if kernel_size % 2 == 0 or kernel_size < 1:
+#             raise ValueError("kernel_size must be a positive odd integer.")
+#         k = kernel_size
+#         radius = k // 2
+
+#     # 1D Gaussian kernel
+#     t = torch.arange(-radius, radius + 1, device=device, dtype=dtype)
+#     gauss = torch.exp(-(t * t) / (2 * (sigma ** 2)))
+#     gauss = gauss / gauss.sum()
+
+#     # Separable convolution: horizontal then vertical
+#     # Weights need shape (out_channels=1, in_channels=1, kH, kW)
+#     weight_h = gauss.view(1, 1, 1, k)
+#     weight_v = gauss.view(1, 1, k, 1)
+
+#     # Horizontal pass
+#     x_pad = F.pad(x, (radius, radius, 0, 0), mode=padding)
+#     x = F.conv2d(x_pad, weight_h)
+
+#     # Vertical pass
+#     x_pad = F.pad(x, (0, 0, radius, radius), mode=padding)
+#     x = F.conv2d(x_pad, weight_v)
+
+#     # Restore original shape
+#     if len(original_shape) == 2:
+#         return x.squeeze(0).squeeze(0)
+#     if len(original_shape) == 3:
+#         return x.squeeze(0)
+#     return x
+
+# one-tailed chebyshev weighting
 def chebyshev_weighting(
     means2d: Tensor,  # [N, 2] where N is the number of gaussians in the frustum
     depths: Tensor,  # [N] where N is the number of gaussians in the frustum
@@ -590,8 +662,8 @@ def chebyshev_weighting(
     variance_per_gaussian = variance[projected_pixel_ids]
 
     depth_diff = depths - depth_image_flattened[projected_pixel_ids]
-    weights = variance_per_gaussian / (variance_per_gaussian + depth_diff**2)
-    weights[depth_diff < 0] = 1.0
+    weights = variance_per_gaussian / (variance_per_gaussian + torch.relu(depth_diff)**2)
+    # weights[depth_diff < 0] = 1.0
 
     return weights
 
@@ -691,6 +763,12 @@ def calculate_relighting_weights(
         depth_sqr_image = moments[..., 1].squeeze()
         variance_image = depth_sqr_image - depth_image**2
 
+    # Gaussian blur both the depth and variance images
+    depth_image = gaussian_blur(depth_image[None], kernel_size=7, sigma=3.)
+    variance_image = gaussian_blur(variance_image[None], kernel_size=7, sigma=3.)
+    depth_image = depth_image.squeeze()
+    variance_image = variance_image.squeeze().clamp(min=1e-2)
+
     depths = meta["depths"]  # Depths of each gaussian in frustum
     means2d = meta["means2d"]  # 2D means of each gaussian in frustum
     gaussian_ids = meta["gaussian_ids"]  # Indices of the gaussians in the frustum
@@ -753,7 +831,7 @@ def calculate_relighting_weights(
     #     irradiance[~gaussian_ids] += background_ambient
     # irradiance[~gaussian_ids] += intensity[0]
 
-    return irradiance, irradiance_fraction
+    return irradiance, irradiance_fraction, depth_image, variance_image
 
 
 # Renders the accumulated or expected depth (first moment) and the accumulated
