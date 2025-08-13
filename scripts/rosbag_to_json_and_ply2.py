@@ -38,13 +38,13 @@ RGB_INTRINSICS = {
     "P": [909.1692504882812, 0.0, 655.2548217773438, 0.0, 0.0, 909.460693359375, 366.4031066894531, 0.0, 0.0, 0.0, 1.0, 0.0]
 }
 
-DEPTH_INTRINSICS = {
-    "height": 480,
-    "width": 848,
-    "distortion_model": "Brown Congrady",
-    "D": [0.0, 0.0, 0.0, 0.0, 0.0],
-    "K": [427.18, 0., 426.96, 0., 427.18, 235.22, 0., 0., 1.]
-}
+# DEPTH_INTRINSICS = {
+#     "height": 480,
+#     "width": 848,
+#     "distortion_model": "Brown Congrady",
+#     "D": [0.0, 0.0, 0.0, 0.0, 0.0],
+#     "K": [427.18, 0., 426.96, 0., 427.18, 235.22, 0., 0., 1.]
+# }
 
 # OpenCV camera to OpenGL camera transform
 opencv_to_opengl = np.array([
@@ -54,42 +54,32 @@ opencv_to_opengl = np.array([
     [0,  0,  0, 1]
 ], dtype=np.float32)
 
+# camera_to_mocap = np.array([
+#     [-1., 0., 0., 0.],
+#     [0., 0., -1., 0.],
+#     [0., -1., 0., 0.],
+#     [0., 0., 0., 1.]
+# ], dtype=np.float32)
+
 camera_to_mocap = np.array([
+    [0., -1., 0., 0.],
     [-1., 0., 0., 0.],
     [0., 0., -1., 0.],
-    [0., -1., 0., 0.],
     [0., 0., 0., 1.]
 ], dtype=np.float32)
-
-# k = 4
-
-# camera_to_mocap = np.eye(4)
-# camera_to_mocap[:3, :3] = rotations[k]
-# print("Using camera_to_mocap rotation matrix:")
-# print(camera_to_mocap[:3, :3])
-
-# def scale_K(K, orig_shape, new_shape):
-#     K = np.array(K).reshape(3, 3).copy()
-#     scale_x = new_shape[1] / orig_shape[1]
-#     scale_y = new_shape[0] / orig_shape[0]
-#     K[0, 0] *= scale_x  # fx
-#     K[1, 1] *= scale_y  # fy
-#     K[0, 2] *= scale_x  # cx
-#     K[1, 2] *= scale_y  # cy
-#     return K
-
-# orig_shape = (720, 1280)
-# new_shape = (480, 848)
 
 LIGHT_INTRINSICS = {}
 
 # User-provided topic names
-COLOR_TOPIC = '/camera/camera/color/image_raw'
-DEPTH_TOPIC = '/camera/camera/depth/image_rect_raw'
-CAM_POSE_TOPIC = '/vrpn_mocap/realsense_Tim/pose'
-LIGHT_POSE_TOPIC = '/vrpn_mocap/lightsource_Tim/pose'
+COLOR_TOPIC = "/fixed_camera/color/image_raw"
+DEPTH_TOPIC = "/fixed_camera/aligned_depth_to_color/image_raw"
+CAM_POSE_TOPIC = "/vrpn_client_node/realsenseTim/pose"
+LIGHT_POSE_TOPIC = "/vrpn_client_node/finger/pose"
 
-SAVE_FOLDER = "../realsense_bag"
+start_idx = 45
+end_idx = 910
+
+SAVE_FOLDER = "data/figurines/figurines"
 Path(SAVE_FOLDER + '/images').mkdir(parents=True, exist_ok=True)
 Path(SAVE_FOLDER + '/depth').mkdir(parents=True, exist_ok=True)
 
@@ -169,6 +159,11 @@ pcd = o3d.geometry.PointCloud()
 min_delta_t = 1e-1 * 1e9
 
 for out_idx, idx in enumerate(tqdm(downsampled_indices, desc="Processing frames")):
+
+    if idx < start_idx or idx > end_idx:
+        print(f"Skipping frame {out_idx} at index {idx} due to out of range.")
+        continue
+
     color_msg = color_msgs[idx]
     t_color = color_ts[idx]
 
@@ -207,6 +202,8 @@ for out_idx, idx in enumerate(tqdm(downsampled_indices, desc="Processing frames"
     depth_path = f'{SAVE_FOLDER}/depth/depth_{idx:04d}.png'
     cv2.imwrite(color_path, color_np)
     cv2.imwrite(depth_path, (depth_m)) # save as 16UC1
+    # Save depth as npy file
+    np.save(f'{SAVE_FOLDER}/depth/depth_{idx:04d}.npy', depth_m)
 
     # Camera and light poses
     cam_matrix_mocap = pose_msg_to_matrix(cam_pose)
@@ -227,7 +224,7 @@ for out_idx, idx in enumerate(tqdm(downsampled_indices, desc="Processing frames"
     yy = yy[valid_mask]
 
     z = depth_m[valid_mask]
-    K = np.array(DEPTH_INTRINSICS["K"]).reshape(3, 3)
+    K = np.array(RGB_INTRINSICS["K"]).reshape(3, 3)
     uv = np.stack((xx, yy, np.ones_like(xx)), axis=-1)  # Shape (N, 2)
 
     # Backproject only valid points
@@ -250,6 +247,8 @@ for out_idx, idx in enumerate(tqdm(downsampled_indices, desc="Processing frames"
 
     # Add to point cloud
     if world_pts.shape[0] > 0 and colors.shape[0] == world_pts.shape[0]:
+        # Shift colors from BGR to RGB
+        colors = colors[:, ::-1]
         pcd.points.extend(o3d.utility.Vector3dVector(world_pts))
         pcd.colors.extend(o3d.utility.Vector3dVector(colors))
 
@@ -262,9 +261,9 @@ for out_idx, idx in enumerate(tqdm(downsampled_indices, desc="Processing frames"
     # plt.pause(1.)
 
     # # VIsualize point cloud
-    pcd_per_frame = o3d.geometry.PointCloud()
-    pcd_per_frame.points = o3d.utility.Vector3dVector(world_pts)
-    pcd_per_frame.colors = o3d.utility.Vector3dVector(colors)
+    # pcd_per_frame = o3d.geometry.PointCloud()
+    # pcd_per_frame.points = o3d.utility.Vector3dVector(world_pts)
+    # pcd_per_frame.colors = o3d.utility.Vector3dVector(colors)
     # o3d.visualization.draw_geometries([pcd_per_frame], window_name=f"Point Cloud {idx}")
 
     # if out_idx % 10 == 0:
@@ -281,7 +280,14 @@ for out_idx, idx in enumerate(tqdm(downsampled_indices, desc="Processing frames"
     })
 
 print(f"Processed {len(frames)} frames.")
-target_num_points = 300000
+
+pcd = pcd.voxel_down_sample(voxel_size=0.01)
+print("Statistical oulier removal")
+cl, ind = pcd.remove_statistical_outlier(nb_neighbors=20,
+                                                    std_ratio=2.0)
+pcd = pcd.select_by_index(ind)
+
+target_num_points = 200000
 
 if len(pcd.points) > target_num_points:
     # Use random sampling for exact count (Open3D >= 0.15)
@@ -306,7 +312,7 @@ for i, frame in enumerate(frames):
         intrinsic=o3d.camera.PinholeCameraIntrinsic(RGB_INTRINSICS['width'], RGB_INTRINSICS['height'], 
                                                      RGB_INTRINSICS['K'][0], RGB_INTRINSICS['K'][4], 
                                                      RGB_INTRINSICS['K'][2], RGB_INTRINSICS['K'][5]),
-        extrinsic=cam_matrix, #  @ opencv_to_opengl,  # Convert to OpenGL convention
+        extrinsic=cam_matrix @ opencv_to_opengl,  # Convert to OpenGL convention
         scale=1.0
     )
     vis_objs.append(cam_frustum)
@@ -317,10 +323,16 @@ o3d.io.write_point_cloud(ply_file_path, pcd)
 
 # 4. Write JSON metadata
 out_json = {
-    "rgb_intrinsics": RGB_INTRINSICS,
-    "depth_intrinsics": DEPTH_INTRINSICS,
-    "light_intrinsics": LIGHT_INTRINSICS,
+    "w": RGB_INTRINSICS["width"],
+    "h": RGB_INTRINSICS["height"],
+    "fl_x": RGB_INTRINSICS["K"][0],
+    "fl_y": RGB_INTRINSICS["K"][4],
+    "cx": RGB_INTRINSICS["K"][2],
+    "cy": RGB_INTRINSICS["K"][5],
+    "camera_model": "OPENCV",
     "ply_file_path": ply_file_path,
+    "applied_transform": np.eye(4)[:3].tolist(),
+    "light_intrinsics": LIGHT_INTRINSICS,
     "frames": frames
 }
 with open(f"{SAVE_FOLDER}/transforms.json", "w") as f:
