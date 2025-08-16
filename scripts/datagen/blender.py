@@ -8,6 +8,13 @@ import bpy
 import numpy as np
 from mathutils import Matrix
 
+from blender_util import (
+    get_camera_intrinsics,
+    look_at_blender,
+    set_sun_direction,
+    set_sun_direction_and_location,
+)
+
 
 class BlenderScene:
     def __init__(self, scene_path: str | Path):
@@ -19,6 +26,7 @@ class BlenderScene:
         """
         bpy.ops.wm.open_mainfile(filepath=scene_path)
         self.scene = bpy.context.scene
+        self.light = bpy.data.objects["Spot"]
 
         # Render settings
         self.scene.render.engine = "CYCLES"
@@ -36,6 +44,14 @@ class BlenderScene:
     def set_camera_pose(self, pose: np.ndarray):
         """Set the camera pose (OpenGL convention)."""
         self.camera.matrix_world = Matrix(pose)
+
+    def set_light_pose(self, pose: np.ndarray):
+        """Set the light pose."""
+        self.light.matrix_world = Matrix(pose)
+
+    def get_camera_intrinsics(self):
+        """Get the camera intrinsics."""
+        return get_camera_intrinsics(self.scene, self.camera)
 
     def get_depth(self):
         pass
