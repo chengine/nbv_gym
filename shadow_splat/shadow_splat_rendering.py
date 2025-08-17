@@ -1,5 +1,5 @@
 import math
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import torch
 import torch.distributed
@@ -25,6 +25,74 @@ from gsplat.utils import depth_to_normal
 from nerfstudio.cameras.cameras import Cameras, CameraType
 import matplotlib.pyplot as plt
 from torchvision.transforms.functional import gaussian_blur
+
+def generate_point_cloud_from_camera_depth(
+    depth: torch.Tensor,
+    K: torch.Tensor,
+    W: int,
+    H: int,
+    viewmat: torch.Tensor,
+    near_plane: float = 0.01,
+    far_plane: float = 1e10,
+    mask: Optional[torch.Tensor] = None,
+    use_bounding_box: bool = False,
+    bounding_box_min: Optional[torch.Tensor] = None,
+    bounding_box_max: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    
+    if depth.ndim == 4:
+        depth = depth.squeeze(0)
+        depth = depth.squeeze(-1)
+    elif depth.ndim == 3:
+        depth = depth.squeeze(-1)
+    
+    if K.ndim == 3:
+        K = K.squeeze(0)
+    if viewmat.ndim == 3:
+        viewmat = viewmat.squeeze(0)
+
+    # raybundle = camera.generate_rays(camera_indices)
+    # point = raybundle.origins + raybundle.directions * depth[..., None]
+    # view_direction = raybundle.directions
+
+    # Project depth to 3D using K matrix
+    # unnormalized pixel coordinates
+    u_coords = torch.arange(W, device=depth.device)
+    v_coords = torch.arange(H, device=depth.device)
+
+    # meshgrid
+    U_grid, V_grid = torch.meshgrid(u_coords, v_coords, indexing='xy')
+
+    # transformed points in camera frame
+    # [u, v, 1] = [[f_x, 0, c_x], [0, f_y, c_y], [0, 0, 1]] @ [x/z, y/z, 1]
+    cam_pts_x = (U_grid - K[0, 2]) * depth / K[0, 0]
+    cam_pts_y = (V_grid - K[1, 2]) * depth / K[1, 1]
+    points = torch.stack((cam_pts_x, cam_pts_y, depth), axis=-1)
+
+    c2w = torch.linalg.inv(viewmat)
+    points = points @ c2w[:3, :3].T + c2w[:3, 3]
+
+    if mask is not None:
+        points = points[mask]
+        # view_direction = view_direction[mask]
+    else:
+        mask = torch.logical_and(depth > near_plane, depth < far_plane)
+        points = points[mask]
+        # view_direction = view_direction[mask]
+
+    # if use_bounding_box:
+    #     comp_l = torch.tensor(bounding_box_min, device=point.device)
+    #     comp_m = torch.tensor(bounding_box_max, device=point.device)
+    #     assert torch.all(
+    #         comp_l < comp_m
+    #     ), f"Bounding box min {bounding_box_min} must be smaller than max {bounding_box_max}"
+    #     mask = torch.all(torch.concat([point > comp_l, point < comp_m], dim=-1), dim=-1)
+    #     point = point[mask]
+    #     view_direction = view_direction[mask]
+
+    # The output will ostensibly be N x 3 while the depth and rgb is H x w x C, so we need to mask in order to know which values
+    # in the rgb image to touch.
+    return points, mask
 
 def focal_bce(pred, target, alpha_pos=0.9, alpha_neg=0.1, gamma=2.0, eps=1e-6):
     # pred, target in [0,1]
@@ -666,12 +734,188 @@ def chebyshev_weighting(
     weights = variance_per_gaussian / (variance_per_gaussian + torch.relu(depth_diff)**2)
 
     if baseline is not None:
-        weights_ambient = torch.stack([weights, torch.ones_like(weights) * baseline], dim=-1)
-        softmax_weights = torch.softmax( weights_ambient, dim=-1)
-        weights = torch.sum(softmax_weights * weights_ambient, dim=-1)
+
+        # Does softmax weighting
+        # weights_ambient = torch.stack([weights.squeeze(), torch.ones_like(weights.squeeze()) * baseline], dim=-1)
+        # softmax_weights = torch.softmax( weights_ambient, dim=-1)
+        # weights = torch.sum(softmax_weights * weights_ambient, dim=-1)
+
+        # Does linear mixing
+        # weights = (1 - baseline) * weights + baseline
+
+        # Does hard cutoff
+        weights = torch.max(weights, torch.ones_like(weights) * baseline)
 
     return weights
 
+def calculate_relighting_weights_from_point_cloud(
+    means: Tensor,  # [N, 3]
+    quats: Tensor,  # [N, 4]
+    scales: Tensor,  # [N, 3]       # NOTE: IMPORTANT! THESE SCALES MUST ALREADY BE POSITIVE
+    opacities: Tensor,  # [N]       # NOTE: IMPORTANT! THESE OPACITIES MUST ALREADY BE [0, 1]
+    viewmats: Tensor,  # [C, 4, 4]
+    Ks: Tensor,  # [C, 3, 3]
+    width: int,
+    height: int,
+    point_cloud: Tensor,
+    point_cloud_mask: Tensor,
+    rgb_image: Tensor,
+    intensity: List[float],
+    ambient: Optional[float] = None,
+    near_plane: float = 0.01,
+    far_plane: float = 1e10,
+    radius_clip: float = 0.0,
+    eps2d: float = 0.3,
+    tile_size: int = 16,
+    sparse_grad: bool = False,
+    absgrad: bool = False,
+    rasterize_mode: Literal["classic", "antialiased"] = "classic",
+    channel_chunk: int = 32,
+    distributed: bool = False,
+    camera_model: Literal["pinhole", "ortho", "fisheye"] = "pinhole",
+    fix_variance: bool = False,
+    use_2dgs: bool = False,
+    distloss: bool = False,  # 2DGS only
+) -> Tuple[Tensor, Tensor, Dict]:
+    """Compute the relighting weights for a given light source for the scene."""
+
+    N, _ = means.shape  # Number of gaussians in the scene
+    assert N == opacities.shape[0], "Number of means and opacities must match"
+    assert N == scales.shape[0], "Number of means and scales must match"
+    assert N == quats.shape[0], "Number of means and quaternions must match"
+
+    if not use_2dgs:
+        moments, alphas, meta = moment_rasterization(
+            means,  # [N, 3]
+            quats,  # [N, 4]
+            scales,  # [N, 3]
+            opacities,  # [N]
+            viewmats,  # [C, 4, 4]
+            Ks,  # [C, 3, 3]
+            width,
+            height,
+            near_plane=near_plane,
+            far_plane=far_plane,
+            radius_clip=radius_clip,
+            eps2d=eps2d,
+            packed=True,
+            tile_size=tile_size,
+            sparse_grad=sparse_grad,
+            absgrad=absgrad,
+            rasterize_mode=rasterize_mode,
+            channel_chunk=channel_chunk,
+            distributed=distributed,
+            camera_model=camera_model,
+        )
+    else:
+        (moments, alphas, normals, normals_from_depth, distort, median, meta) = (
+            moment_rasterization_2dgs(
+                means,
+                quats,
+                scales,
+                opacities,
+                viewmats,
+                Ks,
+                width,
+                height,
+                near_plane=near_plane,
+                far_plane=far_plane,
+                radius_clip=radius_clip,
+                eps2d=eps2d,
+                packed=True,
+                tile_size=tile_size,
+                sparse_grad=sparse_grad,
+                absgrad=absgrad,
+                distloss=distloss,
+            )
+        )
+
+    assert not torch.isnan(moments[..., 1]).any(), "Depth squared is nan"
+    assert not torch.isnan(moments[..., 0]).any(), "Depth is nan"
+    assert not torch.isinf(moments[..., 1]).any(), "Depth squared is inf"
+    assert not torch.isinf(moments[..., 0]).any(), "Depth is inf"
+
+    depth_image = moments[..., 0].squeeze()
+
+    if fix_variance:
+        # TODO: Implement fix_variance
+        variance_image = torch.ones_like(depth_image)
+    else:
+        depth_sqr_image = moments[..., 1].squeeze()
+        variance_image = depth_sqr_image - depth_image**2
+
+    # Gaussian blur both the depth and variance images
+    depth_image = gaussian_blur(depth_image[None], kernel_size=49, sigma=3.)
+    variance_image = gaussian_blur(variance_image[None], kernel_size=49, sigma=3.)
+    depth_image = depth_image.squeeze()
+    variance_image = variance_image.squeeze().clamp(min=5e-3)
+
+    assert torch.isnan(depth_image).any() == False, "Depth image is nan"
+    assert torch.isnan(variance_image).any() == False, "Variance image is nan"
+
+    # Project point cloud onto the light source camera
+    # Project Gaussians to 2D. Directly pass in {quats, scales} is faster than precomputing covars.
+    means = point_cloud[..., :3]
+
+    # Initialize quats to be the identity quaternion
+    quats = torch.zeros(means.shape[0], 4, device=means.device)
+    quats[..., -1] = 1.0
+
+    # Initialize scales to be some small scale
+    scales = torch.ones_like(means[..., :3]) * 1e-3
+
+    proj_results = fully_fused_projection(
+        means,
+        None,
+        quats,
+        scales,
+        viewmats,
+        Ks,
+        width,
+        height,
+        eps2d=eps2d,
+        packed=True,
+        near_plane=near_plane,
+        far_plane=far_plane,
+        radius_clip=radius_clip,
+        sparse_grad=sparse_grad,
+        calc_compensations=(rasterize_mode == "antialiased"),
+        camera_model=camera_model,
+    )
+
+    # The results are packed into shape [nnz, ...]. All elements are valid.
+    (   _,
+        _,
+        gaussian_ids,
+        radii,
+        means2d,
+        depths,
+        _,
+        _,
+    ) = proj_results
+
+    assert (radii > 0).all(), "Radii are zero"
+
+    # This represents the fraction of light that is received by each gaussian in the frustum
+    weights = chebyshev_weighting(
+        means2d,  # [N, 2] where N is the number of gaussians in the frustum
+        depths,  # [N] where N is the number of gaussians in the frustum
+        depth_image,  # [H, W]
+        variance_image,  # [H, W]
+        baseline=ambient
+    )
+
+    assert not torch.isnan(weights).any(), "Weights are nan"
+    assert not torch.isinf(weights).any(), "Weights are inf"
+
+    # We're going to make the assumption that if the pixel is not in the mask, we don't do anything to it.
+    # TODO: Implement a flag that allows us to treat the pixels as dark if they're not in the mask.
+    rgb_image[point_cloud_mask][gaussian_ids] = rgb_image[point_cloud_mask][gaussian_ids] * weights.unsqueeze(-1) * intensity
+
+    shadow_image = torch.zeros(rgb_image.shape[0], rgb_image.shape[1], device=rgb_image.device)
+    shadow_image[point_cloud_mask][gaussian_ids] = 1. - weights
+
+    return rgb_image, shadow_image, depth_image, variance_image
 
 def calculate_relighting_weights(
     means: Tensor,  # [N, 3]
@@ -769,10 +1013,10 @@ def calculate_relighting_weights(
         variance_image = depth_sqr_image - depth_image**2
 
     # Gaussian blur both the depth and variance images
-    depth_image = gaussian_blur(depth_image[None], kernel_size=7, sigma=3.)
-    variance_image = gaussian_blur(variance_image[None], kernel_size=7, sigma=3.)
+    depth_image = gaussian_blur(depth_image[None], kernel_size=49, sigma=3.)
+    variance_image = gaussian_blur(variance_image[None], kernel_size=49, sigma=3.)
     depth_image = depth_image.squeeze()
-    variance_image = variance_image.squeeze().clamp(min=1e-2)
+    variance_image = variance_image.squeeze().clamp(min=5e-3)
 
     depths = meta["depths"]  # Depths of each gaussian in frustum
     means2d = meta["means2d"]  # 2D means of each gaussian in frustum
@@ -782,7 +1026,6 @@ def calculate_relighting_weights(
     assert (meta["radii"] >= 0.0).all(), "Radii must be non-negative"
 
     # This represents the fraction of light that is received by each gaussian in the frustum
-    # weights = logistic_weighting(
     # weights = chebyshev_weighting(
     #     means2d,  # [N, 2] where N is the number of gaussians in the frustum
     #     depths,  # [N] where N is the number of gaussians in the frustum
@@ -792,9 +1035,17 @@ def calculate_relighting_weights(
 
     # Smoothing across whole Gaussian
     # Sample points in axis directions of the Gaussian
-    sample_points = conics_to_semi_major_axis_points(means2d, conics)
+    assert torch.isnan(means2d).any() == False, "Means2d is nan"
+    assert torch.isnan(depths).any() == False, "Depths is nan"
+    assert torch.isnan(depth_image).any() == False, "Depth image is nan"
+    assert torch.isnan(variance_image).any() == False, "Variance image is nan"
+
+    extreme_points, interior_points = conics_to_semi_major_axis_points_analytic(means2d, conics, num_interior=50)
+    sample_points = torch.cat([extreme_points, interior_points], dim=-2)
+
+    num_points = sample_points.shape[-2]
     sample_points = sample_points.reshape(-1, 2)
-    sample_depths = torch.repeat_interleave(depths, 5)
+    sample_depths = torch.repeat_interleave(depths, num_points)
 
     weights = chebyshev_weighting(
         sample_points,  # [N, 2] where N is the number of gaussians in the frustum
@@ -803,8 +1054,9 @@ def calculate_relighting_weights(
         variance_image,  # [H, W]
         baseline=ambient
     )
-    weights = weights.reshape(means2d.shape[0], 5)
-    weights = weights.min(dim=1).values
+
+    weights = weights.reshape(means2d.shape[0], num_points)
+    weights = weights.max(dim=1).values
 
     assert not torch.isnan(weights).any(), "Weights are nan"
     assert not torch.isinf(weights).any(), "Weights are inf"
@@ -2318,6 +2570,9 @@ def augmented_rasterization(
             colors = spherical_harmonics(sh_degree, dirs, shs, masks=masks)  # [C, N, 3]
         # make it apple-to-apple with Inria's CUDA Backend.
         colors = torch.clamp_min(colors + 0.5, 0.0)
+
+    meta.update({"colors": colors})
+
     # If in distributed mode, we need to scatter the GSs to the destination ranks, based
     # on which cameras they are visible to, which we already figured out in the projection
     # stage.
@@ -3245,67 +3500,139 @@ def augmented_rasterization_2dgs(
         meta,
     )
 
-
-def conics_to_semi_major_axis_points(
-    means2d: Tensor,  # [N, 2] - 2D means of Gaussians
-    conics: Tensor,   # [N, 3] - conic parameters [a, b, c] for covariance matrix [[a, b], [b, c]]
-    scale_factor: float = 1.0,  # Scale factor for the semi-major axis length
-) -> Tensor:
+def conics_to_semi_major_axis_points_analytic(
+    means2d: Tensor,      # [N, 2]
+    conics: Tensor,       # [N, 3] with [a, b, c] for [[a, b], [b, c]]
+    scale_factor: float = 1.0,
+    eps: float = 1e-12,
+    num_interior: int = 0,  # number of uniform interior samples per ellipse
+):
     """
-    Convert Gaussian conics to sample points on the semi-major axis.
-    
-    Args:
-        means2d: 2D means of Gaussians [N, 2]
-        conics: Conic parameters [N, 3] representing covariance matrix [[a, b], [b, c]]
-        scale_factor: Scale factor for the semi-major axis length (default: 1.0)
-    
     Returns:
-        Tensor of shape [N, 4, 2] containing 4 points per Gaussian:
-        - points[:, 0, :]: Point in negative direction along semi-major axis
-        - points[:, 1, :]: Point in positive direction along semi-major axis  
-        - points[:, 2, :]: Point in negative direction along semi-minor axis
-        - points[:, 3, :]: Point in positive direction along semi-minor axis
+      axis_points: [N, 5, 2] = [center, major_neg, major_pos, minor_neg, minor_pos]
+      interior_points (optional): [N, num_interior, 2] (only if num_interior>0)
     """
-    N = means2d.shape[0]
     device = means2d.device
+    dtype = means2d.dtype
+
+    a, b, c = conics[:, 0], conics[:, 1], conics[:, 2]  # [N]
+
+    # Closed-form eigenvalues
+    mu = 0.5 * (a + c)
+    delta = 0.5 * (a - c)
+    r = torch.sqrt(delta * delta + b * b + eps)
+    lam_major = torch.clamp(mu + r, min=0.0)
+    lam_minor = torch.clamp(mu - r, min=0.0)
+
+    # Eigenvectors via rotation by theta
+    theta = 0.5 * torch.atan2(2.0 * b, (a - c))
+    cos_t, sin_t = torch.cos(theta), torch.sin(theta)
+    v_major = torch.stack([cos_t, sin_t], dim=1)       # [N, 2]
+    v_minor = torch.stack([-sin_t, cos_t], dim=1)      # [N, 2]
+
+    # Axis (semi-axis) lengths
+    major_len = torch.sqrt(lam_major) * scale_factor   # [N]
+    minor_len = torch.sqrt(lam_minor) * scale_factor   # [N]
+
+    # Axis endpoints
+    major_pos = means2d + major_len.unsqueeze(1) * v_major
+    major_neg = means2d - major_len.unsqueeze(1) * v_major
+    minor_pos = means2d + minor_len.unsqueeze(1) * v_minor
+    minor_neg = means2d - minor_len.unsqueeze(1) * v_minor
+
+    axis_points = torch.stack(
+        [means2d, major_neg, major_pos, minor_neg, minor_pos],
+        dim=1
+    )  # [N, 5, 2]
+
+    if num_interior <= 0:
+        return axis_points
+
+    # ----- Uniform-in-area interior sampling -----
+    # Sample in unit disk and map with principal-axis transform
+    # r_hat = sqrt(U), phi ~ Uniform[0, 2pi]
+    U = torch.rand(means2d.shape[0], num_interior, device=device, dtype=dtype)  # [N, S]
+    r_hat = torch.sqrt(U)                                  # [N, S]
+    phi = 2.0 * torch.pi * torch.rand_like(U)              # [N, S]
+    cos_p, sin_p = torch.cos(phi), torch.sin(phi)          # [N, S]
+
+    # Broadcast axis lengths to match [N, S, 1]
+    major_len_exp = major_len[:, None, None]               # [N, 1, 1]
+    minor_len_exp = minor_len[:, None, None]               # [N, 1, 1]
+
+    # Scale cos/sin terms with r_hat and axis lengths
+    w_major = major_len_exp * (r_hat[:, :, None] * cos_p[:, :, None])  # [N, S, 1]
+    w_minor = minor_len_exp * (r_hat[:, :, None] * sin_p[:, :, None])  # [N, S, 1]
+
+    vmaj = v_major[:, None, :]  # [N, 1, 2]
+    vmin = v_minor[:, None, :]  # [N, 1, 2]
+    m = means2d[:, None, :]     # [N, 1, 2]
+
+    # Map unit-disk samples to ellipse
+    interior_points = m + w_major * vmaj + w_minor * vmin  # [N, S, 2]
+
+    return axis_points, interior_points
+
+# def conics_to_semi_major_axis_points(
+#     means2d: Tensor,  # [N, 2] - 2D means of Gaussians
+#     conics: Tensor,   # [N, 3] - conic parameters [a, b, c] for covariance matrix [[a, b], [b, c]]
+#     scale_factor: float = 1.0,  # Scale factor for the semi-major axis length
+# ) -> Tensor:
+#     """
+#     Convert Gaussian conics to sample points on the semi-major axis.
     
-    # Extract covariance matrix parameters
-    a = conics[:, 0]  # [N]
-    b = conics[:, 1]  # [N] 
-    c = conics[:, 2]  # [N]
+#     Args:
+#         means2d: 2D means of Gaussians [N, 2]
+#         conics: Conic parameters [N, 3] representing covariance matrix [[a, b], [b, c]]
+#         scale_factor: Scale factor for the semi-major axis length (default: 1.0)
     
-    # Construct covariance matrices
-    # [[a, b], [b, c]]
-    cov_matrices = torch.stack([
-        torch.stack([a, b], dim=1),  # [N, 2]
-        torch.stack([b, c], dim=1),  # [N, 2]
-    ], dim=2)  # [N, 2, 2]
+#     Returns:
+#         Tensor of shape [N, 4, 2] containing 4 points per Gaussian:
+#         - points[:, 0, :]: Point in negative direction along semi-major axis
+#         - points[:, 1, :]: Point in positive direction along semi-major axis  
+#         - points[:, 2, :]: Point in negative direction along semi-minor axis
+#         - points[:, 3, :]: Point in positive direction along semi-minor axis
+#     """
+#     N = means2d.shape[0]
+#     device = means2d.device
     
-    # Compute eigenvalues and eigenvectors
-    eigenvals, eigenvecs = torch.linalg.eigh(cov_matrices)  # [N, 2], [N, 2, 2]
+#     # Extract covariance matrix parameters
+#     a = conics[:, 0]  # [N]
+#     b = conics[:, 1]  # [N] 
+#     c = conics[:, 2]  # [N]
     
-    # Sort eigenvalues in descending order (largest first = semi-major axis)
-    # eigenvals are already sorted in ascending order from eigh, so reverse
-    eigenvals = torch.flip(eigenvals, dims=[1])  # [N, 2] - largest first
-    eigenvecs = torch.flip(eigenvecs, dims=[2])  # [N, 2, 2] - corresponding eigenvectors
+#     # Construct covariance matrices
+#     # [[a, b], [b, c]]
+#     cov_matrices = torch.stack([
+#         torch.stack([a, b], dim=1),  # [N, 2]
+#         torch.stack([b, c], dim=1),  # [N, 2]
+#     ], dim=2)  # [N, 2, 2]
     
-    # Extract semi-major and semi-minor axes
-    semi_major_length = torch.sqrt(eigenvals[:, 0]) * scale_factor  # [N]
-    semi_minor_length = torch.sqrt(eigenvals[:, 1]) * scale_factor  # [N]
+#     # Compute eigenvalues and eigenvectors
+#     eigenvals, eigenvecs = torch.linalg.eigh(cov_matrices)  # [N, 2], [N, 2, 2]
     
-    semi_major_dir = eigenvecs[:, :, 0]  # [N, 2] - direction of semi-major axis
-    semi_minor_dir = eigenvecs[:, :, 1]  # [N, 2] - direction of semi-minor axis
+#     # Sort eigenvalues in descending order (largest first = semi-major axis)
+#     # eigenvals are already sorted in ascending order from eigh, so reverse
+#     eigenvals = torch.flip(eigenvals, dims=[1])  # [N, 2] - largest first
+#     eigenvecs = torch.flip(eigenvecs, dims=[2])  # [N, 2, 2] - corresponding eigenvectors
     
-    # Compute sample points
-    # Semi-major axis points (positive and negative directions)
-    major_pos = means2d + semi_major_length.unsqueeze(1) * semi_major_dir  # [N, 2]
-    major_neg = means2d - semi_major_length.unsqueeze(1) * semi_major_dir  # [N, 2]
+#     # Extract semi-major and semi-minor axes
+#     semi_major_length = torch.sqrt(eigenvals[:, 0]) * scale_factor  # [N]
+#     semi_minor_length = torch.sqrt(eigenvals[:, 1]) * scale_factor  # [N]
     
-    # Semi-minor axis points (positive and negative directions)  
-    minor_pos = means2d + semi_minor_length.unsqueeze(1) * semi_minor_dir  # [N, 2]
-    minor_neg = means2d - semi_minor_length.unsqueeze(1) * semi_minor_dir  # [N, 2]
+#     semi_major_dir = eigenvecs[:, :, 0]  # [N, 2] - direction of semi-major axis
+#     semi_minor_dir = eigenvecs[:, :, 1]  # [N, 2] - direction of semi-minor axis
     
-    # Stack all points: [major_neg, major_pos, minor_neg, minor_pos]
-    sample_points = torch.stack([means2d, major_neg, major_pos, minor_neg, minor_pos], dim=1)  # [N, 5, 2]
+#     # Compute sample points
+#     # Semi-major axis points (positive and negative directions)
+#     major_pos = means2d + semi_major_length.unsqueeze(1) * semi_major_dir  # [N, 2]
+#     major_neg = means2d - semi_major_length.unsqueeze(1) * semi_major_dir  # [N, 2]
     
-    return sample_points
+#     # Semi-minor axis points (positive and negative directions)  
+#     minor_pos = means2d + semi_minor_length.unsqueeze(1) * semi_minor_dir  # [N, 2]
+#     minor_neg = means2d - semi_minor_length.unsqueeze(1) * semi_minor_dir  # [N, 2]
+    
+#     # Stack all points: [major_neg, major_pos, minor_neg, minor_pos]
+#     sample_points = torch.stack([means2d, major_neg, major_pos, minor_neg, minor_pos], dim=1)  # [N, 5, 2]
+    
+#     return sample_points

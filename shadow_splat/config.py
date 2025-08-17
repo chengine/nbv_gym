@@ -115,7 +115,7 @@ lumen = MethodSpecification(
 )
 
 shadow_splat = MethodSpecification(
-    ShadowSplatTrainerConfig(
+    TrainerConfig(
         method_name="shadow-splat",
         steps_per_eval_image=100,
         steps_per_eval_batch=0,
@@ -186,14 +186,14 @@ shadow_splat = MethodSpecification(
             },
             "intensity": {"optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15), "scheduler": None},
             "ambient": {"optimizer": AdamOptimizerConfig(lr=0.01, eps=1e-15), "scheduler": None},
-            "background_ambient": {
-                "optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15),
-                "scheduler": None,
-            },
-            "variance_factor": {
-                "optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15),
-                "scheduler": None,
-            },
+            # "background_ambient": {
+            #     "optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15),
+            #     "scheduler": None,
+            # },
+            # "variance_factor": {
+            #     "optimizer": AdamOptimizerConfig(lr=0.001, eps=1e-15),
+            #     "scheduler": None,
+            # },
         },
         viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
         vis="viewer",
