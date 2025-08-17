@@ -1191,13 +1191,13 @@ class ShadowSplatModel(SplatfactoModel):
 
         # ====== ALBEDO TV LOSS ======
         albedo_img = outputs["albedo"]
-        albedo_tv_loss = 0.1 * total_variation_loss(albedo_img)
+        albedo_tv_loss = 0.0 #0.1 * total_variation_loss(albedo_img)
         # ====== ALBEDO TV LOSS ======
 
         # Variance loss #
         light_variance_img = outputs["light_variance"]
         light_depth_img = outputs["light_depth"]
-        light_tv_loss = torch.mean(light_variance_img) + total_variation_loss(light_depth_img)
+        light_tv_loss = 0. #torch.mean(light_variance_img) #+ total_variation_loss(light_depth_img)
         # ====== Variance loss ======
 
         # Neighbor color loss #
