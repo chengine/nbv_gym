@@ -123,21 +123,12 @@ class ShadowSplatViewer(Viewer):
         lighting_tab = tabs.add_tab("Light", viser.Icon.SUN)
 
         with lighting_tab:
-            # Get initial light parameters from pipeline model
-            # initial_variance_factor = torch.exp(
-            #     pipeline.model.light_params["variance_factor"]
-            # ).item()
-            initial_ambient = torch.exp(pipeline.model.light_params["ambient"]).item()
-            # initial_background_ambient = torch.exp(
-            #     pipeline.model.light_params["background_ambient"]
-            # ).item()
+            initial_ambient = torch.sigmoid(pipeline.model.light_params["ambient"]).item()
             initial_intensity = (
                 torch.exp(pipeline.model.light_params["intensity"]).detach().cpu().numpy()
             ) * np.ones(3)
             self._add_light_source_slider(
-                # initial_variance_factor=initial_variance_factor,
                 initial_ambient=initial_ambient,
-                # initial_background_ambient=initial_background_ambient,
                 initial_intensity=initial_intensity,
             )
 
@@ -155,9 +146,7 @@ class ShadowSplatViewer(Viewer):
 
     def _add_light_source_slider(
         self,
-        # initial_variance_factor=0.01,
         initial_ambient=0.01,
-        # initial_background_ambient=0.01,
         initial_intensity=np.ones(3),
     ):
         """Add a slider to the control panel for adjusting the light source position."""
@@ -176,23 +165,9 @@ class ShadowSplatViewer(Viewer):
         self.focal_length_slider = self.viser_server.gui.add_slider(
             label="Focal length", min=0.0, max=3000.0, step=1.0, initial_value=1250
         )
-        # self.variance_factor_slider = self.viser_server.gui.add_slider(
-        #     label="Variance factor",
-        #     min=0.0,
-        #     max=1.0,
-        #     step=0.01,
-        #     initial_value=initial_variance_factor,
-        # )
         self.ambient_slider = self.viser_server.gui.add_slider(
             label="Ambient", min=0.0, max=1.0, step=0.01, initial_value=initial_ambient
         )
-        # self.background_ambient_slider = self.viser_server.gui.add_slider(
-        #     label="Background ambient",
-        #     min=0.0,
-        #     max=1.0,
-        #     step=0.01,
-        #     initial_value=initial_background_ambient,
-        # )
         if self.RGB_INTENSITY:
             self.red_intensity_slider = self.viser_server.gui.add_slider(
                 label="Red intensity",
@@ -235,7 +210,6 @@ class ShadowSplatViewer(Viewer):
         self.radius_slider.on_update(self.update_light_source_pose)
         self.dim_slider.on_update(self.update_light_source_pose)
         self.focal_length_slider.on_update(self.update_light_source_pose)
-        # self.variance_factor_slider.on_update(self.update_light_source_pose)
         if self.RGB_INTENSITY:
             self.red_intensity_slider.on_update(self.update_light_source_pose)
             self.green_intensity_slider.on_update(self.update_light_source_pose)
@@ -243,7 +217,6 @@ class ShadowSplatViewer(Viewer):
         else:
             self.intensity_slider.on_update(self.update_light_source_pose)
         self.ambient_slider.on_update(self.update_light_source_pose)
-        # self.background_ambient_slider.on_update(self.update_light_source_pose)
         self.origin_input.on_update(self.update_light_source_pose)
         self.camera_type_select.on_update(self.update_light_source_pose)
 
@@ -328,7 +301,6 @@ class ShadowSplatViewer(Viewer):
         c2w_delta = c2ws_delta[0, ...]
         c2w = c2w_orig @ np.concatenate((c2w_delta, np.array([[0, 0, 0, 1]])), axis=0)
 
-
         R = tf.SO3.from_matrix(c2w[:3, :3])  # type: ignore
         R = R @ tf.SO3.from_x_radians(np.pi)
         self.light_source_visualizer.position = c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO
@@ -344,9 +316,7 @@ class ShadowSplatViewer(Viewer):
         radius = self.radius_slider.value
         dimension = self.dim_slider.value
         focal_length = self.focal_length_slider.value
-        # variance_factor = self.variance_factor_slider.value
         ambient = self.ambient_slider.value
-        # background_ambient = self.background_ambient_slider.value
         if self.RGB_INTENSITY:
             red_intensity = self.red_intensity_slider.value
             green_intensity = self.green_intensity_slider.value
@@ -381,14 +351,8 @@ class ShadowSplatViewer(Viewer):
             camera_type=camera_type,
         )
 
-        # with torch.no_grad():
-        #     self.pipeline.model.compute_irradiance(
-        #         light_source,
-        #         variance_factor=variance_factor,
-        #         intensity=intensity,
-        #         ambient=ambient,
-        #         background_ambient=background_ambient,
-        #     )
+        with torch.no_grad():
+            self.pipeline.model.last_training_light = light_source
 
         cv_to_gl = torch.tensor(
             [
@@ -412,7 +376,6 @@ class ShadowSplatViewer(Viewer):
         self.light_source_visualizer.visible = True
 
         self._trigger_rerender()
-
 
 def camera_to_world_transform(azimuth_rad, elevation_rad, origin, radius):
     # Compute the camera position in Cartesian coordinates

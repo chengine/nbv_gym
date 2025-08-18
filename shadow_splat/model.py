@@ -20,7 +20,7 @@ Gaussian Splatting implementation that combines many recent advancements.
 from __future__ import annotations
 import os
 
-# os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple, Type, Union
 import torch
@@ -36,7 +36,7 @@ from shadow_splat.shadow_splat_rendering import (
     calculate_relighting_weights,
 )
 
-# torch.autograd.set_detect_anomaly(True)
+torch.autograd.set_detect_anomaly(True)
 import math
 from shadow_splat.lights import LightOptimizer, LightOptimizerConfig
 from nerfstudio.cameras.cameras import Cameras, CameraType
@@ -49,6 +49,7 @@ from nerfstudio.model_components.lib_bilagrid import (
     total_variation_loss,
 )
 
+import open3d as o3d
 import torch_geometric.nn.pool.knn as knn
 
 from shadow_splat.util.nerfstudio import get_viewmat
@@ -694,14 +695,14 @@ class ShadowSplatModel(SplatfactoModel):
             {
                 "intensity": torch.nn.Parameter(torch.log(torch.tensor(1.0))),
                 "ambient": torch.nn.Parameter(torch.logit(torch.tensor(0.5))),  # in frustum
-                # "background_ambient": torch.nn.Parameter(torch.log(torch.tensor(1.0))),  # outside
-                # "variance_factor": torch.nn.Parameter(torch.log(torch.tensor(0.01))),
             }
         )
 
         self.light_optimizer: LightOptimizer = self.config.light_optimizer.setup(
             num_cameras=1, device="cpu"
         )
+
+        self.last_training_light = None
 
     # TODO: What's the best way to return features_dc/rest to reflect the shadows conditioned on a light source?
     @property
@@ -797,103 +798,6 @@ class ShadowSplatModel(SplatfactoModel):
         """
         return self.get_outputs(camera, light)
 
-    # def compute_irradiance(
-    #     self,
-    #     light: Cameras,
-    #     variance_factor: Optional[float] = None,
-    #     intensity: Optional[float] = None,
-    #     ambient: Optional[float] = None,
-    #     background_ambient: Optional[float] = None,
-    # ) -> Tuple[torch.Tensor, torch.Tensor]:
-    #     """Get the irradiance for a given camera and light source.
-
-    #     Args:
-    #         camera: The camera(s) for which output images are rendered
-    #         light: Optional light source camera for shadow computation
-    #     """
-    #     camera_scale_fac = self._get_downscale_factor()
-    #     opacities_crop = self.opacities
-    #     means_crop = self.means
-    #     scales_crop = self.scales
-    #     quats_crop = self.quats
-
-    #     if self.training:
-    #         assert light.shape[0] == 1, "Only one light at a time"
-    #         optimized_light_to_world = self.light_optimizer.apply_to_camera(light)
-    #     else:
-    #         optimized_light_to_world = light.camera_to_worlds
-
-    #     # print("Optimized light to world", optimized_light_to_world)
-
-    #     # TODO: Implement light intrinsic optimization
-    #     light_camera_to_world = optimized_light_to_world
-    #     light.rescale_output_resolution(1 / camera_scale_fac)
-    #     light_viewmat = get_viewmat(light_camera_to_world)
-    #     light_K = light.get_intrinsics_matrices().cuda()
-    #     light_W, light_H = int(light.width.item()), int(light.height.item())
-    #     self.light_last_size = (light_H, light_W)
-    #     light.rescale_output_resolution(camera_scale_fac)  # type: ignore
-
-    #     if light.camera_type == CameraType.PERSPECTIVE.value:
-    #         light_model = "pinhole"
-    #     elif light.camera_type == CameraType.ORTHOPHOTO.value:
-    #         light_model = "ortho"
-    #     elif light.camera_type == CameraType.FISHEYE.value:
-    #         light_model = "fisheye"
-    #     else:
-    #         raise ValueError("Unknown light type: %s", light.camera_type)
-
-    #     # if self.training:
-    #     #     hard_cutoff = False
-    #     # else:
-    #     #     hard_cutoff = True
-
-    #     # print lighting params values
-    #     if variance_factor is None:
-    #         variance_factor = torch.exp(self.light_params["variance_factor"])
-    #     if intensity is None:
-    #         intensity = torch.exp(self.light_params["intensity"]) * torch.ones(3).to(self.device)
-    #     if ambient is None:
-    #         ambient = torch.nn.functional.sigmoid(self.light_params["ambient"])
-    #     # if background_ambient is None:
-    #     #     background_ambient = torch.exp(self.light_params["background_ambient"])
-
-    #     # Check for NaN values in the input tensors
-    #     if torch.isnan(means_crop).any():
-    #         raise ValueError("NaN values detected in means_crop")
-    #     if torch.isnan(quats_crop).any():
-    #         raise ValueError("NaN values detected in quats_crop")
-    #     if torch.isnan(scales_crop).any():
-    #         raise ValueError("NaN values detected in scales_crop")
-
-    #     irradiance, irradiance_fraction, light_depth_image, light_variance_image = calculate_relighting_weights(
-    #         means=means_crop,  # [N, 3]
-    #         quats=quats_crop,  # [N, 4]
-    #         scales=torch.exp(scales_crop),  # [N, 3]
-    #         opacities=torch.sigmoid(opacities_crop).squeeze(-1),  # [N]
-    #         viewmats=light_viewmat,  # [C, 4, 4]
-    #         Ks=light_K,  # [C, 3, 3]
-    #         width=light_W,
-    #         height=light_H,
-    #         variance_factor=variance_factor,
-    #         intensity=intensity,
-    #         ambient=ambient,
-    #         background_ambient=None,
-    #         near_plane=0.01,
-    #         far_plane=1e10,
-    #         sparse_grad=False,
-    #         absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
-    #         rasterize_mode=self.config.rasterize_mode,
-    #         camera_model=light_model,
-    #         distloss=False,  # 2DGS only
-    #         fix_variance=self.config.fix_variance,
-    #     )
-    #     self.irradiance = irradiance
-    #     self.irradiance_fraction = irradiance_fraction
-    #     self.light_depth_image = light_depth_image
-    #     self.light_variance_image = light_variance_image
-    #     return irradiance, irradiance_fraction, light_depth_image, light_variance_image
-
     def get_outputs(
         self, camera: Cameras, light: Optional[Cameras] = None
     ) -> Dict[str, Union[torch.Tensor, List]]:
@@ -981,32 +885,6 @@ class ShadowSplatModel(SplatfactoModel):
             albedo_crop = torch.sigmoid(albedo_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
             sh_degree_to_use = None
 
-        # First 3 channels of render are albedo, next 3 are relit color (intensity), then shadow, then depth
-        # render, alpha, self.info = augmented_rasterization(
-        #     means=means_crop,
-        #     quats=quats_crop,  # rasterization does normalization internally
-        #     scales=torch.exp(scales_crop),
-        #     opacities=torch.sigmoid(opacities_crop).squeeze(-1),
-        #     colors=albedo_crop,
-        #     viewmats=viewmat,  # [1, 4, 4]
-        #     Ks=K,  # [1, 3, 3]
-        #     width=W,
-        #     height=H,
-        #     packed=False,
-        #     near_plane=0.01,
-        #     far_plane=1e10,
-        #     render_mode=render_mode,
-        #     sh_degree=sh_degree_to_use,
-        #     additional_channels=None,  # [(C,) N, D2] or [(C,) N, K, D2]
-        #     color_weights=None,  # [(C,) N, 3],
-        #     sparse_grad=False,
-        #     absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
-        #     rasterize_mode=self.config.rasterize_mode,
-        #     camera_model=camera_model,
-        #     # set some threshold to disregrad small gaussians for faster rendering.
-        #     # radius_clip=3.0,
-        # )
-
         render, alpha, self.info = rasterization(
             means=means_crop,
             quats=quats_crop,
@@ -1020,7 +898,7 @@ class ShadowSplatModel(SplatfactoModel):
             packed=False,
             near_plane=0.01,
             far_plane=1e10,
-            render_mode=render_mode,
+            render_mode="RGB+ED",
             sh_degree=sh_degree_to_use,
             sparse_grad=False,
             absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
@@ -1030,71 +908,78 @@ class ShadowSplatModel(SplatfactoModel):
             # radius_clip=3.0,
         )
 
-        if light is not None:
-            point_cloud, point_cloud_mask = generate_point_cloud_from_camera_depth(
-                depth=render[:, ..., -1:],
-                K=K,
-                W=W,
-                H=H,
-                viewmat=viewmat,
-                near_plane=0.1,
-                far_plane=1e10,
-                mask=None,
-            )
+        if light is None:
+            light = self.last_training_light
 
-            if self.training:
-                assert light.shape[0] == 1, "Only one light at a time"
-                optimized_light_to_world = self.light_optimizer.apply_to_camera(light)
-            else:
-                optimized_light_to_world = light.camera_to_worlds
+        if self.training and light is not None:
+            self.last_training_light = light
+        
+        #camera.rescale_output_resolution(1 / camera_scale_fac)
 
-            light_camera_to_world = optimized_light_to_world
-            light.rescale_output_resolution(1 / camera_scale_fac)
-            light_viewmat = get_viewmat(light_camera_to_world)
-            light_K = light.get_intrinsics_matrices().cuda()
-            light_W, light_H = int(light.width.item()), int(light.height.item())
-            self.light_last_size = (light_H, light_W)
-            light.rescale_output_resolution(camera_scale_fac)  # type: ignore
+        point_cloud, point_cloud_mask = generate_point_cloud_from_camera_depth(
+            depth=render[:, ..., -1:],
+            K=K,
+            W=W,
+            H=H,
+            viewmat=viewmat,
+            # camera=camera,
+            # camera_indices=torch.tensor([0]),
+            near_plane=0.1,
+            far_plane=1e10,
+            mask=None,
+        )
+        #camera.rescale_output_resolution(camera_scale_fac)  # type: ignore
 
-            if light.camera_type == CameraType.PERSPECTIVE.value:
-                light_model = "pinhole"
-            elif light.camera_type == CameraType.ORTHOPHOTO.value:
-                light_model = "ortho"
-            elif light.camera_type == CameraType.FISHEYE.value:
-                light_model = "fisheye"
-            else:
-                raise ValueError("Unknown light type: %s", light.camera_type)
-
-            # Check for NaN values in the input tensors
-            if torch.isnan(means_crop).any():
-                raise ValueError("NaN values detected in means_crop")
-            if torch.isnan(quats_crop).any():
-                raise ValueError("NaN values detected in quats_crop")
-            if torch.isnan(scales_crop).any():
-                raise ValueError("NaN values detected in scales_crop")
-
-            relit_rgb, shadow_img, light_depth_image, light_variance_image = calculate_relighting_weights_from_point_cloud(
-                means=means_crop,  # [N, 3]
-                quats=quats_crop,  # [N, 4]
-                scales=torch.exp(scales_crop),  # [N, 3]       # NOTE: IMPORTANT! THESE SCALES MUST ALREADY BE POSITIVE
-                opacities=torch.sigmoid(opacities_crop).squeeze(-1),  # [N]       # NOTE: IMPORTANT! THESE OPACITIES MUST ALREADY BE [0, 1]
-                viewmats=light_viewmat,  # [C, 4, 4]
-                Ks=light_K,  # [C, 3, 3]
-                width=light_W,
-                height=light_H,
-                point_cloud=point_cloud,
-                point_cloud_mask=point_cloud_mask,
-                rgb_image=render[:, ..., :3].squeeze(),
-                intensity=torch.exp(self.light_params["intensity"]),
-                ambient=torch.sigmoid(self.light_params["ambient"]),
-                camera_model=light_model,
-            )
-
+        if self.training:
+            assert light.shape[0] == 1, "Only one light at a time"
+            optimized_light_to_world = self.light_optimizer.apply_to_camera(light)
         else:
-            relit_rgb = render[:, ..., :3]
-            shadow_img = None
-            light_depth_image = None
-            light_variance_image = None
+            optimized_light_to_world = light.camera_to_worlds
+
+        light_camera_to_world = optimized_light_to_world
+        light.rescale_output_resolution(1 / camera_scale_fac)
+        light_viewmat = get_viewmat(light_camera_to_world)
+        light_K = light.get_intrinsics_matrices().cuda()
+        light_W, light_H = int(light.width.item()), int(light.height.item())
+        self.light_last_size = (light_H, light_W)
+        light.rescale_output_resolution(camera_scale_fac)  # type: ignore
+
+        if light.camera_type == CameraType.PERSPECTIVE.value:
+            light_model = "pinhole"
+        elif light.camera_type == CameraType.ORTHOPHOTO.value:
+            light_model = "ortho"
+        elif light.camera_type == CameraType.FISHEYE.value:
+            light_model = "fisheye"
+        else:
+            raise ValueError("Unknown light type: %s", light.camera_type)
+
+        # Check for NaN values in the input tensors
+        if torch.isnan(means_crop).any():
+            raise ValueError("NaN values detected in means_crop")
+        if torch.isnan(quats_crop).any():
+            raise ValueError("NaN values detected in quats_crop")
+        if torch.isnan(scales_crop).any():
+            raise ValueError("NaN values detected in scales_crop")
+
+        relit_rgb, shadow_img, light_depth_image, light_variance_image = calculate_relighting_weights_from_point_cloud(
+            means=means_crop,  # [N, 3]
+            quats=quats_crop,  # [N, 4]
+            scales=torch.exp(scales_crop),  # [N, 3]       # NOTE: IMPORTANT! THESE SCALES MUST ALREADY BE POSITIVE
+            opacities=torch.sigmoid(opacities_crop).squeeze(-1),  # [N]       # NOTE: IMPORTANT! THESE OPACITIES MUST ALREADY BE [0, 1]
+            viewmats=light_viewmat,  # [C, 4, 4]
+            Ks=light_K,  # [C, 3, 3]
+            width=light_W,
+            height=light_H,
+            point_cloud=point_cloud,
+            point_cloud_mask=point_cloud_mask,
+            rgb_image=render[:, ..., :3].squeeze(),
+            intensity=torch.exp(self.light_params["intensity"]),
+            ambient=torch.sigmoid(self.light_params["ambient"]),
+            camera_model=light_model,
+        )
+
+        print("Intensity", torch.exp(self.light_params["intensity"]))
+        print("Ambient", torch.sigmoid(self.light_params["ambient"]))
 
         if self.training:
             self.strategy.step_pre_backward(
@@ -1191,13 +1076,13 @@ class ShadowSplatModel(SplatfactoModel):
 
         # ====== ALBEDO TV LOSS ======
         albedo_img = outputs["albedo"]
-        albedo_tv_loss = 0.0 #0.1 * total_variation_loss(albedo_img)
+        albedo_tv_loss = 0.1 * total_variation_loss(albedo_img)
         # ====== ALBEDO TV LOSS ======
 
         # Variance loss #
         light_variance_img = outputs["light_variance"]
         light_depth_img = outputs["light_depth"]
-        light_tv_loss = 0.0 # torch.mean(light_variance_img) #+ total_variation_loss(light_depth_img)
+        light_tv_loss = torch.mean(light_variance_img) + total_variation_loss(light_depth_img)
         # ====== Variance loss ======
 
         # Neighbor color loss #
@@ -1232,7 +1117,7 @@ class ShadowSplatModel(SplatfactoModel):
             scale_reg = torch.tensor(0.0).to(self.device)
 
         loss_dict = {
-            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss + light_tv_loss, #+ neighbor_color_loss,
+            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss + light_tv_loss,
             "scale_reg": scale_reg,
             "albedo_tv_loss": albedo_tv_loss,
             "light_tv_loss": light_tv_loss,
@@ -1293,7 +1178,6 @@ class ShadowSplatModel(SplatfactoModel):
         """
         metrics_dict = super().get_metrics_dict(outputs, batch)
         metrics_dict["intensity"] = torch.exp(self.light_params["intensity"])
-        metrics_dict["ambient"] = torch.exp(self.light_params["ambient"])
-        # metrics_dict["background_ambient"] = torch.exp(self.light_params["background_ambient"])
+        metrics_dict["ambient"] = torch.sigmoid(self.light_params["ambient"])
         self.light_optimizer.get_metrics_dict(metrics_dict)
         return metrics_dict

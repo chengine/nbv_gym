@@ -28,10 +28,12 @@ from torchvision.transforms.functional import gaussian_blur
 
 def generate_point_cloud_from_camera_depth(
     depth: torch.Tensor,
-    K: torch.Tensor,
-    W: int,
-    H: int,
-    viewmat: torch.Tensor,
+    K: Optional[torch.Tensor] = None,
+    W: Optional[int] = None,
+    H: Optional[int] = None,
+    viewmat: Optional[torch.Tensor] = None,
+    camera: Optional[Cameras] = None,
+    camera_indices: Optional[torch.Tensor] = None,
     near_plane: float = 0.01,
     far_plane: float = 1e10,
     mask: Optional[torch.Tensor] = None,
@@ -46,31 +48,36 @@ def generate_point_cloud_from_camera_depth(
     elif depth.ndim == 3:
         depth = depth.squeeze(-1)
     
-    if K.ndim == 3:
-        K = K.squeeze(0)
-    if viewmat.ndim == 3:
-        viewmat = viewmat.squeeze(0)
+    if K is not None:
+        if K.ndim == 3:
+            K = K.squeeze(0)
+        if viewmat.ndim == 3:
+            viewmat = viewmat.squeeze(0)
 
-    # raybundle = camera.generate_rays(camera_indices)
-    # point = raybundle.origins + raybundle.directions * depth[..., None]
-    # view_direction = raybundle.directions
+    if camera is not None and camera_indices is not None:
+        raybundle = camera.generate_rays(camera_indices)
+        points = raybundle.origins + raybundle.directions * depth[..., None]
+        view_direction = raybundle.directions
 
     # Project depth to 3D using K matrix
     # unnormalized pixel coordinates
-    u_coords = torch.arange(W, device=depth.device)
-    v_coords = torch.arange(H, device=depth.device)
+    elif K is not None and viewmat is not None and W is not None and H is not None:
+        u_coords = torch.arange(W, device=depth.device)
+        v_coords = torch.arange(H, device=depth.device)
 
-    # meshgrid
-    U_grid, V_grid = torch.meshgrid(u_coords, v_coords, indexing='xy')
+        # meshgrid
+        U_grid, V_grid = torch.meshgrid(u_coords, v_coords, indexing='xy')
 
-    # transformed points in camera frame
-    # [u, v, 1] = [[f_x, 0, c_x], [0, f_y, c_y], [0, 0, 1]] @ [x/z, y/z, 1]
-    cam_pts_x = (U_grid - K[0, 2]) * depth / K[0, 0]
-    cam_pts_y = (V_grid - K[1, 2]) * depth / K[1, 1]
-    points = torch.stack((cam_pts_x, cam_pts_y, depth), axis=-1)
+        # transformed points in camera frame
+        # [u, v, 1] = [[f_x, 0, c_x], [0, f_y, c_y], [0, 0, 1]] @ [x/z, y/z, 1]
+        cam_pts_x = (U_grid - K[0, 2]) * depth / K[0, 0]
+        cam_pts_y = (V_grid - K[1, 2]) * depth / K[1, 1]
+        points = torch.stack((cam_pts_x, cam_pts_y, depth), axis=-1)
 
-    c2w = torch.linalg.inv(viewmat)
-    points = points @ c2w[:3, :3].T + c2w[:3, 3]
+        c2w = torch.linalg.inv(viewmat)
+        points = points @ c2w[:3, :3].T + c2w[:3, 3]
+    else:
+        raise ValueError("Either camera and camera_indices or K and viewmat must be provided")
 
     if mask is not None:
         points = points[mask]
@@ -736,15 +743,15 @@ def chebyshev_weighting(
     if baseline is not None:
 
         # Does softmax weighting
-        # weights_ambient = torch.stack([weights.squeeze(), torch.ones_like(weights.squeeze()) * baseline], dim=-1)
-        # softmax_weights = torch.softmax( weights_ambient, dim=-1)
-        # weights = torch.sum(softmax_weights * weights_ambient, dim=-1)
+        weights_ambient = torch.stack([weights.squeeze(), torch.ones_like(weights.squeeze()) * baseline], dim=-1)
+        softmax_weights = torch.softmax( weights_ambient, dim=-1)
+        weights = torch.sum(softmax_weights * weights_ambient, dim=-1)
 
         # Does linear mixing
         # weights = (1 - baseline) * weights + baseline
 
         # Does hard cutoff
-        weights = torch.max(weights, torch.ones_like(weights) * baseline)
+        # weights = torch.max(weights, torch.ones_like(weights) * baseline)
 
     return weights
 
@@ -845,10 +852,10 @@ def calculate_relighting_weights_from_point_cloud(
         variance_image = depth_sqr_image - depth_image**2
 
     # Gaussian blur both the depth and variance images
-    depth_image = gaussian_blur(depth_image[None], kernel_size=49, sigma=3.)
-    variance_image = gaussian_blur(variance_image[None], kernel_size=49, sigma=3.)
+    depth_image = gaussian_blur(depth_image[None], kernel_size=5, sigma=1.)
+    variance_image = gaussian_blur(variance_image[None], kernel_size=5, sigma=1.)
     depth_image = depth_image.squeeze()
-    variance_image = variance_image.squeeze().clamp(min=5e-3)
+    variance_image = variance_image.squeeze().clamp(min=1e-3)
 
     assert torch.isnan(depth_image).any() == False, "Depth image is nan"
     assert torch.isnan(variance_image).any() == False, "Variance image is nan"
@@ -910,10 +917,18 @@ def calculate_relighting_weights_from_point_cloud(
 
     # We're going to make the assumption that if the pixel is not in the mask, we don't do anything to it.
     # TODO: Implement a flag that allows us to treat the pixels as dark if they're not in the mask.
-    rgb_image[point_cloud_mask][gaussian_ids] = rgb_image[point_cloud_mask][gaussian_ids] * weights.unsqueeze(-1) * intensity
+
+    sel = point_cloud_mask.view(-1).nonzero(as_tuple=True)[0]  # [K]
+
+    rgb_image = rgb_image.clone()
+    rgb_flat = rgb_image.reshape(-1, 3)
+    rgb_flat[sel[gaussian_ids]] = rgb_flat[sel[gaussian_ids]] * weights.unsqueeze(-1) * intensity
+    rgb_image = rgb_flat.reshape(rgb_image.shape)
 
     shadow_image = torch.zeros(rgb_image.shape[0], rgb_image.shape[1], device=rgb_image.device)
-    shadow_image[point_cloud_mask][gaussian_ids] = 1. - weights
+    shadow_flat = shadow_image.reshape(-1)
+    shadow_flat[sel[gaussian_ids]] = 1. - weights
+    shadow_image = shadow_flat.reshape(shadow_image.shape)
 
     return rgb_image, shadow_image, depth_image, variance_image
 

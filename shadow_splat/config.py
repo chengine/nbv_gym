@@ -115,7 +115,7 @@ lumen = MethodSpecification(
 )
 
 shadow_splat = MethodSpecification(
-    TrainerConfig(
+    ShadowSplatTrainerConfig(
         method_name="shadow-splat",
         steps_per_eval_image=100,
         steps_per_eval_batch=0,
