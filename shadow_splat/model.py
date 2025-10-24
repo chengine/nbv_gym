@@ -978,9 +978,6 @@ class ShadowSplatModel(SplatfactoModel):
             camera_model=light_model,
         )
 
-        print("Intensity", torch.exp(self.light_params["intensity"]))
-        print("Ambient", torch.sigmoid(self.light_params["ambient"]))
-
         if self.training:
             self.strategy.step_pre_backward(
                 self.gauss_params, self.optimizers, self.strategy_state, self.step, self.info
@@ -991,24 +988,25 @@ class ShadowSplatModel(SplatfactoModel):
         albedo_rgb = render[:, ..., :3] + (1 - alpha) * background
         albedo_rgb = torch.clamp(albedo_rgb, 0.0, 1.0)
 
-        # Apply tone mapping and gamma correction
+        # # Apply tone mapping and gamma correction
         relit_rgb = (
             relit_rgb + (1 - alpha) * background
         )  # NOTE: Should we be mixing with the background?
+        relit_rgb = torch.clamp(relit_rgb, min=0.0, max=1.0)
 
-        if self.config.tone_mapping == "reinhard":
-            relit_rgb = relit_rgb / (relit_rgb + 1.0)
-        # Does luminance tonemapping
-        elif self.config.tone_mapping == "luminance":
-            luminance = (
-                0.2126 * relit_rgb[..., 0]
-                + 0.7152 * relit_rgb[..., 1]
-                + 0.0722 * relit_rgb[..., 2]
-            )
-            relit_rgb = relit_rgb / (luminance + 1.0)[..., None]
-        # Does linear tonemapping
-        elif self.config.tone_mapping == "linear":
-            relit_rgb = torch.clamp(relit_rgb, min=0.0, max=1.0)
+        # if self.config.tone_mapping == "reinhard":
+        #     relit_rgb = relit_rgb / (relit_rgb + 1.0)
+        # # Does luminance tonemapping
+        # elif self.config.tone_mapping == "luminance":
+        #     luminance = (
+        #         0.2126 * relit_rgb[..., 0]
+        #         + 0.7152 * relit_rgb[..., 1]
+        #         + 0.0722 * relit_rgb[..., 2]
+        #     )
+        #     relit_rgb = relit_rgb / (luminance + 1.0)[..., None]
+        # # Does linear tonemapping
+        # elif self.config.tone_mapping == "linear":
+        #     relit_rgb = torch.clamp(relit_rgb, min=0.0, max=1.0)
 
         # Does gamma correction # NOTE: leads to nans during training
         # relit_rgb = relit_rgb ** (1.0 / self.config.gamma_correction)
@@ -1051,8 +1049,8 @@ class ShadowSplatModel(SplatfactoModel):
    
         #     self.neighbor_color_loss = torch.mean((1 - irradiance_fraction)[low_visibility_mask][:, None, None] *(neighbor_colors - mean_neighbor_colors[:, None, :])**2)
         return {
-            "rgb": relit_rgb.squeeze(0),  # type: ignore
-            "albedo": albedo_rgb.squeeze(0),  # type: ignore
+            "rgb": albedo_rgb.squeeze(0),  # type: ignore
+            "relight": relit_rgb.squeeze(0),  # type: ignore
             "depth": depth_im,  # type: ignore
             "accumulation": alpha.squeeze(0),  # type: ignore
             "background": background,  # type: ignore
@@ -1073,21 +1071,6 @@ class ShadowSplatModel(SplatfactoModel):
             self.get_gt_img(batch["image"]), outputs["background"]
         )
         pred_img = outputs["rgb"]
-
-        # ====== ALBEDO TV LOSS ======
-        albedo_img = outputs["albedo"]
-        albedo_tv_loss = 0.1 * total_variation_loss(albedo_img)
-        # ====== ALBEDO TV LOSS ======
-
-        # Variance loss #
-        light_variance_img = outputs["light_variance"]
-        light_depth_img = outputs["light_depth"]
-        light_tv_loss = torch.mean(light_variance_img) + total_variation_loss(light_depth_img)
-        # ====== Variance loss ======
-
-        # Neighbor color loss #
-        # neighbor_color_loss = 0.1*self.neighbor_color_loss
-        # ====== Neighbor color loss ======
 
         # Set masked part of both ground-truth and rendered image to black.
         # This is a little bit sketchy for the SSIM loss.
@@ -1117,12 +1100,9 @@ class ShadowSplatModel(SplatfactoModel):
             scale_reg = torch.tensor(0.0).to(self.device)
 
         loss_dict = {
-            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss + light_tv_loss,
+            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss,
             "scale_reg": scale_reg,
-            "albedo_tv_loss": albedo_tv_loss,
-            "light_tv_loss": light_tv_loss,
-            # "neighbor_color_loss": neighbor_color_loss,
-        }
+            }
 
         # Losses for mcmc
         if self.config.strategy == "mcmc":
