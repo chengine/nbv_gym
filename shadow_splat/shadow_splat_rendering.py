@@ -15,6 +15,11 @@ from gsplat.cuda._wrapper import (
     rasterize_to_pixels_2dgs,
     spherical_harmonics,
 )
+
+from gsplat.cuda._torch_impl import (
+    _fully_fused_projection
+)
+
 from gsplat.distributed import (
     all_gather_int32,
     all_gather_tensor_list,
@@ -755,6 +760,75 @@ def chebyshev_weighting(
 
     return weights
 
+@torch.no_grad()
+def project_points_packed(
+    points_world: torch.Tensor,   # (N, 3)
+    viewmats: torch.Tensor,       # (C, 4, 4), OpenCV-style (camera looks +Z)
+    Ks: torch.Tensor,             # (C, 3, 3)
+    width: int,
+    height: int,
+    near: float = 1e-6,
+    far: float = float("inf"),
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Vectorized point projection akin to fully_fused_projection, but for points only.
+
+    Returns:
+        means2d:      (M, 2) pixel coords (u, v) of valid projections
+        depths:       (M,)   camera-space z (> near)
+        gaussian_ids: (M,)   indices into points_world for those valid projections
+
+    Notes:
+      • Assumes OpenCV convention for viewmats (world→camera, +Z forward).
+      • If you have a single camera, pass viewmats[None, ...] and Ks[None, ...].
+      • Multiple cameras: the same point can appear multiple times (once per camera).
+    """
+    assert points_world.ndim == 2 and points_world.shape[1] == 3, "points_world must be (N,3)"
+    assert viewmats.ndim == 3 and viewmats.shape[-2:] == (4, 4), "viewmats must be (C,4,4)"
+    assert Ks.ndim == 3 and Ks.shape[-2:] == (3, 3), "Ks must be (C,3,3)"
+    C = viewmats.shape[0]
+    N = points_world.shape[0]
+
+    device = points_world.device
+    dtype  = points_world.dtype
+
+    # Homogeneous transform world -> camera for all cameras
+    ones   = torch.ones(N, 1, device=device, dtype=dtype)          # (N,1)
+    Xw_h   = torch.cat([points_world, ones], dim=-1)                # (N,4)
+    # cam_h: (C,N,4)  (broadcasted batch matmul)
+    cam_h  = torch.einsum("cab,nb->cna", viewmats.to(device, dtype), Xw_h)
+    Xc     = cam_h[..., :3]                                         # (C,N,3)
+    z      = Xc[..., 2]                                             # (C,N)
+
+    # Depth validity
+    z_ok   = (z > near) & (z < far)
+
+    # Project: p = K @ Xc  (batched per camera), then divide by z
+    # P: (C,N,3)
+    P      = torch.einsum("cab,cnb->cna", Ks.to(device, dtype), Xc)
+    z_safe = z.clamp_min(near)
+    u      = P[..., 0] / z_safe
+    v      = P[..., 1] / z_safe
+
+    # Finite + image bounds
+    finite = torch.isfinite(u) & torch.isfinite(v) & torch.isfinite(z)
+    in_w   = (u >= 0) & (u < (width  - 1e-6))
+    in_h   = (v >= 0) & (v < (height - 1e-6))
+    valid  = z_ok & finite & in_w & in_h                             # (C,N)
+
+    if not valid.any():
+        empty2 = torch.empty(0, 2, device=device, dtype=dtype)
+        empty1 = torch.empty(0,     device=device, dtype=dtype)
+        return empty2, empty1, empty1  # means2d, depths, gaussian_ids
+
+    # Gather packed outputs
+    cam_ids, point_ids = valid.nonzero(as_tuple=True)               # (M,), (M,)
+    means2d = torch.stack([u[cam_ids, point_ids], v[cam_ids, point_ids]], dim=-1).contiguous()  # (M,2)
+    depths  = z[cam_ids, point_ids].contiguous()                                                         # (M,)
+    gaussian_ids = point_ids.contiguous()                                                                 # (M,)
+
+    return means2d, depths, gaussian_ids
+
 def calculate_relighting_weights_from_point_cloud(
     means: Tensor,  # [N, 3]
     quats: Tensor,  # [N, 4]
@@ -766,8 +840,6 @@ def calculate_relighting_weights_from_point_cloud(
     height: int,
     point_cloud: Tensor,
     point_cloud_mask: Tensor,
-    rgb_image: Tensor,
-    intensity: List[float],
     ambient: Optional[float] = None,
     near_plane: float = 0.01,
     far_plane: float = 1e10,
@@ -864,44 +936,71 @@ def calculate_relighting_weights_from_point_cloud(
     # Project Gaussians to 2D. Directly pass in {quats, scales} is faster than precomputing covars.
     means = point_cloud[..., :3]
 
+    # Get rid of Nans
+    means = means[~torch.isnan(means).any(dim=-1)]
+    means = means[~torch.isinf(means).any(dim=-1)]
+
     # Initialize quats to be the identity quaternion
-    quats = torch.zeros(means.shape[0], 4, device=means.device)
-    quats[..., -1] = 1.0
+    # quats = torch.zeros(means.shape[0], 4, device=means.device)
+    # quats[..., -1] = 1.0
 
-    # Initialize scales to be some small scale
-    scales = torch.ones_like(means[..., :3]) * 1e-3
+    # # Initialize scales to be some small scale
+    # scales = torch.ones_like(means[..., :3]) * 1e-2
 
-    proj_results = fully_fused_projection(
+    covars = torch.randn(means.shape[0], 3, 3, device=means.device)
+    covars = covars @ covars.transpose(-2, -1)
+
+    # Extract upper triangular part of covars, converting N x 3 x 3 to N x 6
+    # i, j = torch.triu_indices(3, 3)  # order: (0,0),(0,1),(0,2),(1,1),(1,2),(2,2)
+    # covars = covars[:, i, j]
+
+    # proj_results = fully_fused_projection(
+    #     means,
+    #     covars,
+    #     None,
+    #     None,
+    #     viewmats,
+    #     Ks,
+    #     width,
+    #     height,
+    #     packed=True,
+    #     near_plane=0.01,
+    #     far_plane=1e10,
+    #     camera_model=camera_model,
+    # )
+
+    # # The results are packed into shape [nnz, ...]. All elements are valid.
+    # (   _,
+    #     _,
+    #     gaussian_ids,
+    #     radii,
+    #     means2d,
+    #     depths,
+    #     _,
+    #     _,
+    # ) = proj_results
+
+    # assert (radii > 0).all(), "Radii are zero"
+
+    radii, means2d, depths, conics, compensations = _fully_fused_projection(
         means,
-        None,
-        quats,
-        scales,
+        covars,
         viewmats,
         Ks,
         width,
         height,
-        eps2d=eps2d,
-        packed=True,
-        near_plane=near_plane,
-        far_plane=far_plane,
-        radius_clip=radius_clip,
-        sparse_grad=sparse_grad,
-        calc_compensations=(rasterize_mode == "antialiased"),
+        near_plane=0.01,
+        far_plane=1e10,
         camera_model=camera_model,
     )
+    radii = radii.squeeze(0)
+    means2d = means2d.squeeze(0)
+    depths = depths.squeeze(0)
 
-    # The results are packed into shape [nnz, ...]. All elements are valid.
-    (   _,
-        _,
-        gaussian_ids,
-        radii,
-        means2d,
-        depths,
-        _,
-        _,
-    ) = proj_results
+    valid = (radii[:, 0] > 0) & (radii[:, 1] > 0)
 
-    assert (radii > 0).all(), "Radii are zero"
+    means2d = means2d[valid]
+    depths = depths[valid]
 
     # This represents the fraction of light that is received by each gaussian in the frustum
     weights = chebyshev_weighting(
@@ -917,20 +1016,18 @@ def calculate_relighting_weights_from_point_cloud(
 
     # We're going to make the assumption that if the pixel is not in the mask, we don't do anything to it.
     # TODO: Implement a flag that allows us to treat the pixels as dark if they're not in the mask.
-
     sel = point_cloud_mask.view(-1).nonzero(as_tuple=True)[0]  # [K]
 
-    rgb_image = rgb_image.clone()
-    rgb_flat = rgb_image.reshape(-1, 3)
-    rgb_flat[sel[gaussian_ids]] = rgb_flat[sel[gaussian_ids]] * weights.unsqueeze(-1) * intensity
-    rgb_image = rgb_flat.reshape(rgb_image.shape)
+    shadow_image = torch.zeros_like(point_cloud_mask).to(torch.float32)
 
-    shadow_image = torch.zeros(rgb_image.shape[0], rgb_image.shape[1], device=rgb_image.device)
-    shadow_flat = shadow_image.reshape(-1)
-    shadow_flat[sel[gaussian_ids]] = 1. - weights
-    shadow_image = shadow_flat.reshape(shadow_image.shape)
+    if len(sel) > 0:
+        shadow_flat = shadow_image.reshape(-1)
+        shadow_flat[sel[valid]] = 1. - weights
+        shadow_image = shadow_flat.reshape(point_cloud_mask.shape)
 
-    return rgb_image, shadow_image, depth_image, variance_image
+    # shadow_image = torch.zeros_like(depth_image)
+    
+    return shadow_image, depth_image, variance_image
 
 def calculate_relighting_weights(
     means: Tensor,  # [N, 3]
