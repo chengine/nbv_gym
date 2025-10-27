@@ -78,6 +78,10 @@ shadow_splat = MethodSpecification(
                     lr_final=5e-7, max_steps=30000, warmup_steps=1000, lr_pre_warmup=0
                 ),
             },
+            "coverage_counts": {
+                "optimizer": AdamOptimizerConfig(lr=0.0, eps=1e-15),
+                "scheduler": None,
+            },
             "light_opt": {
             "optimizer": AdamOptimizerConfig(lr=1e-4, eps=1e-15),
             "scheduler": ExponentialDecaySchedulerConfig(
