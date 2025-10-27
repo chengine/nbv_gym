@@ -1,0 +1,8 @@
+{
+    "include": ["."],
+    "extraPaths": [
+      "/home/addai/NeRF/nerfstudio",
+      "/home/addai/NeRF/2dgs-nerfstudio",
+      "/home/addai/NeRF/gsplat"
+    ]
+  }

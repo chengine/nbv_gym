@@ -28,15 +28,14 @@ from gsplat.distributed import (
 )
 from gsplat.utils import depth_to_normal, get_projection_matrix
 
-from gsplat.cuda._torch_impl import (
-    _fully_fused_projection
-)
+from gsplat.cuda._torch_impl import _fully_fused_projection
 
 from nerfstudio.cameras.cameras import Cameras, CameraType
 import matplotlib.pyplot as plt
 from torchvision.transforms.functional import gaussian_blur
 from shadow_splat.util.coverage import *
 from shadow_splat.util.sampling import *
+
 
 def generate_point_cloud_from_camera_depth(
     depth: torch.Tensor,
@@ -53,13 +52,12 @@ def generate_point_cloud_from_camera_depth(
     bounding_box_min: Optional[torch.Tensor] = None,
     bounding_box_max: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    
     if depth.ndim == 4:
         depth = depth.squeeze(0)
         depth = depth.squeeze(-1)
     elif depth.ndim == 3:
         depth = depth.squeeze(-1)
-    
+
     if K is not None:
         if K.ndim == 3:
             K = K.squeeze(0)
@@ -78,7 +76,7 @@ def generate_point_cloud_from_camera_depth(
         v_coords = torch.arange(H, device=depth.device)
 
         # meshgrid
-        U_grid, V_grid = torch.meshgrid(u_coords, v_coords, indexing='xy')
+        U_grid, V_grid = torch.meshgrid(u_coords, v_coords, indexing="xy")
 
         # transformed points in camera frame
         # [u, v, 1] = [[f_x, 0, c_x], [0, f_y, c_y], [0, 0, 1]] @ [x/z, y/z, 1]
@@ -112,6 +110,7 @@ def generate_point_cloud_from_camera_depth(
     # The output will ostensibly be N x 3 while the depth and rgb is H x w x C, so we need to mask in order to know which values
     # in the rgb image to touch.
     return points, mask
+
 
 def logistic_weighting(
     means2d: Tensor,  # [N, 2] where N is the number of gaussians in the frustum
@@ -178,6 +177,7 @@ def logistic_weighting(
 
     return sigmoid_weights
 
+
 # one-tailed chebyshev weighting
 def chebyshev_weighting(
     means2d: Tensor,  # [N, 2] where N is the number of gaussians in the frustum
@@ -207,13 +207,14 @@ def chebyshev_weighting(
     variance_per_gaussian = variance[projected_pixel_ids]
 
     depth_diff = depths - depth_image_flattened[projected_pixel_ids]
-    weights = variance_per_gaussian / (variance_per_gaussian + torch.relu(depth_diff)**2)
+    weights = variance_per_gaussian / (variance_per_gaussian + torch.relu(depth_diff) ** 2)
 
     if baseline is not None:
-
         # Does softmax weighting
-        weights_ambient = torch.stack([weights.squeeze(), torch.ones_like(weights.squeeze()) * baseline], dim=-1)
-        softmax_weights = torch.softmax( weights_ambient, dim=-1)
+        weights_ambient = torch.stack(
+            [weights.squeeze(), torch.ones_like(weights.squeeze()) * baseline], dim=-1
+        )
+        softmax_weights = torch.softmax(weights_ambient, dim=-1)
         weights = torch.sum(softmax_weights * weights_ambient, dim=-1)
 
         # Does linear mixing
@@ -224,11 +225,12 @@ def chebyshev_weighting(
 
     return weights
 
+
 @torch.no_grad()
 def project_points_packed(
-    points_world: torch.Tensor,   # (N, 3)
-    viewmats: torch.Tensor,       # (C, 4, 4), OpenCV-style (camera looks +Z)
-    Ks: torch.Tensor,             # (C, 3, 3)
+    points_world: torch.Tensor,  # (N, 3)
+    viewmats: torch.Tensor,  # (C, 4, 4), OpenCV-style (camera looks +Z)
+    Ks: torch.Tensor,  # (C, 3, 3)
     width: int,
     height: int,
     near: float = 1e-6,
@@ -254,44 +256,47 @@ def project_points_packed(
     N = points_world.shape[0]
 
     device = points_world.device
-    dtype  = points_world.dtype
+    dtype = points_world.dtype
 
     # Homogeneous transform world -> camera for all cameras
-    ones   = torch.ones(N, 1, device=device, dtype=dtype)          # (N,1)
-    Xw_h   = torch.cat([points_world, ones], dim=-1)                # (N,4)
+    ones = torch.ones(N, 1, device=device, dtype=dtype)  # (N,1)
+    Xw_h = torch.cat([points_world, ones], dim=-1)  # (N,4)
     # cam_h: (C,N,4)  (broadcasted batch matmul)
-    cam_h  = torch.einsum("cab,nb->cna", viewmats.to(device, dtype), Xw_h)
-    Xc     = cam_h[..., :3]                                         # (C,N,3)
-    z      = Xc[..., 2]                                             # (C,N)
+    cam_h = torch.einsum("cab,nb->cna", viewmats.to(device, dtype), Xw_h)
+    Xc = cam_h[..., :3]  # (C,N,3)
+    z = Xc[..., 2]  # (C,N)
 
     # Depth validity
-    z_ok   = (z > near) & (z < far)
+    z_ok = (z > near) & (z < far)
 
     # Project: p = K @ Xc  (batched per camera), then divide by z
     # P: (C,N,3)
-    P      = torch.einsum("cab,cnb->cna", Ks.to(device, dtype), Xc)
+    P = torch.einsum("cab,cnb->cna", Ks.to(device, dtype), Xc)
     z_safe = z.clamp_min(near)
-    u      = P[..., 0] / z_safe
-    v      = P[..., 1] / z_safe
+    u = P[..., 0] / z_safe
+    v = P[..., 1] / z_safe
 
     # Finite + image bounds
     finite = torch.isfinite(u) & torch.isfinite(v) & torch.isfinite(z)
-    in_w   = (u >= 0) & (u < (width  - 1e-6))
-    in_h   = (v >= 0) & (v < (height - 1e-6))
-    valid  = z_ok & finite & in_w & in_h                             # (C,N)
+    in_w = (u >= 0) & (u < (width - 1e-6))
+    in_h = (v >= 0) & (v < (height - 1e-6))
+    valid = z_ok & finite & in_w & in_h  # (C,N)
 
     if not valid.any():
         empty2 = torch.empty(0, 2, device=device, dtype=dtype)
-        empty1 = torch.empty(0,     device=device, dtype=dtype)
+        empty1 = torch.empty(0, device=device, dtype=dtype)
         return empty2, empty1, empty1  # means2d, depths, gaussian_ids
 
     # Gather packed outputs
-    cam_ids, point_ids = valid.nonzero(as_tuple=True)               # (M,), (M,)
-    means2d = torch.stack([u[cam_ids, point_ids], v[cam_ids, point_ids]], dim=-1).contiguous()  # (M,2)
-    depths  = z[cam_ids, point_ids].contiguous()                                                         # (M,)
-    gaussian_ids = point_ids.contiguous()                                                                 # (M,)
+    cam_ids, point_ids = valid.nonzero(as_tuple=True)  # (M,), (M,)
+    means2d = torch.stack(
+        [u[cam_ids, point_ids], v[cam_ids, point_ids]], dim=-1
+    ).contiguous()  # (M,2)
+    depths = z[cam_ids, point_ids].contiguous()  # (M,)
+    gaussian_ids = point_ids.contiguous()  # (M,)
 
     return means2d, depths, gaussian_ids
+
 
 def calculate_relighting_weights_from_point_cloud(
     means: Tensor,  # [N, 3]
@@ -388,8 +393,8 @@ def calculate_relighting_weights_from_point_cloud(
         variance_image = depth_sqr_image - depth_image**2
 
     # Gaussian blur both the depth and variance images
-    depth_image = gaussian_blur(depth_image[None], kernel_size=5, sigma=1.)
-    variance_image = gaussian_blur(variance_image[None], kernel_size=5, sigma=1.)
+    depth_image = gaussian_blur(depth_image[None], kernel_size=5, sigma=1.0)
+    variance_image = gaussian_blur(variance_image[None], kernel_size=5, sigma=1.0)
     depth_image = depth_image.squeeze()
     variance_image = variance_image.squeeze().clamp(min=1e-3)
 
@@ -466,7 +471,7 @@ def calculate_relighting_weights_from_point_cloud(
         depths,  # [N] where N is the number of gaussians in the frustum
         depth_image,  # [H, W]
         variance_image,  # [H, W]
-        baseline=ambient
+        baseline=ambient,
     )
 
     assert not torch.isnan(weights).any(), "Weights are nan"
@@ -480,12 +485,13 @@ def calculate_relighting_weights_from_point_cloud(
 
     if len(sel) > 0:
         shadow_flat = shadow_image.reshape(-1)
-        shadow_flat[sel[valid]] = 1. - weights
+        shadow_flat[sel[valid]] = 1.0 - weights
         shadow_image = shadow_flat.reshape(point_cloud_mask.shape)
 
     # shadow_image = torch.zeros_like(depth_image)
-    
+
     return shadow_image, depth_image, variance_image
+
 
 def calculate_relighting_weights(
     means: Tensor,  # [N, 3]
@@ -583,8 +589,8 @@ def calculate_relighting_weights(
         variance_image = depth_sqr_image - depth_image**2
 
     # Gaussian blur both the depth and variance images
-    depth_image = gaussian_blur(depth_image[None], kernel_size=49, sigma=3.)
-    variance_image = gaussian_blur(variance_image[None], kernel_size=49, sigma=3.)
+    depth_image = gaussian_blur(depth_image[None], kernel_size=49, sigma=3.0)
+    variance_image = gaussian_blur(variance_image[None], kernel_size=49, sigma=3.0)
     depth_image = depth_image.squeeze()
     variance_image = variance_image.squeeze().clamp(min=5e-3)
 
@@ -611,7 +617,9 @@ def calculate_relighting_weights(
     assert torch.isnan(depth_image).any() == False, "Depth image is nan"
     assert torch.isnan(variance_image).any() == False, "Variance image is nan"
 
-    extreme_points, interior_points = conics_to_semi_major_axis_points_analytic(means2d, conics, num_interior=50)
+    extreme_points, interior_points = conics_to_semi_major_axis_points_analytic(
+        means2d, conics, num_interior=50
+    )
     sample_points = torch.cat([extreme_points, interior_points], dim=-2)
 
     num_points = sample_points.shape[-2]
@@ -624,7 +632,7 @@ def calculate_relighting_weights(
         sample_depths,  # [N] where N is the number of gaussians in the frustum
         depth_image,  # [H, W]
         variance_image,  # [H, W]
-        baseline=ambient
+        baseline=ambient,
     )
 
     weights = weights.reshape(means2d.shape[0], num_points)
@@ -662,6 +670,7 @@ def calculate_relighting_weights(
     # irradiance[~gaussian_ids] += intensity[0]
 
     return irradiance, irradiance_fraction, depth_image, variance_image
+
 
 # Renders the accumulated or expected depth (first moment) and the accumulated
 # or expected depth squared (second moment). Will add higher moments as necessary.
@@ -1137,6 +1146,7 @@ def moment_rasterization(
     render_moments = render_moments / render_alphas.clamp(min=1e-10)
 
     return render_moments, render_alphas, meta
+
 
 # Regular rasterization, but allows to simultaneously render additional channels
 # TODO: Do we want these additional channels to be view dependent?
@@ -1762,6 +1772,7 @@ def augmented_rasterization(
 
     return render_colors, render_alphas, meta
 
+
 # Renders the accumulated or expected depth (first moment) and the accumulated
 # or expected variance (second moment) for 2DGS. Will add higher moments as necessary.
 def moment_rasterization_2dgs(
@@ -2022,6 +2033,7 @@ def moment_rasterization_2dgs(
         render_median,
         meta,
     )
+
 
 # Regular rasterization, but allows to simultaneously render additional channels for 2DGS
 # TODO: Do we want these additional channels to be view dependent?
@@ -2440,6 +2452,7 @@ def augmented_rasterization_2dgs(
         meta,
     )
 
+
 def rasterization_with_coverage(
     means: Tensor,  # [..., N, 3]
     quats: Tensor,  # [..., N, 4]
@@ -2710,12 +2723,8 @@ def rasterization_with_coverage(
 
     if sh_degree is None:
         # treat colors as post-activation values, should be in shape [..., N, D] or [..., C, N, D]
-        assert (
-            colors.dim() == num_batch_dims + 2
-            and colors.shape[:-1] == batch_dims + (N,)
-        ) or (
-            colors.dim() == num_batch_dims + 3
-            and colors.shape[:-1] == batch_dims + (C, N)
+        assert (colors.dim() == num_batch_dims + 2 and colors.shape[:-1] == batch_dims + (N,)) or (
+            colors.dim() == num_batch_dims + 3 and colors.shape[:-1] == batch_dims + (C, N)
         ), colors.shape
         if distributed:
             assert (
@@ -2749,18 +2758,12 @@ def rasterization_with_coverage(
         or ftheta_coeffs is not None
         or rolling_shutter != RollingShutterType.GLOBAL
     ):
-        assert (
-            with_ut
-        ), "Distortion and rolling shutter are only supported with `with_ut=True`."
+        assert with_ut, "Distortion and rolling shutter are only supported with `with_ut=True`."
 
     if rolling_shutter != RollingShutterType.GLOBAL:
-        assert (
-            viewmats_rs is not None
-        ), "Rolling shutter requires to provide viewmats_rs."
+        assert viewmats_rs is not None, "Rolling shutter requires to provide viewmats_rs."
     else:
-        assert (
-            viewmats_rs is None
-        ), "viewmats_rs should be None for global rolling shutter."
+        assert viewmats_rs is None, "viewmats_rs should be None for global rolling shutter."
 
     if with_ut or with_eval3d:
         assert (quats is not None) and (
@@ -2855,9 +2858,7 @@ def rasterization_with_coverage(
     else:
         # The results are with shape [..., C, N, ...]. Only the elements with radii > 0 are valid.
         radii, means2d, depths, conics, compensations = proj_results
-        opacities = torch.broadcast_to(
-            opacities[..., None, :], batch_dims + (C, N)
-        )  # [..., C, N]
+        opacities = torch.broadcast_to(opacities[..., None, :], batch_dims + (C, N))  # [..., C, N]
         batch_ids, camera_ids, gaussian_ids = None, None, None
         image_ids = None
 
@@ -2892,9 +2893,7 @@ def rasterization_with_coverage(
         else:
             if colors.dim() == num_batch_dims + 2:
                 # Turn [..., N, D] into [..., C, N, D]
-                colors = torch.broadcast_to(
-                    colors[..., None, :, :], batch_dims + (C, N, -1)
-                )
+                colors = torch.broadcast_to(colors[..., None, :, :], batch_dims + (C, N, -1))
             else:
                 # colors is already [..., C, N, D]
                 pass
@@ -2924,27 +2923,24 @@ def rasterization_with_coverage(
             masks = (radii > 0).all(dim=-1)  # [..., C, N]
             if colors.dim() == num_batch_dims + 3:
                 # Turn [..., N, K, 3] into [..., C, N, K, 3]
-                shs = torch.broadcast_to(
-                    colors[..., None, :, :, :], batch_dims + (C, N, -1, 3)
-                )
+                shs = torch.broadcast_to(colors[..., None, :, :, :], batch_dims + (C, N, -1, 3))
             else:
                 # colors is already [..., C, N, K, 3]
                 shs = colors
-            colors = spherical_harmonics(
-                sh_degree, dirs, shs, masks=masks
-            )  # [..., C, N, 3]
+            colors = spherical_harmonics(sh_degree, dirs, shs, masks=masks)  # [..., C, N, 3]
         # make it apple-to-apple with Inria's CUDA Backend.
         colors = torch.clamp_min(colors + 0.5, 0.0)
 
-    coverage_metric = compute_coverage_per_gaussian(
-        coverage_counts=coverage_counts,
-        bin_dirs=bin_dirs,
-        masks=masks.squeeze(0),
-        inference_dirs=dirs.squeeze(0),
-    )
+    # NOTE: disable coverage for debuggin
+    # coverage_metric = compute_coverage_per_gaussian(
+    #     coverage_counts=coverage_counts,
+    #     bin_dirs=bin_dirs,
+    #     masks=masks.squeeze(0),
+    #     inference_dirs=dirs.squeeze(0),
+    # )
 
-    # Concatenate coverage_metric with colors
-    colors = torch.cat((colors, coverage_metric[None, ..., None]), dim=-1)
+    # # Concatenate coverage_metric with colors
+    # colors = torch.cat((colors, coverage_metric[None, ..., None]), dim=-1)
 
     # If in distributed mode, we need to scatter the GSs to the destination ranks, based
     # on which cameras they are visible to, which we already figured out in the projection

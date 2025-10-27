@@ -36,7 +36,7 @@ from shadow_splat.shadow_splat_rendering import (
     rasterization_with_coverage,
 )
 
-torch.autograd.set_detect_anomaly(True)
+
 import math
 from shadow_splat.lights import LightOptimizer, LightOptimizerConfig
 from nerfstudio.cameras.cameras import Cameras, CameraType
@@ -50,20 +50,29 @@ from nerfstudio.model_components.lib_bilagrid import (
 )
 
 import open3d as o3d
-import torch_geometric.nn.pool.knn as knn
+
+# import torch_geometric.nn.pool.knn as knn
 
 from shadow_splat.util.nerfstudio import get_viewmat
-from shadow_splat.shadow_splat_rendering import calculate_relighting_weights_from_point_cloud, generate_point_cloud_from_camera_depth
+from shadow_splat.shadow_splat_rendering import (
+    calculate_relighting_weights_from_point_cloud,
+    generate_point_cloud_from_camera_depth,
+)
 from shadow_splat.util.coverage import update_view_coverage_for_frustum, fibonacci_sphere
 
 import matplotlib.pyplot as plt
+
+torch.autograd.set_detect_anomaly(True)
+
 
 @dataclass
 class ShadowSplatModelConfig(SplatfactoModelConfig):
     """Splatfacto Model Config, nerfstudio's implementation of Gaussian Splatting"""
 
     _target: Type = field(default_factory=lambda: ShadowSplatModel)
-    light_optimizer: LightOptimizerConfig = field(default_factory=lambda: LightOptimizerConfig(mode="off"))
+    light_optimizer: LightOptimizerConfig = field(
+        default_factory=lambda: LightOptimizerConfig(mode="off")
+    )
     # TODO: add shadow splat specific parameters here
     ambient: bool = (
         True  # Controls whether Gaussians outside the light frustum are set to ambient or to black
@@ -72,6 +81,7 @@ class ShadowSplatModelConfig(SplatfactoModelConfig):
     gamma_correction: float = 1.0
     fix_variance: bool = False
     n_sphere_bins: int = 128
+
 
 class ShadowSplatModel(SplatfactoModel):
     """Nerfstudio's implementation of Shadow Splatting
@@ -108,7 +118,9 @@ class ShadowSplatModel(SplatfactoModel):
         self.last_training_light = None
 
         self.bin_dirs = fibonacci_sphere(n_bins=self.config.n_sphere_bins, device="cuda")
-        self.coverage_counts = torch.nn.Parameter(torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda"))
+        self.coverage_counts = torch.nn.Parameter(
+            torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda")
+        )
 
         self.gauss_params["coverage_counts"] = self.coverage_counts
 
@@ -133,7 +145,15 @@ class ShadowSplatModel(SplatfactoModel):
         if "means" in dict:
             # For backwards compatibility, we remap the names of parameters from
             # means->gauss_params.means since old checkpoints have that format
-            for p in ["means", "scales", "quats", "features_dc", "features_rest", "opacities", "coverage_counts"]:
+            for p in [
+                "means",
+                "scales",
+                "quats",
+                "features_dc",
+                "features_rest",
+                "opacities",
+                "coverage_counts",
+            ]:
                 dict[f"gauss_params.{p}"] = dict[p]
         newp = dict["gauss_params.means"].shape[0]
         for name, param in self.gauss_params.items():
@@ -173,14 +193,19 @@ class ShadowSplatModel(SplatfactoModel):
         # specify more if they want to add more optimizable params to gaussians.
         return {
             name: [self.gauss_params[name]]
-            for name in ["means", "scales", "quats", "features_dc", "features_rest", "opacities", "coverage_counts"]
+            for name in [
+                "means",
+                "scales",
+                "quats",
+                "features_dc",
+                "features_rest",
+                "opacities",
+                "coverage_counts",
+            ]
         }
 
     def get_light_param_groups(self) -> Dict[str, List[Parameter]]:
-        return {
-            name: [self.light_params[name]]
-            for name in ["intensity", "ambient"]
-        }
+        return {name: [self.light_params[name]] for name in ["intensity", "ambient"]}
 
     def get_param_groups(self) -> Dict[str, List[Parameter]]:
         """Obtain the parameter groups for the optimizers
@@ -313,7 +338,7 @@ class ShadowSplatModel(SplatfactoModel):
             packed=False,
             near_plane=0.01,
             far_plane=1e10,
-            render_mode="RGB+ED",
+            render_mode=render_mode,
             sh_degree=sh_degree_to_use,
             sparse_grad=False,
             absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
@@ -352,7 +377,7 @@ class ShadowSplatModel(SplatfactoModel):
 
         if self.training and light is not None:
             self.last_training_light = light
-        
+
         point_cloud, point_cloud_mask = generate_point_cloud_from_camera_depth(
             depth=render[:, ..., -1:],
             K=K,
@@ -387,19 +412,25 @@ class ShadowSplatModel(SplatfactoModel):
         else:
             raise ValueError("Unknown light type: %s", light.camera_type)
 
-        shadow_img, light_depth_image, light_variance_image = calculate_relighting_weights_from_point_cloud(
-            means=means_crop,  # [N, 3]
-            quats=quats_crop,  # [N, 4]
-            scales=torch.exp(scales_crop),  # [N, 3]       # NOTE: IMPORTANT! THESE SCALES MUST ALREADY BE POSITIVE
-            opacities=torch.sigmoid(opacities_crop).squeeze(-1),  # [N]       # NOTE: IMPORTANT! THESE OPACITIES MUST ALREADY BE [0, 1]
-            viewmats=light_viewmat,  # [C, 4, 4]
-            Ks=light_K,  # [C, 3, 3]
-            width=light_W,
-            height=light_H,
-            point_cloud=point_cloud,
-            point_cloud_mask=point_cloud_mask,
-            ambient=torch.sigmoid(self.light_params["ambient"]),
-            camera_model=light_model,
+        shadow_img, light_depth_image, light_variance_image = (
+            calculate_relighting_weights_from_point_cloud(
+                means=means_crop,  # [N, 3]
+                quats=quats_crop,  # [N, 4]
+                scales=torch.exp(
+                    scales_crop
+                ),  # [N, 3]       # NOTE: IMPORTANT! THESE SCALES MUST ALREADY BE POSITIVE
+                opacities=torch.sigmoid(opacities_crop).squeeze(
+                    -1
+                ),  # [N]       # NOTE: IMPORTANT! THESE OPACITIES MUST ALREADY BE [0, 1]
+                viewmats=light_viewmat,  # [C, 4, 4]
+                Ks=light_K,  # [C, 3, 3]
+                width=light_W,
+                height=light_H,
+                point_cloud=point_cloud,
+                point_cloud_mask=point_cloud_mask,
+                ambient=torch.sigmoid(self.light_params["ambient"]),
+                camera_model=light_model,
+            )
         )
 
         if self.training:
@@ -415,21 +446,19 @@ class ShadowSplatModel(SplatfactoModel):
         coverage = render[:, ..., 3:4].squeeze(0)
         shadow_img = shadow_img.unsqueeze(-1)
 
-        lighted_dissimilarity = (1. - coverage) * (1. - shadow_img)
+        lighted_dissimilarity = (1.0 - coverage) * (1.0 - shadow_img)
 
         # apply bilateral grid
         if self.config.use_bilateral_grid and self.training:
             if camera.metadata is not None and "cam_idx" in camera.metadata:
-                rgb = self._apply_bilateral_grid(
-                    rgb, camera.metadata["cam_idx"], H, W
-                )
+                rgb = self._apply_bilateral_grid(rgb, camera.metadata["cam_idx"], H, W)
 
         if render_mode == "RGB+ED":
             depth_im = render[:, ..., -1:]
             depth_im = torch.where(alpha > 0, depth_im, depth_im.detach().max()).squeeze(0)
         else:
             depth_im = None
-           
+
         if background.shape[0] == 3 and not self.training:
             background = background.expand(H, W, 3)
 
@@ -488,7 +517,7 @@ class ShadowSplatModel(SplatfactoModel):
         loss_dict = {
             "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss,
             "scale_reg": scale_reg,
-            }
+        }
 
         # Losses for mcmc
         if self.config.strategy == "mcmc":
