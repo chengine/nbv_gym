@@ -2931,16 +2931,15 @@ def rasterization_with_coverage(
         # make it apple-to-apple with Inria's CUDA Backend.
         colors = torch.clamp_min(colors + 0.5, 0.0)
 
-    # NOTE: disable coverage for debuggin
-    # coverage_metric = compute_coverage_per_gaussian(
-    #     coverage_counts=coverage_counts,
-    #     bin_dirs=bin_dirs,
-    #     masks=masks.squeeze(0),
-    #     inference_dirs=dirs.squeeze(0),
-    # )
+    coverage_metric = compute_coverage_per_gaussian(
+        coverage_counts=coverage_counts,
+        bin_dirs=bin_dirs,
+        masks=masks.squeeze(0),
+        inference_dirs=dirs.squeeze(0),
+    )
 
-    # # Concatenate coverage_metric with colors
-    # colors = torch.cat((colors, coverage_metric[None, ..., None]), dim=-1)
+    # Concatenate coverage_metric with colors
+    colors = torch.cat((colors, coverage_metric[None, ..., None]), dim=-1)
 
     # If in distributed mode, we need to scatter the GSs to the destination ranks, based
     # on which cameras they are visible to, which we already figured out in the projection
