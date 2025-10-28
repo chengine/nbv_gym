@@ -1,6 +1,7 @@
 data
 outputs
 .vscode/
+pyrightconfig.json
 *.png
 *.jpg
 *.gif
