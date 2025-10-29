@@ -78,9 +78,10 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
             local_rank=local_rank,
             **kwargs,
         )
+        self.current_light = None
         # print(self.train_dataparser_outputs.lights)
-        print("datamanager init | num cameras: ", len(self.train_dataset.cameras))
-        print("datamanager init | num lights: ", len(self.train_dataparser_outputs.lights))
+        # print("datamanager init | num cameras: ", len(self.train_dataset.cameras))
+        # print("datamanager init | num lights: ", len(self.train_dataparser_outputs.lights))
 
     def next_train(self, step: int) -> Tuple[Cameras, Dict, Cameras]:
         """Returns the next training batch
@@ -105,8 +106,11 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
         cameras.metadata["cam_idx"] = image_idx
 
         # NOTE: Added
-        light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
-        self.current_light = light
+        if self.train_dataparser_outputs.lights is not None:
+            light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
+            self.current_light = light
+        else:
+            light = None
 
         return cameras, data, light
 

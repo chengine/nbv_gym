@@ -378,60 +378,67 @@ class ShadowSplatModel(SplatfactoModel):
         if self.training and light is not None:
             self.last_training_light = light
 
-        point_cloud, point_cloud_mask = generate_point_cloud_from_camera_depth(
-            depth=render[:, ..., -1:],
-            K=K,
-            W=W,
-            H=H,
-            viewmat=viewmat,
-            near_plane=0.1,
-            far_plane=1e10,
-            mask=None,
-        )
-
-        if self.training:
-            assert light.shape[0] == 1, "Only one light at a time"
-            optimized_light_to_world = self.light_optimizer.apply_to_camera(light)
-        else:
-            optimized_light_to_world = light.camera_to_worlds
-
-        light_camera_to_world = optimized_light_to_world
-        light.rescale_output_resolution(1 / camera_scale_fac)
-        light_viewmat = get_viewmat(light_camera_to_world)
-        light_K = light.get_intrinsics_matrices().cuda()
-        light_W, light_H = int(light.width.item()), int(light.height.item())
-        self.light_last_size = (light_H, light_W)
-        light.rescale_output_resolution(camera_scale_fac)  # type: ignore
-
-        if light.camera_type == CameraType.PERSPECTIVE.value:
-            light_model = "pinhole"
-        elif light.camera_type == CameraType.ORTHOPHOTO.value:
-            light_model = "ortho"
-        elif light.camera_type == CameraType.FISHEYE.value:
-            light_model = "fisheye"
-        else:
-            raise ValueError("Unknown light type: %s", light.camera_type)
-
-        shadow_img, light_depth_image, light_variance_image = (
-            calculate_relighting_weights_from_point_cloud(
-                means=means_crop,  # [N, 3]
-                quats=quats_crop,  # [N, 4]
-                scales=torch.exp(
-                    scales_crop
-                ),  # [N, 3]       # NOTE: IMPORTANT! THESE SCALES MUST ALREADY BE POSITIVE
-                opacities=torch.sigmoid(opacities_crop).squeeze(
-                    -1
-                ),  # [N]       # NOTE: IMPORTANT! THESE OPACITIES MUST ALREADY BE [0, 1]
-                viewmats=light_viewmat,  # [C, 4, 4]
-                Ks=light_K,  # [C, 3, 3]
-                width=light_W,
-                height=light_H,
-                point_cloud=point_cloud,
-                point_cloud_mask=point_cloud_mask,
-                ambient=torch.sigmoid(self.light_params["ambient"]),
-                camera_model=light_model,
+        if light is not None:
+            point_cloud, point_cloud_mask = generate_point_cloud_from_camera_depth(
+                depth=render[:, ..., -1:],
+                K=K,
+                W=W,
+                H=H,
+                viewmat=viewmat,
+                near_plane=0.1,
+                far_plane=1e10,
+                mask=None,
             )
-        )
+
+            if self.training:
+                optimized_light_to_world = self.light_optimizer.apply_to_camera(light)
+            else:
+                optimized_light_to_world = light.camera_to_worlds
+
+            light_camera_to_world = optimized_light_to_world
+            light.rescale_output_resolution(1 / camera_scale_fac)
+            light_viewmat = get_viewmat(light_camera_to_world)
+            light_K = light.get_intrinsics_matrices().cuda()
+            light_W, light_H = int(light.width.item()), int(light.height.item())
+            self.light_last_size = (light_H, light_W)
+            light.rescale_output_resolution(camera_scale_fac)  # type: ignore
+
+            if light.camera_type == CameraType.PERSPECTIVE.value:
+                light_model = "pinhole"
+            elif light.camera_type == CameraType.ORTHOPHOTO.value:
+                light_model = "ortho"
+            elif light.camera_type == CameraType.FISHEYE.value:
+                light_model = "fisheye"
+            else:
+                raise ValueError("Unknown light type: %s", light.camera_type)
+
+            shadow_img, light_depth_image, light_variance_image = (
+                calculate_relighting_weights_from_point_cloud(
+                    means=means_crop,  # [N, 3]
+                    quats=quats_crop,  # [N, 4]
+                    scales=torch.exp(
+                        scales_crop
+                    ),  # [N, 3]       # NOTE: IMPORTANT! THESE SCALES MUST ALREADY BE POSITIVE
+                    opacities=torch.sigmoid(opacities_crop).squeeze(
+                        -1
+                    ),  # [N]       # NOTE: IMPORTANT! THESE OPACITIES MUST ALREADY BE [0, 1]
+                    viewmats=light_viewmat,  # [C, 4, 4]
+                    Ks=light_K,  # [C, 3, 3]
+                    width=light_W,
+                    height=light_H,
+                    point_cloud=point_cloud,
+                    point_cloud_mask=point_cloud_mask,
+                    ambient=torch.sigmoid(self.light_params["ambient"]),
+                    camera_model=light_model,
+                )
+            )
+            shadow_img = shadow_img.unsqueeze(-1)
+            light_depth_image = light_depth_image.unsqueeze(-1)
+            light_variance_image = light_variance_image.unsqueeze(-1)
+        else:
+            shadow_img = torch.zeros((H, W, 1), device=self.device)
+            light_depth_image = None
+            light_variance_image = None
 
         if self.training:
             self.strategy.step_pre_backward(
@@ -444,8 +451,6 @@ class ShadowSplatModel(SplatfactoModel):
         rgb = torch.clamp(rgb, 0.0, 1.0)
 
         coverage = render[:, ..., 3:4].squeeze(0)
-        shadow_img = shadow_img.unsqueeze(-1)
-
         lighted_dissimilarity = (1.0 - coverage) * (1.0 - shadow_img)
 
         # apply bilateral grid
@@ -469,8 +474,8 @@ class ShadowSplatModel(SplatfactoModel):
             "background": background,  # type: ignore
             "coverage": coverage,  # type: ignore
             "shadow": shadow_img,  # type: ignore
-            "light_depth": light_depth_image.unsqueeze(-1),  # type: ignore
-            "light_variance": light_variance_image.unsqueeze(-1),  # type: ignore
+            "light_depth": light_depth_image,  # type: ignore
+            "light_variance": light_variance_image,  # type: ignore
             "lighted_dissimilarity": lighted_dissimilarity,  # type: ignore
         }  # type: ignore
 

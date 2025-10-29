@@ -128,9 +128,9 @@ def logistic_weighting(
     N, _ = means2d.shape
 
     assert N == depths.shape[0], "Number of means and depths must match"
-    assert (
-        depth_image.shape == variance_image.shape
-    ), "Depth and variance images must have the same shape"
+    assert depth_image.shape == variance_image.shape, (
+        "Depth and variance images must have the same shape"
+    )
 
     # Check inputs for NaN values
     if torch.isnan(means2d).any():
@@ -190,9 +190,9 @@ def chebyshev_weighting(
     N, _ = means2d.shape
 
     assert N == depths.shape[0], "Number of means and depths must match"
-    assert (
-        depth_image.shape == variance_image.shape
-    ), "Depth and variance images must have the same shape"
+    assert depth_image.shape == variance_image.shape, (
+        "Depth and variance images must have the same shape"
+    )
 
     # NOTE: These means correspond to Gaussians that are in the frustum!
     pixel_x = means2d[:, 0].long().clamp(0, W - 1)
@@ -324,7 +324,7 @@ def calculate_relighting_weights_from_point_cloud(
     fix_variance: bool = False,
     use_2dgs: bool = False,
     distloss: bool = False,  # 2DGS only
-) -> Tuple[Tensor, Tensor, Dict]:
+) -> Tuple[Tensor, Tensor, Tensor]:
     """Compute the relighting weights for a given light source for the scene."""
 
     N, _ = means.shape  # Number of gaussians in the scene
@@ -2188,7 +2188,9 @@ def augmented_rasterization_2dgs(
             "ED",
             "RGB+D",
             "RGB+ED",
-        ], f"distloss requires depth rendering, render_mode should be D, ED, RGB+D, RGB+ED, but got {render_mode}"
+        ], (
+            f"distloss requires depth rendering, render_mode should be D, ED, RGB+D, RGB+ED, but got {render_mode}"
+        )
 
     if additional_channels is not None:
         assert additional_channels.shape[0] == N, additional_channels.shape
@@ -2727,9 +2729,9 @@ def rasterization_with_coverage(
             colors.dim() == num_batch_dims + 3 and colors.shape[:-1] == batch_dims + (C, N)
         ), colors.shape
         if distributed:
-            assert (
-                colors.dim() == num_batch_dims + 2
-            ), "Distributed mode only supports per-Gaussian colors."
+            assert colors.dim() == num_batch_dims + 2, (
+                "Distributed mode only supports per-Gaussian colors."
+            )
     else:
         # treat colors as SH coefficients, should be in shape [..., N, K, 3] or [..., C, N, K, 3]
         # Allowing for activating partial SH bands
@@ -2744,9 +2746,9 @@ def rasterization_with_coverage(
         ), colors.shape
         assert (sh_degree + 1) ** 2 <= colors.shape[-2], colors.shape
         if distributed:
-            assert (
-                colors.dim() == num_batch_dims + 3
-            ), "Distributed mode only supports per-Gaussian colors."
+            assert colors.dim() == num_batch_dims + 3, (
+                "Distributed mode only supports per-Gaussian colors."
+            )
 
     if absgrad:
         assert not distributed, "AbsGrad is not supported in distributed mode."
@@ -2766,9 +2768,9 @@ def rasterization_with_coverage(
         assert viewmats_rs is None, "viewmats_rs should be None for global rolling shutter."
 
     if with_ut or with_eval3d:
-        assert (quats is not None) and (
-            scales is not None
-        ), "UT and eval3d requires to provide quats and scales."
+        assert (quats is not None) and (scales is not None), (
+            "UT and eval3d requires to provide quats and scales."
+        )
         assert packed is False, "Packed mode is not supported with UT."
         assert sparse_grad is False, "Sparse grad is not supported with UT."
 

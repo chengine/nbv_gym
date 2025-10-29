@@ -56,7 +56,7 @@ class ShadowSplatDataParser(Nerfstudio):
         meta = load_from_json(self.config.data / "transforms.json")
         data_dir = self.config.data
 
-        # sort the frames by fname
+        # Sort the frames by fname
         fnames = []
         for frame in meta["frames"]:
             filepath = Path(frame["file_path"])
@@ -64,28 +64,6 @@ class ShadowSplatDataParser(Nerfstudio):
             fnames.append(fname)
         inds = np.argsort(fnames)
         frames = [meta["frames"][ind] for ind in inds]
-
-        # print("dataparser | num frames", len(frames))
-
-        # Load 3D points
-        # print("dataparser | config.load_3D_points", self.config.load_3D_points)
-        # if (
-        #     self.config.load_3D_points
-        # ):  # NOTE: for some reason this is False even though we set it to True in the method config
-        #     print("dataparser | loading 3D points")
-        # if "ply_file_path" in meta:
-        #     ply_file_path = data_dir / meta["ply_file_path"]
-        #     if ply_file_path:
-        #         sparse_points = self._load_3D_points(
-        #             ply_file_path,
-        #             dataparser_outputs.dataparser_transform,
-        #             dataparser_outputs.dataparser_scale,
-        #         )
-        #         if sparse_points is not None:
-        #             dataparser_outputs.metadata.update(sparse_points)
-
-        #         print("Ply path", ply_file_path)
-        #         print(sparse_points)
 
         # Get the same indices that were used for cameras in the parent method
         # This ensures lights and cameras have the same split
@@ -108,32 +86,34 @@ class ShadowSplatDataParser(Nerfstudio):
                 # Fallback: use the same index if filename mapping fails
                 split_frame_indices.append(len(split_frame_indices))
 
-        # Load light poses only for the split frames
-        light_poses = []
-        for frame_idx in split_frame_indices:
-            light_poses.append(np.array(frames[frame_idx]["light_pose"]))
+        # Dataset has light info
+        if "light_pose" in frames[0]:
+            # Load light poses only for the split frames
+            light_poses = []
+            for frame_idx in split_frame_indices:
+                light_poses.append(np.array(frames[frame_idx]["light_pose"]))
 
-        light_poses = torch.from_numpy(np.array(light_poses).astype(np.float32))
-        # Transform light poses with dataparser transform and scale
-        # NOTE: if we are using a colmap dataset, the light pose is manually determined in the
-        # nerfstudio frame, and does not need to be transformed
-        colmap_path = self.config.data / "colmap/sparse/0"
-        if not colmap_path.exists():
-            transform_4x4 = torch.eye(4)
-            transform_4x4[:3, :4] = dataparser_outputs.dataparser_transform
-            light_poses = light_poses @ transform_4x4
-            light_poses[:, :3, 3] *= dataparser_outputs.dataparser_scale
+            light_poses = torch.from_numpy(np.array(light_poses).astype(np.float32))
+            # Transform light poses with dataparser transform and scale
+            # NOTE: if we are using a colmap dataset, the light pose is manually determined in the
+            # nerfstudio frame, and does not need to be transformed
+            colmap_path = self.config.data / "colmap/sparse/0"
+            if not colmap_path.exists():
+                transform_4x4 = torch.eye(4)
+                transform_4x4[:3, :4] = dataparser_outputs.dataparser_transform
+                light_poses = light_poses @ transform_4x4
+                light_poses[:, :3, 3] *= dataparser_outputs.dataparser_scale
 
-        lights = Cameras(
-            fx=meta["light_intrinsics"]["fl_x"],
-            fy=meta["light_intrinsics"]["fl_y"],
-            cx=meta["light_intrinsics"]["cx"],
-            cy=meta["light_intrinsics"]["cy"],
-            height=meta["light_intrinsics"]["h"],
-            width=meta["light_intrinsics"]["w"],
-            camera_to_worlds=light_poses[:, :3, :4],
-            camera_type=CameraType.ORTHOPHOTO,  # TODO: add this to transforms.json
-        )
-        dataparser_outputs.lights = lights
+            lights = Cameras(
+                fx=meta["light_intrinsics"]["fl_x"],
+                fy=meta["light_intrinsics"]["fl_y"],
+                cx=meta["light_intrinsics"]["cx"],
+                cy=meta["light_intrinsics"]["cy"],
+                height=meta["light_intrinsics"]["h"],
+                width=meta["light_intrinsics"]["w"],
+                camera_to_worlds=light_poses[:, :3, :4],
+                camera_type=CameraType.ORTHOPHOTO,  # TODO: add this to transforms.json
+            )
+            dataparser_outputs.lights = lights
 
         return dataparser_outputs

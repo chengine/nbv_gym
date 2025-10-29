@@ -15,6 +15,7 @@ from nerfstudio.viewer.render_state_machine import RenderAction
 
 from shadow_splat.model import ShadowSplatModel, ShadowSplatModelConfig
 
+
 class ShadowSplatViewer(Viewer):
     """Custom viewer with an additional slider for adjusting the light source position dynamically."""
 
@@ -207,10 +208,14 @@ class ShadowSplatViewer(Viewer):
 
         # # Nerfstudio conversion
         # c2w = current_light.camera_to_worlds.squeeze().cpu().numpy()
+        if self.pipeline.datamanager.current_light is None:
+            return
 
         with torch.no_grad():
             light_optimizer = self.pipeline.model.light_optimizer
-            c2ws_delta = light_optimizer(torch.tensor([0], device=light_optimizer.device)).cpu().numpy()
+            c2ws_delta = (
+                light_optimizer(torch.tensor([0], device=light_optimizer.device)).cpu().numpy()
+            )
         c2w_orig = self.pipeline.datamanager.current_light.camera_to_worlds.squeeze().cpu().numpy()
         c2w_delta = c2ws_delta[0, ...]
         c2w = c2w_orig @ np.concatenate((c2w_delta, np.array([[0, 0, 0, 1]])), axis=0)
@@ -290,6 +295,7 @@ class ShadowSplatViewer(Viewer):
         self.light_source_visualizer.visible = True
 
         self._trigger_rerender()
+
 
 def camera_to_world_transform(azimuth_rad, elevation_rad, origin, radius):
     # Compute the camera position in Cartesian coordinates
