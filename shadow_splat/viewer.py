@@ -47,6 +47,14 @@ class ShadowSplatViewer(Viewer):
                 initial_intensity=initial_intensity,
             )
 
+        # Toggle to show only active training views (from progressive view selection)
+        self._show_only_active = False
+        self._last_active_indices = set()
+        self.only_active_checkbox = self.viser_server.gui.add_checkbox(
+            label="Show only active train views", disabled=False, initial_value=False
+        )
+        self.only_active_checkbox.on_update(lambda _: self._on_only_active_toggle())
+
     def _convert_model(self, pipeline):
         """Convert the model to a ShadowSplatModel"""
         config = ShadowSplatModelConfig()
@@ -189,25 +197,50 @@ class ShadowSplatViewer(Viewer):
                     if camera_state is not None:
                         self.render_statemachines[id].action(RenderAction("step", camera_state))
                 self.update_camera_poses()
+                # Update which training cameras are visible based on active subset
+                self._update_train_camera_visibility()
                 self.update_training_light_source_frustum()
                 self.update_step(step)
 
+    def _on_only_active_toggle(self):
+        self._show_only_active = bool(self.only_active_checkbox.value)
+        self._update_train_camera_visibility(force=True)
+
+    def _get_active_indices(self) -> set:
+        """Return the active training indices from the datamanager if present, else all indices."""
+        dm = self.pipeline.datamanager
+        try:
+            if hasattr(dm, "active_train_indices") and dm.active_train_indices is not None:
+                return set(int(i) for i in dm.active_train_indices)
+        except Exception:
+            pass
+        # Fallback to all train indices
+        try:
+            total = len(dm.train_dataset)
+            return set(range(total))
+        except Exception:
+            return set()
+
+    def _update_train_camera_visibility(self, force: bool = False) -> None:
+        """Hide non-active training frustums when the toggle is enabled.
+
+        Operates only on already-created frustums (Viewer limits number displayed).
+        """
+        if not hasattr(self, "camera_handles") or self.camera_handles is None:
+            return
+        active = self._get_active_indices()
+        if not force and active == self._last_active_indices and self._show_only_active is False:
+            return
+        self._last_active_indices = active
+
+        # Apply visibility filter
+        for idx, handle in self.camera_handles.items():
+            try:
+                handle.visible = (idx in active) if self._show_only_active else True
+            except Exception:
+                continue
+
     def update_training_light_source_frustum(self):
-        # current_light = self.pipeline.datamanager.current_light
-        # dimension = current_light.width.item()
-        # focal_length = current_light.fx.item()
-        # self.light_source_visualizer.fov = 2 * np.arctan2(dimension, (2 * focal_length))
-
-        # # Update light params
-        # # self.cutoff_slider.value = torch.exp(self.pipeline.model.light_params["cutoff"]).item()
-        # # self.intensity_slider.value = (
-        # #     torch.exp(self.pipeline.model.light_params["intensity"]).detach().cpu().numpy()[0]
-        # # )
-        # # self.dim_slider.value = dimension
-        # # self.focal_length_slider.value = focal_length
-
-        # # Nerfstudio conversion
-        # c2w = current_light.camera_to_worlds.squeeze().cpu().numpy()
         if self.pipeline.datamanager.current_light is None:
             return
 

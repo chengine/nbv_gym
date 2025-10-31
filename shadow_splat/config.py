@@ -13,8 +13,8 @@ from nerfstudio.pipelines.base_pipeline import VanillaPipelineConfig
 
 from shadow_splat.model import ShadowSplatModelConfig
 from shadow_splat.dataparser import ShadowSplatDataParserConfig
-from shadow_splat.datamanager import ShadowSplatDataManagerConfig
-from shadow_splat.pipeline import ShadowSplatPipelineConfig
+from shadow_splat.datamanager import ShadowSplatDataManagerConfig, ViewSelectionDataManagerConfig
+from shadow_splat.pipeline import ShadowSplatPipelineConfig, ViewSelectionPipelineConfig
 # from shadow_splat.model_2dgs import ShadowSplat2DGSModelConfig
 
 # NOTE: The ShadowSplatTrainer import is needed for some reason to make the viewer work
@@ -29,8 +29,9 @@ shadow_splat = MethodSpecification(
         steps_per_eval_all_images=1000,
         max_num_iterations=10000,
         mixed_precision=False,
-        pipeline=ShadowSplatPipelineConfig(
-            datamanager=ShadowSplatDataManagerConfig(
+        pipeline=ViewSelectionPipelineConfig(
+            add_every_n_steps=100,
+            datamanager=ViewSelectionDataManagerConfig(
                 dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
                 cache_images_type="uint8",
             ),

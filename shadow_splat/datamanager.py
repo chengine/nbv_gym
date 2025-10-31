@@ -152,3 +152,118 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
         )
 
         return camera, data, light
+
+
+@dataclass
+class ViewSelectionDataManagerConfig(FullImageDatamanagerConfig):
+    _target: Type = field(default_factory=lambda: ViewSelectionDataManager)
+    start_num_views: int = 1
+
+
+class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstract-method
+    """DataManager that progressively grows an active subset of training views.
+
+    Only samples training images from `active_train_indices`, which starts with a
+    small subset and can be expanded over time via `expand_active_set`.
+    """
+
+    config: ViewSelectionDataManagerConfig
+
+    def __init__(
+        self,
+        config: ViewSelectionDataManagerConfig,
+        device: Union[torch.device, str] = "cuda:0",
+        test_mode: Literal["test", "val", "inference"] = "val",
+        world_size: int = 1,
+        local_rank: int = 0,
+        **kwargs,  # pylint: disable=unused-argument
+    ):
+        super().__init__(
+            config=config,
+            device=device,
+            test_mode=test_mode,
+            world_size=world_size,
+            local_rank=local_rank,
+            **kwargs,
+        )
+
+        self.current_light = None
+
+        # Initialize active set
+        num_train_images = len(self.train_dataset)
+        self.all_train_indices = list(range(num_train_images))
+        start_k = max(1, min(self.config.start_num_views, num_train_images))
+        self.active_train_indices = (
+            random.sample(self.all_train_indices, k=start_k) if num_train_images > 0 else []
+        )
+        self.active_unseen_cameras = list(self.active_train_indices)
+
+    def expand_active_set(self, k: int = 1) -> None:
+        """Expand the active set by randomly adding up to k remaining indices."""
+        if not self.all_train_indices:
+            return
+        remaining = list(set(self.all_train_indices) - set(self.active_train_indices))
+        if not remaining:
+            return
+        add = random.sample(remaining, k=min(max(1, k), len(remaining)))
+        self.active_train_indices.extend(add)
+        # Make newly added indices available for immediate sampling
+        self.active_unseen_cameras.extend(add)
+        print(f"Expanded active set to {len(self.active_train_indices)} views")
+
+    def next_train(self, step: int) -> Tuple[Cameras, Dict, Cameras]:
+        """Return the next training batch restricted to the active view subset.
+
+        Returns a `Cameras` object instead of a ray bundle to match the existing
+        ShadowSplat pipeline/model interface.
+        """
+        if not self.active_unseen_cameras:
+            # Refill from the active set when we have seen all active cameras
+            self.active_unseen_cameras = list(self.active_train_indices)
+
+        image_idx = self.active_unseen_cameras.pop(
+            random.randint(0, len(self.active_unseen_cameras) - 1)
+        )
+
+        data = deepcopy(self.cached_train[image_idx])
+        data["image"] = data["image"].to(self.device)
+
+        assert len(self.train_dataset.cameras.shape) == 1, "Assumes single batch dimension"
+        cameras = self.train_dataset.cameras[image_idx : image_idx + 1].to(self.device)
+        if cameras.metadata is None:
+            cameras.metadata = {}
+        cameras.metadata["cam_idx"] = image_idx
+
+        if self.train_dataparser_outputs.lights is not None:
+            light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
+            self.current_light = light
+        else:
+            light = None
+
+        return cameras, data, light
+
+    def next_eval_image(self, step: int) -> Tuple[Cameras, Dict]:
+        """Returns the next evaluation batch.
+        Mirrors the ShadowSplatDataManager behavior to return a Camera.
+        """
+        if self.config.cache_images == "disk":
+            camera, data = next(self.iter_eval_image_dataloader)[0]
+            return camera, data
+        image_idx = self.eval_unseen_cameras.pop(
+            random.randint(0, len(self.eval_unseen_cameras) - 1)
+        )
+        if len(self.eval_unseen_cameras) == 0:
+            self.eval_unseen_cameras = [i for i in range(len(self.eval_dataset))]
+        data = self.cached_eval[image_idx]
+        data = data.copy()
+        data["image"] = data["image"].to(self.device)
+        assert len(self.eval_dataset.cameras.shape) == 1, "Assumes single batch dimension"
+        camera = self.eval_dataset.cameras[image_idx : image_idx + 1].to(self.device)
+
+        light = (
+            self.dataparser.get_dataparser_outputs(split=self.test_split)
+            .lights[image_idx : image_idx + 1]
+            .to(self.device)
+        )
+
+        return camera, data, light

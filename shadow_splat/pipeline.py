@@ -13,6 +13,7 @@ from nerfstudio.pipelines.base_pipeline import (
 from nerfstudio.utils import profiler
 
 from shadow_splat.datamanager import ShadowSplatDataManagerConfig
+from shadow_splat.datamanager import ViewSelectionDataManagerConfig
 from shadow_splat.model import ShadowSplatModelConfig
 
 
@@ -111,6 +112,89 @@ class ShadowSplatPipeline(VanillaPipeline):
         Args:
             step: current iteration step
         """
+        self.eval()
+        camera, batch, light = self.datamanager.next_eval_image(step)
+        if self.config.disable_light:
+            outputs = self.model(camera)
+        else:
+            outputs = self.model(camera, light)
+        metrics_dict, images_dict = self.model.get_image_metrics_and_images(outputs, batch)
+        assert "num_rays" not in metrics_dict
+        metrics_dict["num_rays"] = (camera.height * camera.width * camera.size).item()
+        self.train()
+        return metrics_dict, images_dict
+
+
+@dataclass
+class ViewSelectionPipelineConfig(VanillaPipelineConfig):
+    """Configuration for progressive view selection pipeline"""
+
+    _target: Type = field(default_factory=lambda: ViewSelectionPipeline)
+    datamanager: ViewSelectionDataManagerConfig = ViewSelectionDataManagerConfig()
+    model: ModelConfig = ShadowSplatModelConfig()
+    disable_light: bool = False
+
+    # Progressive view selection controls
+    add_every_n_steps: int = 1000
+    add_num_views: int = 1
+    view_selector: Optional[str] = None  # optional dotted path for custom selector
+
+
+class ViewSelectionPipeline(VanillaPipeline):
+    def __init__(
+        self,
+        config: ViewSelectionPipelineConfig,
+        device: str,
+        test_mode: Literal["test", "val", "inference"] = "val",
+        world_size: int = 1,
+        local_rank: int = 0,
+        grad_scaler: Optional[GradScaler] = None,
+    ):
+        super().__init__(
+            config=config,
+            device=device,
+            test_mode=test_mode,
+            world_size=world_size,
+            local_rank=local_rank,
+            grad_scaler=grad_scaler,
+        )
+
+    @profiler.time_function
+    def get_train_loss_dict(self, step: int):
+        """Get training loss dict and conditionally expand the active view set."""
+        # Expand active set on schedule
+        if (
+            getattr(self.config, "add_every_n_steps", 0) > 0
+            and step > 0
+            and step % self.config.add_every_n_steps == 0
+            and hasattr(self.datamanager, "expand_active_set")
+        ):
+            self.datamanager.expand_active_set(self.config.add_num_views)
+
+        cameras, batch, light = self.datamanager.next_train(step)
+        if self.config.disable_light:
+            model_outputs = self._model(cameras)
+        else:
+            model_outputs = self._model(cameras, light)
+        metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
+        loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
+        return model_outputs, loss_dict, metrics_dict
+
+    @profiler.time_function
+    def get_eval_loss_dict(self, step: int):
+        self.eval()
+        ray_bundle, batch, light = self.datamanager.next_eval(step)
+        if self.config.disable_light:
+            model_outputs = self.model(ray_bundle)
+        else:
+            model_outputs = self.model(ray_bundle, light)
+        metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
+        loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
+        self.train()
+        return model_outputs, loss_dict, metrics_dict
+
+    @profiler.time_function
+    def get_eval_image_metrics_and_images(self, step: int):
         self.eval()
         camera, batch, light = self.datamanager.next_eval_image(step)
         if self.config.disable_light:
