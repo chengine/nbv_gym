@@ -145,11 +145,11 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
         assert len(self.eval_dataset.cameras.shape) == 1, "Assumes single batch dimension"
         camera = self.eval_dataset.cameras[image_idx : image_idx + 1].to(self.device)
 
-        light = (
-            self.dataparser.get_dataparser_outputs(split=self.test_split)
-            .lights[image_idx : image_idx + 1]
-            .to(self.device)
-        )
+        if self.train_dataparser_outputs.lights is not None:
+            light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
+            self.current_light = light
+        else:
+            light = None
 
         return camera, data, light
 
@@ -260,10 +260,10 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         assert len(self.eval_dataset.cameras.shape) == 1, "Assumes single batch dimension"
         camera = self.eval_dataset.cameras[image_idx : image_idx + 1].to(self.device)
 
-        light = (
-            self.dataparser.get_dataparser_outputs(split=self.test_split)
-            .lights[image_idx : image_idx + 1]
-            .to(self.device)
-        )
+        if self.train_dataparser_outputs.lights is not None:
+            light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
+            self.current_light = light
+        else:
+            light = None
 
         return camera, data, light
