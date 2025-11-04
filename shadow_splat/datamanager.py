@@ -20,23 +20,17 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Dict, Literal, Tuple, Type, Union
+from typing import Dict, Literal, Tuple, Type, Union, Optional
 import torch
 from copy import deepcopy
 
 from nerfstudio.cameras.cameras import Cameras
-from rich.progress import Console
+from rich.console import Console
 from nerfstudio.data.datamanagers.full_images_datamanager import (
     FullImageDatamanager,
     FullImageDatamanagerConfig,
 )
-from typing import (
-    Dict,
-    Literal,
-    Tuple,
-    Type,
-    Union,
-)
+from nerfstudio.utils import writer
 
 CONSOLE = Console(width=120)
 
@@ -79,9 +73,6 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
             **kwargs,
         )
         self.current_light = None
-        # print(self.train_dataparser_outputs.lights)
-        # print("datamanager init | num cameras: ", len(self.train_dataset.cameras))
-        # print("datamanager init | num lights: ", len(self.train_dataparser_outputs.lights))
 
     def next_train(self, step: int) -> Tuple[Cameras, Dict, Cameras]:
         """Returns the next training batch
@@ -94,9 +85,8 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
         if len(self.train_unseen_cameras) == 0:
             self.train_unseen_cameras = [i for i in range(len(self.train_dataset))]
 
-        # TODO: Add functionality for RGBA images
+        # NOTE: changed for RGBA images
         data = deepcopy(self.cached_train[image_idx])
-        # data["image"] = data["image"].to(self.device)[..., :3]
         data["image"] = data["image"].to(self.device)
 
         assert len(self.train_dataset.cameras.shape) == 1, "Assumes single batch dimension"
@@ -113,18 +103,6 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
             light = None
 
         return cameras, data, light
-
-    # def next_eval(self, step: int) -> Tuple[Cameras, Dict]:
-    #     """Returns the next evaluation batch
-    #     Returns a Camera instead of raybundle"""
-    #     self.eval_count += 1
-    #     if self.config.cache_images == "disk":
-    #         camera, data = next(self.iter_eval_image_dataloader)[0]
-    #         camera = camera.to(self.device)
-    #         data = get_dict_to_torch(data, self.device)
-    #         return camera, data
-
-    #     return self.next_eval_image(step=step)
 
     def next_eval_image(self, step: int) -> Tuple[Cameras, Dict]:
         """Returns the next evaluation batch
@@ -176,6 +154,7 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         test_mode: Literal["test", "val", "inference"] = "val",
         world_size: int = 1,
         local_rank: int = 0,
+        view_selector=None,  # Optional ViewSelector instance
         **kwargs,  # pylint: disable=unused-argument
     ):
         super().__init__(
@@ -188,6 +167,7 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         )
 
         self.current_light = None
+        self.view_selector = view_selector
 
         # Initialize active set
         num_train_images = len(self.train_dataset)
@@ -198,18 +178,48 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         )
         self.active_unseen_cameras = list(self.active_train_indices)
 
-    def expand_active_set(self, k: int = 1) -> None:
-        """Expand the active set by randomly adding up to k remaining indices."""
+    def expand_active_set(self, k: int = 1, step: Optional[int] = None, **kwargs) -> None:
+        """Expand the active set by adding up to k remaining indices using the view selector."""
         if not self.all_train_indices:
             return
         remaining = list(set(self.all_train_indices) - set(self.active_train_indices))
         if not remaining:
             return
-        add = random.sample(remaining, k=min(max(1, k), len(remaining)))
+
+        # Use view selector if available, otherwise fall back to random
+        if self.view_selector is not None:
+            add = self.view_selector.select_views(
+                active_indices=self.active_train_indices,
+                remaining_indices=remaining,
+                num_to_select=k,
+                step=step,
+                datamanager=self,
+                **kwargs,
+            )
+        else:
+            # Fallback to random selection
+            add = random.sample(remaining, k=min(max(1, k), len(remaining)))
+
         self.active_train_indices.extend(add)
         # Make newly added indices available for immediate sampling
         self.active_unseen_cameras.extend(add)
-        print(f"Expanded active set to {len(self.active_train_indices)} views")
+
+        # Log to wandb/tensorboard if step is provided
+        if step is not None:
+            try:
+                writer.put_scalar(name="View Selection/Views Added", scalar=len(add), step=step)
+                writer.put_scalar(
+                    name="View Selection/Total Active Views",
+                    scalar=len(self.active_train_indices),
+                    step=step,
+                )
+            except Exception:
+                # Silently fail if writer is not initialized (e.g., wandb not enabled)
+                pass
+
+        print(
+            f"Expanded active set to {len(self.active_train_indices)} views (added {len(add)} views)"
+        )
 
     def next_train(self, step: int) -> Tuple[Cameras, Dict, Cameras]:
         """Return the next training batch restricted to the active view subset.

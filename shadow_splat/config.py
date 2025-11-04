@@ -29,11 +29,12 @@ shadow_splat = MethodSpecification(
         steps_per_eval_all_images=1000,
         max_num_iterations=30000,
         mixed_precision=False,
-        # pipeline=ViewSelectionPipelineConfig(
-        pipeline=ShadowSplatPipelineConfig(
-            # add_every_n_steps=50,
-            # datamanager=ViewSelectionDataManagerConfig(
-            datamanager=ShadowSplatDataManagerConfig(
+        pipeline=ViewSelectionPipelineConfig(
+            # pipeline=ShadowSplatPipelineConfig(
+            add_every_n_steps=50,
+            view_selector="random",
+            datamanager=ViewSelectionDataManagerConfig(
+                # datamanager=ShadowSplatDataManagerConfig(
                 dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
                 cache_images_type="uint8",
             ),

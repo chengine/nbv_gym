@@ -15,6 +15,7 @@ from nerfstudio.utils import profiler
 from shadow_splat.datamanager import ShadowSplatDataManagerConfig
 from shadow_splat.datamanager import ViewSelectionDataManagerConfig
 from shadow_splat.model import ShadowSplatModelConfig
+from shadow_splat.view_selector import create_view_selector
 
 
 @dataclass
@@ -60,28 +61,13 @@ class ShadowSplatPipeline(VanillaPipeline):
             step: current iteration step to update sampler if using DDP (distributed)
         """
         cameras, batch, light = self.datamanager.next_train(step)
-        # import torch
 
-        # with torch.no_grad():
-        #     if step >= 500:
-        #         self._model.update_light_source(light)  # added
-        # if step >= 500:
-        #     model_outputs = self._model(cameras, light)
-        # else:
-        #     model_outputs = self._model(cameras)
         if self.config.disable_light:
             model_outputs = self._model(cameras)
         else:
             model_outputs = self._model(cameras, light)
         metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
         loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
-
-        # import matplotlib.pyplot as plt
-
-        # fig, ax = plt.subplots(1, 2)
-        # ax[0].imshow(batch["image"].detach().cpu().numpy())
-        # ax[1].imshow(model_outputs["rgb"].detach().cpu().numpy())
-        # plt.show()
 
         return model_outputs, loss_dict, metrics_dict
 
@@ -137,7 +123,17 @@ class ViewSelectionPipelineConfig(VanillaPipelineConfig):
     # Progressive view selection controls
     add_every_n_steps: int = 1000
     add_num_views: int = 1
-    view_selector: Optional[str] = None  # optional dotted path for custom selector
+    view_selector: Optional[str] = None
+    """View selection mode: 'random', 'all', 'optics', or dotted path to custom ViewSelector class.
+    If None, defaults to random selection."""
+
+    # Optics view selector configuration
+    optics_intrinsics_scale: float = 1.0
+    """Scale factor for camera intrinsics during coverage scoring (for efficiency). Values < 1.0 downscale."""
+    optics_use_kdtree_filter: bool = False
+    """Whether to use KD-tree filtering to reduce candidate pool for optics selection."""
+    optics_num_nearest_neighbors: int = 5
+    """Number of nearest neighbors to consider when using KD-tree filtering for optics selection."""
 
 
 class ViewSelectionPipeline(VanillaPipeline):
@@ -159,6 +155,23 @@ class ViewSelectionPipeline(VanillaPipeline):
             grad_scaler=grad_scaler,
         )
 
+        # Create and set view selector if specified
+        if config.view_selector is not None and hasattr(self.datamanager, "view_selector"):
+            # Pass optics-specific config if using optics selector
+            if config.view_selector == "optics":
+                view_selector = create_view_selector(
+                    mode=config.view_selector,
+                    num_nearest_neighbors=config.optics_num_nearest_neighbors,
+                    intrinsics_scale=config.optics_intrinsics_scale,
+                    use_kdtree_filter=config.optics_use_kdtree_filter,
+                )
+            else:
+                view_selector = create_view_selector(config.view_selector)
+            self.datamanager.view_selector = view_selector
+            self._view_selector = view_selector
+        else:
+            self._view_selector = None
+
     @profiler.time_function
     def get_train_loss_dict(self, step: int):
         """Get training loss dict and conditionally expand the active view set."""
@@ -169,7 +182,9 @@ class ViewSelectionPipeline(VanillaPipeline):
             and step % self.config.add_every_n_steps == 0
             and hasattr(self.datamanager, "expand_active_set")
         ):
-            self.datamanager.expand_active_set(self.config.add_num_views)
+            self.datamanager.expand_active_set(
+                k=self.config.add_num_views, step=step, model=self._model, pipeline=self
+            )
 
         cameras, batch, light = self.datamanager.next_train(step)
         if self.config.disable_light:

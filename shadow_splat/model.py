@@ -581,3 +581,62 @@ class ShadowSplatModel(SplatfactoModel):
         metrics_dict["ambient"] = torch.sigmoid(self.light_params["ambient"])
         self.light_optimizer.get_metrics_dict(metrics_dict)
         return metrics_dict
+
+    @torch.no_grad()
+    def coverage_score_for_camera(
+        self, camera: Cameras, intrinsics_scale: float = 1.0
+    ) -> torch.Tensor:
+        """Compute coverage score for a candidate camera.
+
+        Renders from the given camera and computes the sum of all pixel values in the
+        coverage image. Higher scores indicate better coverage.
+
+        Args:
+            camera: Camera object to evaluate
+            intrinsics_scale: Scale factor for camera intrinsics (for faster evaluation).
+                Values < 1.0 downscale the resolution.
+
+        Returns:
+            Scalar tensor with the total coverage score (sum of all coverage pixels)
+        """
+        # Save current training state
+        was_training = self.training
+
+        # Set to eval mode for faster inference
+        self.eval()
+
+        # Optionally downscale camera intrinsics for faster evaluation
+        if intrinsics_scale != 1.0:
+            # Create a new camera with scaled intrinsics
+            scaled_camera = Cameras(
+                camera_to_worlds=camera.camera_to_worlds,
+                fx=camera.fx * intrinsics_scale,
+                fy=camera.fy * intrinsics_scale,
+                cx=camera.cx * intrinsics_scale,
+                cy=camera.cy * intrinsics_scale,
+                width=(camera.width * intrinsics_scale).int(),
+                height=(camera.height * intrinsics_scale).int(),
+                camera_type=camera.camera_type,
+                times=camera.times,
+            ).to(camera.device)
+            camera = scaled_camera
+
+        # Render from camera - get_outputs will use render_mode="RGB+ED" which includes coverage
+        outputs = self.get_outputs(camera, light=None)
+
+        # Extract coverage from outputs
+        if "coverage" in outputs:
+            coverage = outputs["coverage"]  # [H, W] or [H, W, 1]
+        else:
+            # Fallback: coverage might be in render output
+            # This should not happen if render_mode is set correctly, but handle gracefully
+            coverage = torch.zeros((camera.height.item(), camera.width.item()), device=self.device)
+
+        # Sum all pixel values to get total coverage score
+        coverage_score = coverage.sum()
+
+        # Restore training state
+        if was_training:
+            self.train()
+
+        return coverage_score
