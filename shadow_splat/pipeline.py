@@ -134,6 +134,8 @@ class ViewSelectionPipelineConfig(VanillaPipelineConfig):
     """Random seed for initial view selection. If None, uses a random seed. Set to a value to get reproducible initial views per scene."""
 
     # Optics view selector configuration
+    optics_coverage_metric: str = "coverage"
+    """Coverage metric to use for optics selection."""
     optics_intrinsics_scale: float = 1.0
     """Scale factor for camera intrinsics during coverage scoring (for efficiency). Values < 1.0 downscale."""
     optics_use_kdtree_filter: bool = False
@@ -171,6 +173,7 @@ class ViewSelectionPipeline(VanillaPipeline):
             if config.view_selector == "optics":
                 view_selector = create_view_selector(
                     mode=config.view_selector,
+                    coverage_metric=config.optics_coverage_metric,
                     num_nearest_neighbors=config.optics_num_nearest_neighbors,
                     intrinsics_scale=config.optics_intrinsics_scale,
                     use_kdtree_filter=config.optics_use_kdtree_filter,
@@ -192,9 +195,11 @@ class ViewSelectionPipeline(VanillaPipeline):
             and step % self.config.add_every_n_steps == 0
             and hasattr(self.datamanager, "expand_active_set")
         ):
+            self._model.training = False
             self.datamanager.expand_active_set(
                 k=self.config.add_num_views, step=step, model=self._model, pipeline=self
             )
+            self._model.training = True
 
         cameras, batch, light = self.datamanager.next_train(step)
         if self.config.disable_light:
