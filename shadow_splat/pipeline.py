@@ -13,7 +13,9 @@ from nerfstudio.pipelines.base_pipeline import (
 from nerfstudio.utils import profiler
 
 from shadow_splat.datamanager import ShadowSplatDataManagerConfig
+from shadow_splat.datamanager import ViewSelectionDataManagerConfig
 from shadow_splat.model import ShadowSplatModelConfig
+from shadow_splat.view_selector import create_view_selector
 
 
 @dataclass
@@ -59,28 +61,13 @@ class ShadowSplatPipeline(VanillaPipeline):
             step: current iteration step to update sampler if using DDP (distributed)
         """
         cameras, batch, light = self.datamanager.next_train(step)
-        # import torch
 
-        # with torch.no_grad():
-        #     if step >= 500:
-        #         self._model.update_light_source(light)  # added
-        # if step >= 500:
-        #     model_outputs = self._model(cameras, light)
-        # else:
-        #     model_outputs = self._model(cameras)
         if self.config.disable_light:
             model_outputs = self._model(cameras)
         else:
             model_outputs = self._model(cameras, light)
         metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
         loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
-
-        # import matplotlib.pyplot as plt
-
-        # fig, ax = plt.subplots(1, 2)
-        # ax[0].imshow(batch["image"].detach().cpu().numpy())
-        # ax[1].imshow(model_outputs["rgb"].detach().cpu().numpy())
-        # plt.show()
 
         return model_outputs, loss_dict, metrics_dict
 
@@ -111,6 +98,118 @@ class ShadowSplatPipeline(VanillaPipeline):
         Args:
             step: current iteration step
         """
+        self.eval()
+        camera, batch, light = self.datamanager.next_eval_image(step)
+        if self.config.disable_light:
+            outputs = self.model(camera)
+        else:
+            outputs = self.model(camera, light)
+        metrics_dict, images_dict = self.model.get_image_metrics_and_images(outputs, batch)
+        assert "num_rays" not in metrics_dict
+        metrics_dict["num_rays"] = (camera.height * camera.width * camera.size).item()
+        self.train()
+        return metrics_dict, images_dict
+
+
+@dataclass
+class ViewSelectionPipelineConfig(VanillaPipelineConfig):
+    """Configuration for progressive view selection pipeline"""
+
+    _target: Type = field(default_factory=lambda: ViewSelectionPipeline)
+    datamanager: ViewSelectionDataManagerConfig = ViewSelectionDataManagerConfig()
+    model: ModelConfig = ShadowSplatModelConfig()
+    disable_light: bool = False
+
+    # Progressive view selection controls
+    add_every_n_steps: int = 1000
+    add_num_views: int = 1
+    view_selector: Optional[str] = None
+    """View selection mode: 'random', 'all', 'optics', or dotted path to custom ViewSelector class.
+    If None, defaults to random selection."""
+
+    # Optics view selector configuration
+    optics_intrinsics_scale: float = 1.0
+    """Scale factor for camera intrinsics during coverage scoring (for efficiency). Values < 1.0 downscale."""
+    optics_use_kdtree_filter: bool = False
+    """Whether to use KD-tree filtering to reduce candidate pool for optics selection."""
+    optics_num_nearest_neighbors: int = 5
+    """Number of nearest neighbors to consider when using KD-tree filtering for optics selection."""
+
+
+class ViewSelectionPipeline(VanillaPipeline):
+    def __init__(
+        self,
+        config: ViewSelectionPipelineConfig,
+        device: str,
+        test_mode: Literal["test", "val", "inference"] = "val",
+        world_size: int = 1,
+        local_rank: int = 0,
+        grad_scaler: Optional[GradScaler] = None,
+    ):
+        super().__init__(
+            config=config,
+            device=device,
+            test_mode=test_mode,
+            world_size=world_size,
+            local_rank=local_rank,
+            grad_scaler=grad_scaler,
+        )
+
+        # Create and set view selector if specified
+        if config.view_selector is not None and hasattr(self.datamanager, "view_selector"):
+            # Pass optics-specific config if using optics selector
+            if config.view_selector == "optics":
+                view_selector = create_view_selector(
+                    mode=config.view_selector,
+                    num_nearest_neighbors=config.optics_num_nearest_neighbors,
+                    intrinsics_scale=config.optics_intrinsics_scale,
+                    use_kdtree_filter=config.optics_use_kdtree_filter,
+                )
+            else:
+                view_selector = create_view_selector(config.view_selector)
+            self.datamanager.view_selector = view_selector
+            self._view_selector = view_selector
+        else:
+            self._view_selector = None
+
+    @profiler.time_function
+    def get_train_loss_dict(self, step: int):
+        """Get training loss dict and conditionally expand the active view set."""
+        # Expand active set on schedule
+        if (
+            getattr(self.config, "add_every_n_steps", 0) > 0
+            and step > 0
+            and step % self.config.add_every_n_steps == 0
+            and hasattr(self.datamanager, "expand_active_set")
+        ):
+            self.datamanager.expand_active_set(
+                k=self.config.add_num_views, step=step, model=self._model, pipeline=self
+            )
+
+        cameras, batch, light = self.datamanager.next_train(step)
+        if self.config.disable_light:
+            model_outputs = self._model(cameras)
+        else:
+            model_outputs = self._model(cameras, light)
+        metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
+        loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
+        return model_outputs, loss_dict, metrics_dict
+
+    @profiler.time_function
+    def get_eval_loss_dict(self, step: int):
+        self.eval()
+        ray_bundle, batch, light = self.datamanager.next_eval(step)
+        if self.config.disable_light:
+            model_outputs = self.model(ray_bundle)
+        else:
+            model_outputs = self.model(ray_bundle, light)
+        metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
+        loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
+        self.train()
+        return model_outputs, loss_dict, metrics_dict
+
+    @profiler.time_function
+    def get_eval_image_metrics_and_images(self, step: int):
         self.eval()
         camera, batch, light = self.datamanager.next_eval_image(step)
         if self.config.disable_light:

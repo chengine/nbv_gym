@@ -13,92 +13,7 @@ from nerfstudio.models.splatfacto import SplatfactoModel
 from nerfstudio.utils.writer import GLOBAL_BUFFER, EventName
 from nerfstudio.viewer.render_state_machine import RenderAction
 
-from shadow_splat.model import LumenModel, LumenModelConfig
-
-
-class LumenViewer(Viewer):
-    """Custom viewer with an additional slider for adjusting the light source position dynamically."""
-
-    RGB_INTENSITY = False
-
-    def __init__(self, *args, **kwargs):
-        # Convert SplatfactoModel to ShadowSplatModel BEFORE calling parent __init__
-        pipeline = kwargs["pipeline"]
-        if type(pipeline.model) is SplatfactoModel:
-            print("model is splatfacto, converting to shadow splat")
-            self._convert_model(pipeline)
-
-        # Initialize the parent Viewer class
-        super().__init__(*args, **kwargs)
-
-        print("LumenViewer | __init__")
-        print(f"pipeline.model: {type(pipeline.model)}")
-
-        tabs = self.viser_server.gui.add_tab_group()
-        lighting_tab = tabs.add_tab("Light", viser.Icon.SUN)
-
-        with lighting_tab:
-            self._add_light_source_slider()
-
-    def _convert_model(self, pipeline):
-        """Convert the model to a ShadowSplatModel"""
-        config = LumenModelConfig()
-        model = LumenModel(config, pipeline.model.scene_box, pipeline.model.num_train_data)
-        model.populate_modules()
-        model.seed_points = pipeline.model.seed_points
-        model.gauss_params = pipeline.model.gauss_params
-        model = model.to(pipeline.device)
-        pipeline.model = model
-        if hasattr(pipeline, "_model"):
-            pipeline._model = model
-
-    def _add_light_source_slider(
-        self,
-    ):
-        """Add a slider to the control panel for adjusting the light source position."""
-        self.az_slider = self.viser_server.gui.add_slider(
-            label="Azimuth", min=0.0, max=360.0, step=0.1, initial_value=0.0
-        )
-        self.el_slider = self.viser_server.gui.add_slider(
-            label="Elevation", min=0.0, max=180.0, step=0.1, initial_value=0.0
-        )
-        # Set the callbacks
-        self.az_slider.on_update(self.update_light_source_pose)
-        self.el_slider.on_update(self.update_light_source_pose)
-
-        # # Add light source camera
-        # self.light_source_visualizer = self.viser_server.scene.add_camera_frustum(
-        #     name="/light",
-        #     fov=90.0,
-        #     aspect=1.0,
-        #     scale=1.0,
-        #     color=(1.0, 1.0, 0.0),
-        #     wxyz=tf.SO3.from_x_radians(0.0).wxyz,
-        #     position=(0.0, 0.0, 0.0),
-        #     visible=False,
-        # )
-
-    def update_light_source_pose(self, event):
-        """Update the light source pose based on slider input."""
-        # Extract GUI values
-        az_rad = torch.deg2rad(torch.tensor(self.az_slider.value))
-        el_rad = torch.deg2rad(torch.tensor(self.el_slider.value))
-
-        # Light source pose pointing to the origin
-        new_pose = camera_to_world_transform(az_rad, el_rad, torch.zeros(3), 1.0).to(
-            self.pipeline.device
-        )
-
-        pose_delta = torch.tensor([[0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]).to(self.pipeline.device)
-
-        new_pose = torch.linalg.inv(pose_delta) @ new_pose
-
-        print("New light source pose:\n", new_pose)
-
-        with torch.no_grad():
-            self.pipeline.model.env_map_transform = new_pose
-
-        self._trigger_rerender()
+from shadow_splat.model import ShadowSplatModel, ShadowSplatModelConfig
 
 
 class ShadowSplatViewer(Viewer):
@@ -123,23 +38,22 @@ class ShadowSplatViewer(Viewer):
         lighting_tab = tabs.add_tab("Light", viser.Icon.SUN)
 
         with lighting_tab:
-            # Get initial light parameters from pipeline model
-            initial_variance_factor = torch.exp(
-                pipeline.model.light_params["variance_factor"]
-            ).item()
-            initial_ambient = torch.exp(pipeline.model.light_params["ambient"]).item()
-            initial_background_ambient = torch.exp(
-                pipeline.model.light_params["background_ambient"]
-            ).item()
+            initial_ambient = torch.sigmoid(pipeline.model.light_params["ambient"]).item()
             initial_intensity = (
                 torch.exp(pipeline.model.light_params["intensity"]).detach().cpu().numpy()
             ) * np.ones(3)
             self._add_light_source_slider(
-                initial_variance_factor=initial_variance_factor,
                 initial_ambient=initial_ambient,
-                initial_background_ambient=initial_background_ambient,
                 initial_intensity=initial_intensity,
             )
+
+        # Toggle to show only active training views (from progressive view selection)
+        self._show_only_active = False
+        self._last_active_indices = set()
+        self.only_active_checkbox = self.viser_server.gui.add_checkbox(
+            label="Show only active train views", disabled=False, initial_value=False
+        )
+        self.only_active_checkbox.on_update(lambda _: self._on_only_active_toggle())
 
     def _convert_model(self, pipeline):
         """Convert the model to a ShadowSplatModel"""
@@ -155,9 +69,7 @@ class ShadowSplatViewer(Viewer):
 
     def _add_light_source_slider(
         self,
-        initial_variance_factor=0.01,
         initial_ambient=0.01,
-        initial_background_ambient=0.01,
         initial_intensity=np.ones(3),
     ):
         """Add a slider to the control panel for adjusting the light source position."""
@@ -176,22 +88,8 @@ class ShadowSplatViewer(Viewer):
         self.focal_length_slider = self.viser_server.gui.add_slider(
             label="Focal length", min=0.0, max=3000.0, step=1.0, initial_value=1250
         )
-        self.variance_factor_slider = self.viser_server.gui.add_slider(
-            label="Variance factor",
-            min=0.0,
-            max=1.0,
-            step=0.01,
-            initial_value=initial_variance_factor,
-        )
         self.ambient_slider = self.viser_server.gui.add_slider(
             label="Ambient", min=0.0, max=1.0, step=0.01, initial_value=initial_ambient
-        )
-        self.background_ambient_slider = self.viser_server.gui.add_slider(
-            label="Background ambient",
-            min=0.0,
-            max=1.0,
-            step=0.01,
-            initial_value=initial_background_ambient,
         )
         if self.RGB_INTENSITY:
             self.red_intensity_slider = self.viser_server.gui.add_slider(
@@ -235,7 +133,6 @@ class ShadowSplatViewer(Viewer):
         self.radius_slider.on_update(self.update_light_source_pose)
         self.dim_slider.on_update(self.update_light_source_pose)
         self.focal_length_slider.on_update(self.update_light_source_pose)
-        self.variance_factor_slider.on_update(self.update_light_source_pose)
         if self.RGB_INTENSITY:
             self.red_intensity_slider.on_update(self.update_light_source_pose)
             self.green_intensity_slider.on_update(self.update_light_source_pose)
@@ -243,7 +140,6 @@ class ShadowSplatViewer(Viewer):
         else:
             self.intensity_slider.on_update(self.update_light_source_pose)
         self.ambient_slider.on_update(self.update_light_source_pose)
-        self.background_ambient_slider.on_update(self.update_light_source_pose)
         self.origin_input.on_update(self.update_light_source_pose)
         self.camera_type_select.on_update(self.update_light_source_pose)
 
@@ -301,33 +197,61 @@ class ShadowSplatViewer(Viewer):
                     if camera_state is not None:
                         self.render_statemachines[id].action(RenderAction("step", camera_state))
                 self.update_camera_poses()
+                # Update which training cameras are visible based on active subset
+                self._update_train_camera_visibility()
                 self.update_training_light_source_frustum()
                 self.update_step(step)
 
+    def _on_only_active_toggle(self):
+        self._show_only_active = bool(self.only_active_checkbox.value)
+        self._update_train_camera_visibility(force=True)
+
+    def _get_active_indices(self) -> set:
+        """Return the active training indices from the datamanager if present, else all indices."""
+        dm = self.pipeline.datamanager
+        try:
+            if hasattr(dm, "active_train_indices") and dm.active_train_indices is not None:
+                return set(int(i) for i in dm.active_train_indices)
+        except Exception:
+            pass
+        # Fallback to all train indices
+        try:
+            total = len(dm.train_dataset)
+            return set(range(total))
+        except Exception:
+            return set()
+
+    def _update_train_camera_visibility(self, force: bool = False) -> None:
+        """Hide non-active training frustums when the toggle is enabled.
+
+        Operates only on already-created frustums (Viewer limits number displayed).
+        """
+        if not hasattr(self, "camera_handles") or self.camera_handles is None:
+            return
+        active = self._get_active_indices()
+        if not force and active == self._last_active_indices and self._show_only_active is False:
+            return
+        self._last_active_indices = active
+
+        # Apply visibility filter
+        for idx, handle in self.camera_handles.items():
+            try:
+                handle.visible = (idx in active) if self._show_only_active else True
+            except Exception:
+                continue
+
     def update_training_light_source_frustum(self):
-        # current_light = self.pipeline.datamanager.current_light
-        # dimension = current_light.width.item()
-        # focal_length = current_light.fx.item()
-        # self.light_source_visualizer.fov = 2 * np.arctan2(dimension, (2 * focal_length))
-
-        # # Update light params
-        # # self.cutoff_slider.value = torch.exp(self.pipeline.model.light_params["cutoff"]).item()
-        # # self.intensity_slider.value = (
-        # #     torch.exp(self.pipeline.model.light_params["intensity"]).detach().cpu().numpy()[0]
-        # # )
-        # # self.dim_slider.value = dimension
-        # # self.focal_length_slider.value = focal_length
-
-        # # Nerfstudio conversion
-        # c2w = current_light.camera_to_worlds.squeeze().cpu().numpy()
+        if self.pipeline.datamanager.current_light is None:
+            return
 
         with torch.no_grad():
             light_optimizer = self.pipeline.model.light_optimizer
-            c2ws_delta = light_optimizer(torch.tensor([0], device=light_optimizer.device)).cpu().numpy()
+            c2ws_delta = (
+                light_optimizer(torch.tensor([0], device=light_optimizer.device)).cpu().numpy()
+            )
         c2w_orig = self.pipeline.datamanager.current_light.camera_to_worlds.squeeze().cpu().numpy()
         c2w_delta = c2ws_delta[0, ...]
         c2w = c2w_orig @ np.concatenate((c2w_delta, np.array([[0, 0, 0, 1]])), axis=0)
-
 
         R = tf.SO3.from_matrix(c2w[:3, :3])  # type: ignore
         R = R @ tf.SO3.from_x_radians(np.pi)
@@ -344,9 +268,7 @@ class ShadowSplatViewer(Viewer):
         radius = self.radius_slider.value
         dimension = self.dim_slider.value
         focal_length = self.focal_length_slider.value
-        variance_factor = self.variance_factor_slider.value
         ambient = self.ambient_slider.value
-        background_ambient = self.background_ambient_slider.value
         if self.RGB_INTENSITY:
             red_intensity = self.red_intensity_slider.value
             green_intensity = self.green_intensity_slider.value
@@ -382,13 +304,7 @@ class ShadowSplatViewer(Viewer):
         )
 
         with torch.no_grad():
-            self.pipeline.model.compute_irradiance(
-                light_source,
-                variance_factor=variance_factor,
-                intensity=intensity,
-                ambient=ambient,
-                background_ambient=background_ambient,
-            )
+            self.pipeline.model.last_training_light = light_source
 
         cv_to_gl = torch.tensor(
             [
