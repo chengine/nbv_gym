@@ -671,7 +671,6 @@ def calculate_relighting_weights(
 
     return irradiance, irradiance_fraction, depth_image, variance_image
 
-
 # Renders the accumulated or expected depth (first moment) and the accumulated
 # or expected depth squared (second moment). Will add higher moments as necessary.
 def moment_rasterization(
@@ -2462,6 +2461,8 @@ def rasterization_with_coverage(
     opacities: Tensor,  # [..., N]
     colors: Tensor,  # [..., (C,) N, D] or [..., (C,) N, K, 3]
     coverage_counts: Tensor,  # [..., N, G]
+    accumulated_transmittance: Tensor,  # [..., N, 1]
+    accumulated_view_transmittance: Tensor,  # [..., N, G]
     bin_dirs: Tensor,  # [G, 3]
     viewmats: Tensor,  # [..., C, 4, 4]
     Ks: Tensor,  # [..., C, 3, 3]
@@ -2494,6 +2495,7 @@ def rasterization_with_coverage(
     # rolling shutter
     rolling_shutter: RollingShutterType = RollingShutterType.GLOBAL,
     viewmats_rs: Optional[Tensor] = None,  # [..., C, 4, 4]
+    concentration: Optional[float] = 1.0,
 ) -> Tuple[Tensor, Tensor, Dict]:
     """Rasterize a set of 3D Gaussians (N) to a batch of image planes (C).
 
@@ -2933,6 +2935,7 @@ def rasterization_with_coverage(
         # make it apple-to-apple with Inria's CUDA Backend.
         colors = torch.clamp_min(colors + 0.5, 0.0)
 
+    ### COMPUTATION OF COVERAGE METRICS ###
     coverage_metric = compute_coverage_per_gaussian(
         coverage_counts=coverage_counts,
         bin_dirs=bin_dirs,
@@ -2940,8 +2943,16 @@ def rasterization_with_coverage(
         inference_dirs=dirs.squeeze(0),
     )
 
+    transmittance_metric = accumulated_transmittance
+
+    sg_weights = spherical_gaussian_weights(input_view_dirs=dirs.squeeze(0), bin_dirs=bin_dirs, beta=concentration)       # [N, G]
+
+    view_transmittance_metric = torch.sum(accumulated_view_transmittance * sg_weights, dim=-1, keepdim=True)       # [N, 1]
+
     # Concatenate coverage_metric with colors
-    colors = torch.cat((colors, coverage_metric[None, ..., None]), dim=-1)
+    colors = torch.cat((colors, coverage_metric[None, ..., None], transmittance_metric[None], view_transmittance_metric[None]), dim=-1)
+
+    ### END ###
 
     # If in distributed mode, we need to scatter the GSs to the destination ranks, based
     # on which cameras they are visible to, which we already figured out in the projection
@@ -3031,19 +3042,20 @@ def rasterization_with_coverage(
 
     # Rasterize to pixels
     if render_mode in ["RGB+D", "RGB+ED"]:
-        colors = torch.cat((colors, depths[..., None]), dim=-1)
+        safe_depths = torch.nan_to_num(depths, nan=0.0, posinf=far_plane, neginf=near_plane).detach()
+        colors = torch.cat((colors, (safe_depths**2)[..., None], safe_depths[..., None]), dim=-1)
         if backgrounds is not None:
             backgrounds = torch.cat(
                 [
                     backgrounds,
-                    torch.zeros(batch_dims + (C, 1), device=backgrounds.device),
+                    torch.zeros(batch_dims + (C, 5), device=backgrounds.device),
                 ],
                 dim=-1,
             )
     elif render_mode in ["D", "ED"]:
         colors = depths[..., None]
         if backgrounds is not None:
-            backgrounds = torch.zeros(batch_dims + (C, 1), device=backgrounds.device)
+            backgrounds = torch.zeros(batch_dims + (C, 5), device=backgrounds.device)
     else:  # RGB
         pass
 
@@ -3176,14 +3188,14 @@ def rasterization_with_coverage(
                 packed=packed,
                 absgrad=absgrad,
             )
-    if render_mode in ["ED", "RGB+ED"]:
-        # normalize the accumulated depth to get the expected depth
-        render_colors = torch.cat(
-            [
-                render_colors[..., :-1],
-                render_colors[..., -1:] / render_alphas.clamp(min=1e-10),
-            ],
-            dim=-1,
-        )
-
+    # if render_mode in ["ED", "RGB+ED"]:
+    #     # normalize the accumulated depth to get the expected depth
+    #     render_colors = torch.cat(
+    #         [
+    #             render_colors[..., :-2],
+    #             render_colors[..., -2:] / render_alphas.clamp(min=1e-10),
+    #         ],
+    #         dim=-1,
+    #     )
+    
     return render_colors, render_alphas, meta

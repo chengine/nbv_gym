@@ -58,7 +58,7 @@ from shadow_splat.shadow_splat_rendering import (
     calculate_relighting_weights_from_point_cloud,
     generate_point_cloud_from_camera_depth,
 )
-from shadow_splat.util.coverage import update_view_coverage_for_frustum, fibonacci_sphere
+from shadow_splat.util.coverage import update_view_coverage_for_frustum, fibonacci_sphere, update_transmittance_metrics_for_frustum
 
 import matplotlib.pyplot as plt
 
@@ -77,11 +77,8 @@ class ShadowSplatModelConfig(SplatfactoModelConfig):
     ambient: bool = (
         True  # Controls whether Gaussians outside the light frustum are set to ambient or to black
     )
-    tone_mapping: Literal["linear", "luminance", "reinhard"] = "linear"
-    gamma_correction: float = 1.0
-    fix_variance: bool = False
     n_sphere_bins: int = 128
-
+    concentration: float = 5.0
 
 class ShadowSplatModel(SplatfactoModel):
     """Nerfstudio's implementation of Shadow Splatting
@@ -117,12 +114,23 @@ class ShadowSplatModel(SplatfactoModel):
 
         self.last_training_light = None
 
+        ### THIS IS FOR COVERAGE ###
         self.bin_dirs = fibonacci_sphere(n_bins=self.config.n_sphere_bins, device="cuda")
         self.coverage_counts = torch.nn.Parameter(
             torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda")
         )
 
+        self.accumulated_transmittance = torch.nn.Parameter(
+            torch.zeros((self.means.shape[0], 1), device="cuda")
+        )
+
+        self.accumulated_view_transmittance = torch.nn.Parameter(
+            torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda")
+        )
+
         self.gauss_params["coverage_counts"] = self.coverage_counts
+        self.gauss_params["accumulated_transmittance"] = self.accumulated_transmittance
+        self.gauss_params["accumulated_view_transmittance"] = self.accumulated_view_transmittance
 
         self.seen_cam_idx = []
 
@@ -139,6 +147,14 @@ class ShadowSplatModel(SplatfactoModel):
     def coverage_counts(self):
         return self.gauss_params["coverage_counts"]
 
+    @property
+    def accumulated_transmittance(self):
+        return self.gauss_params["accumulated_transmittance"]
+
+    @property
+    def accumulated_view_transmittance(self):
+        return self.gauss_params["accumulated_view_transmittance"]
+
     def load_state_dict(self, dict, **kwargs):  # type: ignore
         # resize the parameters to match the new number of points
         self.step = 30000
@@ -153,6 +169,8 @@ class ShadowSplatModel(SplatfactoModel):
                 "features_rest",
                 "opacities",
                 "coverage_counts",
+                "accumulated_transmittance",
+                "accumulated_view_transmittance",
             ]:
                 dict[f"gauss_params.{p}"] = dict[p]
         newp = dict["gauss_params.means"].shape[0]
@@ -201,6 +219,8 @@ class ShadowSplatModel(SplatfactoModel):
                 "features_rest",
                 "opacities",
                 "coverage_counts",
+                "accumulated_transmittance",
+                "accumulated_view_transmittance",
             ]
         }
 
@@ -310,10 +330,13 @@ class ShadowSplatModel(SplatfactoModel):
         else:
             raise ValueError("Unknown camera type: %s", camera.camera_type)
 
-        if self.config.output_depth_during_training or not self.training:
-            render_mode = "RGB+ED"
-        else:
-            render_mode = "RGB"
+        # if self.config.output_depth_during_training or not self.training:
+        #     render_mode = "RGB+ED"
+        # else:
+        #     render_mode = "RGB"
+
+        # NOTE: We need to render depth (and variance) for coverage metrics
+        render_mode = "RGB+ED"
 
         if self.config.sh_degree > 0:
             sh_degree_to_use = min(
@@ -330,6 +353,8 @@ class ShadowSplatModel(SplatfactoModel):
             opacities=torch.sigmoid(opacities_crop).squeeze(-1),
             colors=features_crop,
             coverage_counts=self.coverage_counts,
+            accumulated_transmittance=torch.sqrt(self.accumulated_transmittance.detach()),
+            accumulated_view_transmittance=torch.sqrt(self.accumulated_view_transmittance.detach()),
             bin_dirs=self.bin_dirs,
             viewmats=viewmat,
             Ks=K,
@@ -344,31 +369,10 @@ class ShadowSplatModel(SplatfactoModel):
             absgrad=self.strategy.absgrad if isinstance(self.strategy, DefaultStrategy) else False,
             rasterize_mode=self.config.rasterize_mode,
             camera_model=camera_model,
+            concentration=self.config.concentration,
             # set some threshold to disregrad small gaussians for faster rendering.
             # radius_clip=3.0,
         )
-
-        if self.training:
-            cam_idx = camera.metadata["cam_idx"]
-            if cam_idx not in self.seen_cam_idx:
-                is_updated = update_view_coverage_for_frustum(
-                    means=means_crop,
-                    quats=quats_crop,
-                    scales=torch.exp(scales_crop),
-                    viewmats=viewmat,
-                    Ks=K,
-                    width=W,
-                    height=H,
-                    coverage_counts=self.coverage_counts,
-                    bin_dirs=self.bin_dirs,
-                    camera_model=camera_model,
-                    near_plane=0.01,
-                    far_plane=1e10,
-                )
-                self.seen_cam_idx.append(cam_idx)
-
-                # Put this in fancy text
-                print(f"Updated coverage counts from camera {cam_idx}!")
 
         # If is_updated, then self.coverage_counts is updated in-place, otherwise self.coverage_counts is not updated
 
@@ -453,26 +457,85 @@ class ShadowSplatModel(SplatfactoModel):
         coverage = render[:, ..., 3:4].squeeze(0)
         lighted_dissimilarity = (1.0 - coverage) * (1.0 - shadow_img)
 
+        transmittance_img = render[:, ..., 4:5].squeeze(0)
+        # lighted_transmittance_img = transmittance_img
+
+        view_transmittance_img = render[:, ..., 5:6].squeeze(0)
+
         # apply bilateral grid
         if self.config.use_bilateral_grid and self.training:
             if camera.metadata is not None and "cam_idx" in camera.metadata:
                 rgb = self._apply_bilateral_grid(rgb, camera.metadata["cam_idx"], H, W)
 
-        if render_mode == "RGB+ED":
-            depth_im = render[:, ..., -1:]
-            depth_im = torch.where(alpha > 0, depth_im, depth_im.detach().max()).squeeze(0)
+        if render_mode in ["ED", "RGB+ED"]:
+            depth_im = render[:, ..., -1:].squeeze(0)
+            depth_sqr_im = render[:, ..., -2:-1].squeeze(0)
+            variance_img = depth_sqr_im - depth_im ** 2
+
+            depth_im = torch.where(alpha.squeeze(0) > 0, depth_im, depth_im.detach().max())
+            variance_img = torch.where(alpha.squeeze(0) > 0, variance_img, 0.0)
+
         else:
             depth_im = None
+            variance_img = None
 
         if background.shape[0] == 3 and not self.training:
             background = background.expand(H, W, 3)
 
+        if self.training:
+            cam_idx = camera.metadata["cam_idx"]
+            if cam_idx not in self.seen_cam_idx:
+
+                ### UPDATE COVERAGE METRICS ###
+                is_updated_coverage = update_view_coverage_for_frustum(
+                    means=means_crop,
+                    quats=quats_crop,
+                    scales=torch.exp(scales_crop),
+                    viewmats=viewmat,
+                    Ks=K,
+                    width=W,
+                    height=H,
+                    coverage_counts=self.coverage_counts,
+                    bin_dirs=self.bin_dirs,
+                    camera_model=camera_model,
+                    near_plane=0.01,
+                    far_plane=1e10,
+                )
+
+                is_updated_transmittance = update_transmittance_metrics_for_frustum(
+                    means=means_crop,
+                    quats=quats_crop,
+                    scales=torch.exp(scales_crop),
+                    viewmats=viewmat,
+                    Ks=K,
+                    width=W,
+                    height=H,
+                    depth_image=depth_im,
+                    variance_image=variance_img,
+                    bin_dirs=self.bin_dirs,
+                    accumulated_transmittance=self.accumulated_transmittance,
+                    accumulated_view_transmittance=self.accumulated_view_transmittance,
+                    camera_model=camera_model,
+                    near_plane=0.01,
+                    far_plane=1e10,
+                    concentration=self.config.concentration,
+                )
+
+                ### END ###
+                self.seen_cam_idx.append(cam_idx)
+
+                # Put this in fancy text
+                print(f"Updated coverage counts from camera {cam_idx}!")
+
         return {
             "rgb": rgb.squeeze(0),  # type: ignore
             "depth": depth_im,  # type: ignore
+            "variance": variance_img,  # type: ignore
             "accumulation": alpha.squeeze(0),  # type: ignore
             "background": background,  # type: ignore
             "coverage": coverage,  # type: ignore
+            "transmittance": transmittance_img,  # type: ignore
+            "view_transmittance": view_transmittance_img,  # type: ignore
             "shadow": shadow_img,  # type: ignore
             "light_depth": light_depth_image,  # type: ignore
             "light_variance": light_variance_image,  # type: ignore
