@@ -77,6 +77,14 @@ shadow_splat = MethodSpecification(
                 "optimizer": AdamOptimizerConfig(lr=0.0, eps=1e-15),
                 "scheduler": None,
             },
+            "accumulated_transmittance": {
+                "optimizer": AdamOptimizerConfig(lr=0.0, eps=1e-15),
+                "scheduler": None,
+            },
+            "accumulated_view_transmittance": {
+                "optimizer": AdamOptimizerConfig(lr=0.0, eps=1e-15),
+                "scheduler": None,
+            },
             "light_opt": {
                 "optimizer": AdamOptimizerConfig(lr=1e-4, eps=1e-15),
                 "scheduler": ExponentialDecaySchedulerConfig(
