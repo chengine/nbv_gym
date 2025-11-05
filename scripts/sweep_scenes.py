@@ -26,6 +26,8 @@ def main():
         ds,
         "--seed",
         str(seed),
+        "--project-name",
+        "shadow-splat",
         "--experiment-name",
         os.environ["WANDB_RUN_GROUP"],
         "--run-name",

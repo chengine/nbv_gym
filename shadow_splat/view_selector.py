@@ -3,7 +3,6 @@
 import random
 from typing import List, Optional
 from abc import ABC, abstractmethod
-import torch
 import numpy as np
 from scipy.spatial import KDTree
 
@@ -89,7 +88,7 @@ class OpticsViewSelector(ViewSelector):
                 - pipeline: The pipeline instance (optional)
 
         Returns:
-            List of selected view indices to add
+            List of selected view indices to add (views with lowest coverage scores)
         """
         if not remaining_indices:
             return []
@@ -108,17 +107,22 @@ class OpticsViewSelector(ViewSelector):
 
         # Get all cameras from the dataset
         all_cameras = datamanager.train_dataset.cameras
-        candidate_cameras = all_cameras[candidate_indices]
+
+        # Extract camera origins for KD-tree filtering
+        # We'll access cameras individually since Cameras doesn't support list indexing
+        candidate_origins_list = []
+        for idx in candidate_indices:
+            cam = all_cameras[idx : idx + 1]
+            origin = cam.camera_to_worlds[0, :3, -1].cpu().numpy()
+            candidate_origins_list.append(origin)
+        candidate_origins = np.array(candidate_origins_list)
 
         # Optionally filter candidates using KD-tree nearest neighbors
         if self.use_kdtree_filter and len(active_indices) > 0:
             # Use the last added view as the "root" pose
             root_idx = active_indices[-1]
-            root_camera = all_cameras[root_idx]
+            root_camera = all_cameras[root_idx : root_idx + 1]
             root_origin = root_camera.camera_to_worlds[0, :3, -1].cpu().numpy()
-
-            # Get camera origins for candidates
-            candidate_origins = candidate_cameras.camera_to_worlds[:, :3, -1].cpu().numpy()
 
             # Build KD-tree and query nearest neighbors
             kdtree = KDTree(candidate_origins)
@@ -128,24 +132,31 @@ class OpticsViewSelector(ViewSelector):
             # Filter to nearest neighbors
             nearest_indices = nearest_indices.flatten()
             candidate_indices = [candidate_indices[i] for i in nearest_indices]
-            candidate_cameras = all_cameras[candidate_indices]
+            # Recompute origins for filtered candidates
+            candidate_origins_list = []
+            for idx in candidate_indices:
+                cam = all_cameras[idx : idx + 1]
+                origin = cam.camera_to_worlds[0, :3, -1].cpu().numpy()
+                candidate_origins_list.append(origin)
+            candidate_origins = np.array(candidate_origins_list)
 
         # Score each candidate camera using coverage
         scores = []
-        for idx, cam_idx in enumerate(candidate_indices):
-            camera = candidate_cameras[idx : idx + 1].to(model.device)
+        for cam_idx in candidate_indices:
+            # Access camera using slice notation (Cameras expects tuple/slice, not list)
+            camera = all_cameras[cam_idx : cam_idx + 1].to(model.device)
             try:
                 score = model.coverage_score_for_camera(
                     camera, intrinsics_scale=self.intrinsics_scale
                 )
                 scores.append((cam_idx, score.item()))
             except Exception as e:
-                # Handle errors gracefully - assign low score
+                # Handle errors gracefully - assign high score
                 print(f"Warning: Failed to score camera {cam_idx}: {e}")
-                scores.append((cam_idx, -float("inf")))
+                scores.append((cam_idx, float("inf")))
 
-        # Sort by score (descending) and select top candidates
-        scores.sort(key=lambda x: x[1], reverse=True)
+        # Sort by score (ascending) and select top candidates (lowest coverage = most novel views)
+        scores.sort(key=lambda x: x[1], reverse=False)
         k = min(num_to_select, len(scores))
         selected_indices = [idx for idx, _ in scores[:k]]
 

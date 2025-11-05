@@ -589,7 +589,8 @@ class ShadowSplatModel(SplatfactoModel):
         """Compute coverage score for a candidate camera.
 
         Renders from the given camera and computes the sum of all pixel values in the
-        coverage image. Higher scores indicate better coverage.
+        coverage image. Higher scores indicate better coverage (more Gaussians seen from
+        more directions). Lower scores indicate novel/uncovered areas.
 
         Args:
             camera: Camera object to evaluate
@@ -597,7 +598,8 @@ class ShadowSplatModel(SplatfactoModel):
                 Values < 1.0 downscale the resolution.
 
         Returns:
-            Scalar tensor with the total coverage score (sum of all coverage pixels)
+            Scalar tensor with the total coverage score (sum of all coverage pixels).
+            Lower values indicate views that see poorly-covered areas.
         """
         # Save current training state
         was_training = self.training
