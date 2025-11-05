@@ -127,6 +127,12 @@ class ViewSelectionPipelineConfig(VanillaPipelineConfig):
     """View selection mode: 'random', 'all', 'optics', or dotted path to custom ViewSelector class.
     If None, defaults to random selection."""
 
+    # Initial view selection
+    start_num_views: int = 10
+    """Number of initial views to randomly select at the start of training."""
+    initial_view_seed: Optional[int] = None
+    """Random seed for initial view selection. If None, uses a random seed. Set to a value to get reproducible initial views per scene."""
+
     # Optics view selector configuration
     optics_intrinsics_scale: float = 1.0
     """Scale factor for camera intrinsics during coverage scoring (for efficiency). Values < 1.0 downscale."""
@@ -146,6 +152,10 @@ class ViewSelectionPipeline(VanillaPipeline):
         local_rank: int = 0,
         grad_scaler: Optional[GradScaler] = None,
     ):
+        # Copy initial view selection parameters from pipeline config to datamanager config
+        config.datamanager.start_num_views = config.start_num_views
+        config.datamanager.initial_view_seed = config.initial_view_seed
+
         super().__init__(
             config=config,
             device=device,

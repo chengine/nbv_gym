@@ -135,7 +135,10 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
 @dataclass
 class ViewSelectionDataManagerConfig(FullImageDatamanagerConfig):
     _target: Type = field(default_factory=lambda: ViewSelectionDataManager)
-    start_num_views: int = 1
+    start_num_views: int = 10
+    """Number of initial views to randomly select at the start of training."""
+    initial_view_seed: Optional[int] = None
+    """Random seed for initial view selection. If None, uses a random seed. Set to a value to get reproducible initial views per scene."""
 
 
 class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstract-method
@@ -173,9 +176,18 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         num_train_images = len(self.train_dataset)
         self.all_train_indices = list(range(num_train_images))
         start_k = max(1, min(self.config.start_num_views, num_train_images))
-        self.active_train_indices = (
-            random.sample(self.all_train_indices, k=start_k) if num_train_images > 0 else []
-        )
+
+        # Use seed for initial view selection if provided (for reproducibility)
+        # Always use random selection for initial views, regardless of view_selector
+        if self.config.initial_view_seed is not None:
+            rng = random.Random(self.config.initial_view_seed)
+            self.active_train_indices = (
+                rng.sample(self.all_train_indices, k=start_k) if num_train_images > 0 else []
+            )
+        else:
+            self.active_train_indices = (
+                random.sample(self.all_train_indices, k=start_k) if num_train_images > 0 else []
+            )
         self.active_unseen_cameras = list(self.active_train_indices)
 
     def expand_active_set(self, k: int = 1, step: Optional[int] = None, **kwargs) -> None:
