@@ -55,6 +55,7 @@ class OpticsViewSelector(ViewSelector):
 
     def __init__(
         self,
+        coverage_metric: str = "coverage",
         num_nearest_neighbors: int = 5,
         intrinsics_scale: float = 1.0,
         use_kdtree_filter: bool = True,
@@ -67,6 +68,7 @@ class OpticsViewSelector(ViewSelector):
             intrinsics_scale: Scale factor for camera intrinsics during scoring (for efficiency)
             use_kdtree_filter: Whether to use KD-tree filtering to reduce candidate pool
         """
+        self.coverage_metric = coverage_metric
         self.num_nearest_neighbors = num_nearest_neighbors
         self.intrinsics_scale = intrinsics_scale
         self.use_kdtree_filter = use_kdtree_filter
@@ -147,7 +149,7 @@ class OpticsViewSelector(ViewSelector):
             camera = all_cameras[cam_idx : cam_idx + 1].to(model.device)
             try:
                 score = model.coverage_score_for_camera(
-                    camera, intrinsics_scale=self.intrinsics_scale
+                    camera, intrinsics_scale=self.intrinsics_scale, metric=self.coverage_metric
                 )
                 scores.append((cam_idx, score.item()))
             except Exception as e:
@@ -168,6 +170,7 @@ def create_view_selector(
     num_nearest_neighbors: Optional[int] = None,
     intrinsics_scale: Optional[float] = None,
     use_kdtree_filter: Optional[bool] = None,
+    coverage_metric: Optional[str] = None,
 ) -> ViewSelector:
     """
     Factory function to create a ViewSelector based on mode string.
@@ -188,6 +191,7 @@ def create_view_selector(
     elif mode == "optics":
         # Use provided config values or defaults
         return OpticsViewSelector(
+            coverage_metric=coverage_metric if coverage_metric is not None else "coverage",
             num_nearest_neighbors=num_nearest_neighbors if num_nearest_neighbors is not None else 5,
             intrinsics_scale=intrinsics_scale if intrinsics_scale is not None else 1.0,
             use_kdtree_filter=use_kdtree_filter if use_kdtree_filter is not None else True,

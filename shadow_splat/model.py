@@ -107,6 +107,7 @@ class ShadowSplatModelConfig(SplatfactoModelConfig):
     n_sphere_bins: int = 128
     concentration: float = 5.0
 
+
 class ShadowSplatModel(SplatfactoModel):
     """Nerfstudio's implementation of Shadow Splatting
 
@@ -497,7 +498,7 @@ class ShadowSplatModel(SplatfactoModel):
         if render_mode in ["ED", "RGB+ED"]:
             depth_im = render[:, ..., -1:].squeeze(0)
             depth_sqr_im = render[:, ..., -2:-1].squeeze(0)
-            variance_img = depth_sqr_im - depth_im ** 2
+            variance_img = depth_sqr_im - depth_im**2
 
             depth_im = torch.where(alpha.squeeze(0) > 0, depth_im, depth_im.detach().max())
             variance_img = torch.where(alpha.squeeze(0) > 0, variance_img, 0.0)
@@ -512,7 +513,6 @@ class ShadowSplatModel(SplatfactoModel):
         if self.training:
             cam_idx = camera.metadata["cam_idx"]
             if cam_idx not in self.seen_cam_idx:
-
                 ### UPDATE COVERAGE METRICS ###
                 is_updated_coverage = update_view_coverage_for_frustum(
                     means=means_crop,
@@ -678,7 +678,7 @@ class ShadowSplatModel(SplatfactoModel):
 
     @torch.no_grad()
     def coverage_score_for_camera(
-        self, camera: Cameras, intrinsics_scale: float = 1.0
+        self, camera: Cameras, intrinsics_scale: float = 1.0, metric: str = "coverage"
     ) -> torch.Tensor:
         """Compute coverage score for a candidate camera.
 
@@ -721,12 +721,13 @@ class ShadowSplatModel(SplatfactoModel):
         outputs = self.get_outputs(camera, light=None)
 
         # Extract coverage from outputs
-        if "coverage" in outputs:
-            coverage = outputs["coverage"]  # [H, W] or [H, W, 1]
+        if metric in outputs:
+            coverage = outputs[metric]  # [H, W] or [H, W, 1]
         else:
             # Fallback: coverage might be in render output
             # This should not happen if render_mode is set correctly, but handle gracefully
             coverage = torch.zeros((camera.height.item(), camera.width.item()), device=self.device)
+            print(f"{metric} not found in outputs")
 
         # Sum all pixel values to get total coverage score
         coverage_score = coverage.sum()
@@ -1447,7 +1448,7 @@ class FisherSplatModel(SplatfactoModel):
 
     @torch.no_grad()
     def coverage_score_for_camera(
-        self, camera: Cameras, intrinsics_scale: float = 1.0
+        self, camera: Cameras, intrinsics_scale: float = 1.0, metric: str = "coverage"
     ) -> torch.Tensor:
         """Compute coverage score for a candidate camera.
 
@@ -1490,12 +1491,13 @@ class FisherSplatModel(SplatfactoModel):
         outputs = self.get_outputs(camera, light=None)
 
         # Extract coverage from outputs
-        if "coverage" in outputs:
-            coverage = outputs["coverage"]  # [H, W] or [H, W, 1]
+        if metric in outputs:
+            coverage = outputs[metric]  # [H, W] or [H, W, 1]
         else:
             # Fallback: coverage might be in render output
             # This should not happen if render_mode is set correctly, but handle gracefully
             coverage = torch.zeros((camera.height.item(), camera.width.item()), device=self.device)
+            print(f"{metric} not found in outputs")
 
         # Sum all pixel values to get total coverage score
         coverage_score = coverage.sum()
