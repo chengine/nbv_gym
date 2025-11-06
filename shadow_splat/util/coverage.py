@@ -150,11 +150,11 @@ def spherical_gaussian_weights(
     return weights
 
 @torch.no_grad()
-def update_transmittance_metrics_for_frustum(
+def update_fig_for_frustum(
     means: Tensor, quats: Tensor, scales: Tensor,
     viewmats: Tensor, Ks: Tensor, width: int, height: int,
     depth_image: Tensor, variance_image: Tensor, bin_dirs: Tensor,
-    accumulated_transmittance: Tensor, accumulated_view_transmittance: Tensor,
+    fig: Tensor, view_fig: Tensor,
     camera_model: str = "pinhole",
     eps2d: float = 0.3,
     near_plane: float = 1e-2,
@@ -210,10 +210,10 @@ def update_transmittance_metrics_for_frustum(
     normal_weights = normal_weights / torch.sqrt(2.0 * math.pi * variance[projected_pixel_ids])
 
     # Update the accumulated transmittance
-    accumulated_transmittance.index_put_((gaussian_ids,), normal_weights.unsqueeze(1)**2, accumulate=True)
+    fig.index_put_((gaussian_ids,), normal_weights.unsqueeze(1)**2, accumulate=True)
 
     # Update the accumulated view transmittance
-    combined_weight = sg_weights * normal_weights[:, None]  # [N, G]
-    accumulated_view_transmittance.index_put_((gaussian_ids,), combined_weight**2, accumulate=True)
+    combined_weight = sg_weights * normal_weights[:, None]  # [N, G]    
+    view_fig.index_put_((gaussian_ids,), combined_weight**2, accumulate=True)
     
     return True

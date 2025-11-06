@@ -2461,8 +2461,8 @@ def rasterization_with_coverage(
     opacities: Tensor,  # [..., N]
     colors: Tensor,  # [..., (C,) N, D] or [..., (C,) N, K, 3]
     coverage_counts: Tensor,  # [..., N, G]
-    accumulated_transmittance: Tensor,  # [..., N, 1]
-    accumulated_view_transmittance: Tensor,  # [..., N, G]
+    fig: Tensor,  # [..., N, 1]
+    view_fig: Tensor,  # [..., N, G]
     bin_dirs: Tensor,  # [G, 3]
     viewmats: Tensor,  # [..., C, 4, 4]
     Ks: Tensor,  # [..., C, 3, 3]
@@ -2943,14 +2943,12 @@ def rasterization_with_coverage(
         inference_dirs=dirs.squeeze(0),
     )
 
-    transmittance_metric = accumulated_transmittance
-
     sg_weights = spherical_gaussian_weights(input_view_dirs=dirs.squeeze(0), bin_dirs=bin_dirs, beta=concentration)       # [N, G]
 
-    view_transmittance_metric = torch.sum(accumulated_view_transmittance * sg_weights, dim=-1, keepdim=True)       # [N, 1]
+    view_fig_metric = torch.sum(view_fig * sg_weights, dim=-1, keepdim=True)       # [N, 1]
 
     # Concatenate coverage_metric with colors
-    colors = torch.cat((colors, coverage_metric[None, ..., None], transmittance_metric[None], view_transmittance_metric[None]), dim=-1)
+    colors = torch.cat((colors, coverage_metric[None, ..., None], fig[None], view_fig_metric[None]), dim=-1)
 
     ### END ###
 
