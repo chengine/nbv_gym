@@ -13,7 +13,7 @@ from nerfstudio.models.splatfacto import SplatfactoModel
 from nerfstudio.utils.writer import GLOBAL_BUFFER, EventName
 from nerfstudio.viewer.render_state_machine import RenderAction
 
-from shadow_splat.model import ShadowSplatModel, ShadowSplatModelConfig
+from shadow_splat.model import ShadowSplatModel, ShadowSplatModelConfig, FisherSplatModelConfig, FisherSplatModel
 
 
 class ShadowSplatViewer(Viewer):
@@ -24,10 +24,19 @@ class ShadowSplatViewer(Viewer):
     def __init__(self, *args, **kwargs):
         # Convert SplatfactoModel to ShadowSplatModel BEFORE calling parent __init__
         pipeline = kwargs["pipeline"]
+
         if type(pipeline.model) is SplatfactoModel:
             print("model is splatfacto, converting to shadow splat")
             self._convert_model(pipeline)
-
+        elif type(pipeline.model) is FisherSplatModel:
+            # Do nothing
+            pass
+        elif type(pipeline.model) is ShadowSplatModel:
+            # Do nothing
+            pass
+        else:
+            raise ValueError(f"Unsupported model type: {type(pipeline.model)}")
+        
         # Initialize the parent Viewer class
         super().__init__(*args, **kwargs)
 
@@ -330,7 +339,6 @@ class ShadowSplatViewer(Viewer):
 
         self._trigger_rerender()
 
-
 def camera_to_world_transform(azimuth_rad, elevation_rad, origin, radius):
     # Compute the camera position in Cartesian coordinates
     x = radius * torch.cos(elevation_rad) * torch.cos(azimuth_rad)
@@ -346,7 +354,6 @@ def camera_to_world_transform(azimuth_rad, elevation_rad, origin, radius):
     transform_matrix[:3, 3] = camera_position
 
     return transform_matrix
-
 
 def look_at(location, target, up):
     z = location - target
