@@ -52,10 +52,10 @@ from nerfstudio.utils.rich_utils import CONSOLE
 
 from modified_diff_gaussian_rasterization_depth import (
     GaussianRasterizer as ModifiedGaussianRasterizer,
+    GaussianRasterizationSettings
 )
-from modified_diff_gaussian_rasterization_depth import GaussianRasterizationSettings
-
 from einops import repeat, reduce, rearrange
+
 import pdb
 
 
