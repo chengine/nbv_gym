@@ -30,12 +30,10 @@ shadow_splat = MethodSpecification(
         max_num_iterations=30000,
         mixed_precision=False,
         pipeline=ViewSelectionPipelineConfig(
-            # pipeline=ShadowSplatPipelineConfig(
             add_every_n_steps=1000,
             add_num_views=5,
             view_selector="random",
             datamanager=ViewSelectionDataManagerConfig(
-                # datamanager=ShadowSplatDataManagerConfig(
                 dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
                 cache_images_type="uint8",
             ),
