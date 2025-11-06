@@ -118,6 +118,7 @@ class ShadowSplatModel(SplatfactoModel):
         )
 
         self.last_training_light = None
+        self.viewer_light = None
 
         ### THIS IS FOR COVERAGE ###
         self.bin_dirs = fibonacci_sphere(n_bins=self.config.n_sphere_bins, device="cuda")
@@ -381,11 +382,9 @@ class ShadowSplatModel(SplatfactoModel):
 
         # If is_updated, then self.coverage_counts is updated in-place, otherwise self.coverage_counts is not updated
 
-        if light is None:
-            light = self.last_training_light
-
-        if self.training and light is not None:
-            self.last_training_light = light
+        # Check if the viewer has set a light
+        if light is None and self.viewer_light is not None:
+            light = self.viewer_light
 
         if light is not None:
             point_cloud, point_cloud_mask = generate_point_cloud_from_camera_depth(

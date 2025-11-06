@@ -304,7 +304,8 @@ class ShadowSplatViewer(Viewer):
         )
 
         with torch.no_grad():
-            self.pipeline.model.last_training_light = light_source
+            # self.pipeline.model.last_training_light = light_source
+            self.pipeline.model.viewer_light = light_source
 
         cv_to_gl = torch.tensor(
             [
