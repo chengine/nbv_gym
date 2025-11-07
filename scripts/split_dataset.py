@@ -12,9 +12,7 @@ EVAL_FRACTION = 0.1
 
 
 if __name__ == "__main__":
-    data_path = Path(
-        os.path.expanduser("/home/shared/data_nerfstudio/ShadowSplat/captures/chair_3pm/")
-    )
+    data_path = Path(os.path.expanduser("/home/shared/data_nerfstudio/ShadowSplat/tandt/ignatius/"))
     transforms_path = data_path / "transforms_original.json"
     image_path = data_path / "images_split"
     with open(transforms_path, "r") as f:
