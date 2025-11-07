@@ -57,8 +57,6 @@ from nerfstudio.model_components.lib_bilagrid import (
 
 import open3d as o3d
 
-# import torch_geometric.nn.pool.knn as knn
-
 from shadow_splat.util.nerfstudio import get_viewmat
 from shadow_splat.shadow_splat_rendering import (
     calculate_relighting_weights_from_point_cloud,
@@ -114,7 +112,6 @@ class ShadowSplatModelConfig(SplatfactoModelConfig):
     n_sphere_bins: int = 128
     concentration: float = 5.0
 
-
 class ShadowSplatModel(SplatfactoModel):
     """Nerfstudio's implementation of Shadow Splatting
 
@@ -152,15 +149,10 @@ class ShadowSplatModel(SplatfactoModel):
 
         ### THIS IS FOR COVERAGE ###
         self.bin_dirs = fibonacci_sphere(n_bins=self.config.n_sphere_bins, device="cuda")
-        self.coverage_counts = torch.nn.Parameter(
-            torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda")
-        )
 
+        self.coverage_counts = torch.nn.Parameter(torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda"))
         self.fig = torch.nn.Parameter(torch.zeros((self.means.shape[0], 1), device="cuda"))
-
-        self.view_fig = torch.nn.Parameter(
-            torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda")
-        )
+        self.view_fig = torch.nn.Parameter(torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda"))
 
         self.gauss_params["coverage_counts"] = self.coverage_counts
         self.gauss_params["fig"] = self.fig
@@ -217,6 +209,7 @@ class ShadowSplatModel(SplatfactoModel):
 
     def step_post_backward(self, step):
         assert step == self.step
+ 
         if isinstance(self.strategy, DefaultStrategy):
             self.strategy.step_post_backward(
                 params=self.gauss_params,
@@ -364,13 +357,10 @@ class ShadowSplatModel(SplatfactoModel):
         else:
             raise ValueError("Unknown camera type: %s", camera.camera_type)
 
-        # if self.config.output_depth_during_training or not self.training:
-        #     render_mode = "RGB+ED"
-        # else:
-        #     render_mode = "RGB"
-
-        # NOTE: We need to render depth (and variance) for coverage metrics
-        render_mode = "RGB+ED"
+        if self.config.output_depth_during_training or not self.training:
+            render_mode = "RGB+ED"
+        else:
+            render_mode = "RGB"
 
         if self.config.sh_degree > 0:
             sh_degree_to_use = min(
@@ -380,15 +370,24 @@ class ShadowSplatModel(SplatfactoModel):
             features_crop = torch.sigmoid(features_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
             sh_degree_to_use = None
 
+        if self.training:
+            coverage_counts = None
+            fig = None
+            view_fig = None
+        else:
+            coverage_counts = self.coverage_counts.detach()
+            fig = torch.sqrt(self.fig.detach())
+            view_fig = torch.sqrt(self.view_fig.detach())
+
         render, alpha, self.info = rasterization_with_coverage(
             means=means_crop,
             quats=quats_crop,
             scales=torch.exp(scales_crop),
             opacities=torch.sigmoid(opacities_crop).squeeze(-1),
             colors=features_crop,
-            coverage_counts=self.coverage_counts,
-            fig=torch.sqrt(self.fig.detach()),
-            view_fig=torch.sqrt(self.view_fig.detach()),
+            coverage_counts=coverage_counts,
+            fig=fig,
+            view_fig=view_fig,
             bin_dirs=self.bin_dirs,
             viewmats=viewmat,
             Ks=K,
@@ -408,13 +407,17 @@ class ShadowSplatModel(SplatfactoModel):
             # radius_clip=3.0,
         )
 
-        # If is_updated, then self.coverage_counts is updated in-place, otherwise self.coverage_counts is not updated
-
         # Check if the viewer has set a light
-        if light is None and self.viewer_light is not None:
+        if light is None and self.viewer_light is not None and not self.training:
             light = self.viewer_light
 
-        if light is not None:
+        if light is None:
+            light = self.last_training_light
+
+        if self.training and light is not None:
+            self.last_training_light = light
+
+        if light is not None and not self.training:
             point_cloud, point_cloud_mask = generate_point_cloud_from_camera_depth(
                 depth=render[:, ..., -1:],
                 K=K,
@@ -426,10 +429,10 @@ class ShadowSplatModel(SplatfactoModel):
                 mask=None,
             )
 
-            if self.training:
-                optimized_light_to_world = self.light_optimizer.apply_to_camera(light)
-            else:
-                optimized_light_to_world = light.camera_to_worlds
+            # if self.training:
+            #     optimized_light_to_world = self.light_optimizer.apply_to_camera(light)
+            # else:
+            optimized_light_to_world = light.camera_to_worlds
 
             light_camera_to_world = optimized_light_to_world
             light.rescale_output_resolution(1 / camera_scale_fac)
@@ -472,7 +475,7 @@ class ShadowSplatModel(SplatfactoModel):
             light_depth_image = light_depth_image.unsqueeze(-1)
             light_variance_image = light_variance_image.unsqueeze(-1)
         else:
-            shadow_img = torch.zeros((H, W, 1), device=self.device)
+            shadow_img = None
             light_depth_image = None
             light_variance_image = None
 
@@ -480,19 +483,23 @@ class ShadowSplatModel(SplatfactoModel):
             self.strategy.step_pre_backward(
                 self.gauss_params, self.optimizers, self.strategy_state, self.step, self.info
             )
+
         alpha = alpha[:, ...]
 
         background = self._get_background_color()
         rgb = render[:, ..., :3] + (1 - alpha) * background
         rgb = torch.clamp(rgb, 0.0, 1.0)
 
-        coverage = render[:, ..., 3:4].squeeze(0)
-        lighted_dissimilarity = (1.0 - coverage) * (1.0 - shadow_img)
-
-        fig_img = render[:, ..., 4:5].squeeze(0)
-        # lighted_transmittance_img = transmittance_img
-
-        view_fig_img = render[:, ..., 5:6].squeeze(0)
+        if not self.training:
+            coverage = render[:, ..., 3:4].squeeze(0)
+            # lighted_dissimilarity = (1.0 - coverage) * (1.0 - shadow_img)
+            fig_img = render[:, ..., 4:5].squeeze(0)
+            view_fig_img = render[:, ..., 5:6].squeeze(0)
+        else:
+            coverage = None
+            # lighted_dissimilarity = None
+            fig_img = None
+            view_fig_img = None
 
         # apply bilateral grid
         if self.config.use_bilateral_grid and self.training:
@@ -501,11 +508,14 @@ class ShadowSplatModel(SplatfactoModel):
 
         if render_mode in ["ED", "RGB+ED"]:
             depth_im = render[:, ..., -1:].squeeze(0)
-            depth_sqr_im = render[:, ..., -2:-1].squeeze(0)
-            variance_img = depth_sqr_im - depth_im**2
-
             depth_im = torch.where(alpha.squeeze(0) > 0, depth_im, depth_im.detach().max())
-            variance_img = torch.where(alpha.squeeze(0) > 0, variance_img, 0.0)
+
+            if not self.training:
+                depth_sqr_im = render[:, ..., -2:-1].squeeze(0)
+                variance_img = depth_sqr_im - depth_im**2
+                variance_img = torch.where(alpha.squeeze(0) > 0, variance_img, 0.0)
+            else:
+                variance_img = None
 
         else:
             depth_im = None
@@ -533,24 +543,24 @@ class ShadowSplatModel(SplatfactoModel):
                     far_plane=1e10,
                 )
 
-                is_updated_fig = update_fig_for_frustum(
-                    means=means_crop,
-                    quats=quats_crop,
-                    scales=torch.exp(scales_crop),
-                    viewmats=viewmat,
-                    Ks=K,
-                    width=W,
-                    height=H,
-                    depth_image=depth_im,
-                    variance_image=variance_img,
-                    bin_dirs=self.bin_dirs,
-                    fig=self.fig,
-                    view_fig=self.view_fig,
-                    camera_model=camera_model,
-                    near_plane=0.01,
-                    far_plane=1e10,
-                    concentration=self.config.concentration,
-                )
+                # is_updated_fig = update_fig_for_frustum(
+                #     means=means_crop,
+                #     quats=quats_crop,
+                #     scales=torch.exp(scales_crop),
+                #     viewmats=viewmat,
+                #     Ks=K,
+                #     width=W,
+                #     height=H,
+                #     depth_image=depth_im,
+                #     variance_image=variance_img,
+                #     bin_dirs=self.bin_dirs,
+                #     fig=self.fig,
+                #     view_fig=self.view_fig,
+                #     camera_model=camera_model,
+                #     near_plane=0.01,
+                #     far_plane=1e10,
+                #     concentration=self.config.concentration,
+                # )
 
                 ### END ###
                 self.seen_cam_idx.append(cam_idx)
@@ -570,12 +580,41 @@ class ShadowSplatModel(SplatfactoModel):
             "shadow": shadow_img,  # type: ignore
             "light_depth": light_depth_image,  # type: ignore
             "light_variance": light_variance_image,  # type: ignore
-            "lighted_dissimilarity": lighted_dissimilarity,  # type: ignore
+            # "lighted_dissimilarity": lighted_dissimilarity,  # type: ignore
         }  # type: ignore
 
-    # def update_coverage(self, camera: Cameras):
+    @torch.no_grad()
+    def update_coverage(self, camera: Cameras):
+        # Update coverage counts based on all cameras in the camera batch, conditioned on the current state of the scene
+        is_updated_coverage = update_view_coverage_for_frustum(
+            means=means_crop,
+            quats=quats_crop,
+            scales=torch.exp(scales_crop),
+            viewmats=viewmat,
+            Ks=K,
+            width=W,
+            height=H,
+            coverage_counts=self.coverage_counts,
+            bin_dirs=self.bin_dirs,
+            camera_model=camera_model,
+            near_plane=0.01,
+            far_plane=1e10,
+        )
 
-    # def update_
+    @torch.no_grad()
+    def update_fig(self, camera: Cameras):
+
+        # Update fig based on all cameras in the camera batch, conditioned on the current state of the scene
+        pass
+
+    @torch.no_grad()
+    def reset_coverage(self):
+        self.gauss_params["coverage_counts"].zero_()
+
+    @torch.no_grad()
+    def reset_fig(self):
+        self.gauss_params["fig"].zero_()
+        self.gauss_params["view_fig"].zero_()
 
     def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
         """Computes and returns the losses dict.
@@ -741,7 +780,6 @@ class ShadowSplatModel(SplatfactoModel):
             self.train()
 
         return coverage_score
-
 
 @dataclass
 class FisherSplatModelConfig(SplatfactoModelConfig):
@@ -1015,7 +1053,7 @@ class FisherSplatModel(SplatfactoModel):
         if self.training and light is not None:
             self.last_training_light = light
 
-        if light is not None:
+        if light is not None and not self.training:
             point_cloud, point_cloud_mask = generate_point_cloud_from_camera_depth(
                 depth=render[:, ..., -1:],
                 K=K,
@@ -1027,10 +1065,7 @@ class FisherSplatModel(SplatfactoModel):
                 mask=None,
             )
 
-            if self.training:
-                optimized_light_to_world = self.light_optimizer.apply_to_camera(light)
-            else:
-                optimized_light_to_world = light.camera_to_worlds
+            optimized_light_to_world = light.camera_to_worlds
 
             light_camera_to_world = optimized_light_to_world
             light.rescale_output_resolution(1 / camera_scale_fac)
@@ -1073,7 +1108,7 @@ class FisherSplatModel(SplatfactoModel):
             light_depth_image = light_depth_image.unsqueeze(-1)
             light_variance_image = light_variance_image.unsqueeze(-1)
         else:
-            shadow_img = torch.zeros((H, W, 1), device=self.device)
+            shadow_img = None
             light_depth_image = None
             light_variance_image = None
 
@@ -1095,11 +1130,14 @@ class FisherSplatModel(SplatfactoModel):
 
         if render_mode in ["ED", "RGB+ED"]:
             depth_im = render[:, ..., -1:].squeeze(0)
-            depth_sqr_im = render[:, ..., -2:-1].squeeze(0)
-            variance_img = depth_sqr_im - depth_im**2
-
             depth_im = torch.where(alpha.squeeze(0) > 0, depth_im, depth_im.detach().max())
-            variance_img = torch.where(alpha.squeeze(0) > 0, variance_img, 0.0)
+
+            if not self.training:
+                depth_sqr_im = render[:, ..., -2:-1].squeeze(0)
+                variance_img = depth_sqr_im - depth_im**2
+                variance_img = torch.where(alpha.squeeze(0) > 0, variance_img, 0.0)
+            else:
+                variance_img = None
 
         else:
             depth_im = None
@@ -1150,10 +1188,7 @@ class FisherSplatModel(SplatfactoModel):
         # print(camera.shape)
         # assert camera.shape[0] == 1, "Only one camera at a time"
 
-        if self.training:
-            optimized_camera_to_world = self.camera_optimizer.apply_to_camera(camera)
-        else:
-            optimized_camera_to_world = camera.camera_to_worlds
+        optimized_camera_to_world = camera.camera_to_worlds
 
         # move to the GPU
         camera = camera.to(self.device)
@@ -1496,7 +1531,7 @@ class FisherSplatModel(SplatfactoModel):
         uncertainty = outputs["uncertainty"]
 
         # Sum all pixel values to get total coverage score
-        coverage_score = uncertainty.sum()
+        coverage_score = -uncertainty.sum()
 
         # Restore training state
         if was_training:

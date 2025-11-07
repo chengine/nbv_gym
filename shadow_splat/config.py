@@ -111,27 +111,17 @@ shadow_splat = MethodSpecification(
 fisher_splat = MethodSpecification(
     ShadowSplatTrainerConfig(
         method_name="fisher-splat",
-        steps_per_eval_image=100,
-        steps_per_eval_batch=0,
-        steps_per_save=700,
+        steps_per_eval_image=500,
+        steps_per_eval_batch=500,
+        steps_per_save=1000,
         steps_per_eval_all_images=1000,
-        max_num_iterations=30000,
+        max_num_iterations=10000,
         mixed_precision=False,
-        pipeline=FisherSplatPipelineConfig(
-            # # pipeline=ShadowSplatPipelineConfig(
-            # add_every_n_steps=1000,
-            # add_num_views=5,
-            # view_selector="random",
-            # datamanager=ViewSelectionDataManagerConfig(
-            #     # datamanager=ShadowSplatDataManagerConfig(
-            #     dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
-            #     cache_images_type="uint8",
-            # ),
-            # model=ShadowSplatModelConfig(
-            #     sh_degree=3,
-            # ),
-            # pipeline=ShadowSplatPipelineConfig(
-            datamanager=ShadowSplatDataManagerConfig(
+        pipeline=ViewSelectionPipelineConfig(
+            add_every_n_steps=1000,
+            add_num_views=5,
+            view_selector="random",
+            datamanager=ViewSelectionDataManagerConfig(
                 dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
                 cache_images_type="uint8",
             ),

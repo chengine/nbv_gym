@@ -2936,19 +2936,24 @@ def rasterization_with_coverage(
         colors = torch.clamp_min(colors + 0.5, 0.0)
 
     ### COMPUTATION OF COVERAGE METRICS ###
-    coverage_metric = compute_coverage_per_gaussian(
-        coverage_counts=coverage_counts,
-        bin_dirs=bin_dirs,
-        masks=masks.squeeze(0),
-        inference_dirs=dirs.squeeze(0),
-    )
+    if coverage_counts is not None:
+        coverage_metric = compute_coverage_per_gaussian(
+            coverage_counts=coverage_counts,
+            bin_dirs=bin_dirs,
+            masks=masks.squeeze(0),
+            inference_dirs=dirs.squeeze(0),
+        )
 
-    sg_weights = spherical_gaussian_weights(input_view_dirs=dirs.squeeze(0), bin_dirs=bin_dirs, beta=concentration)       # [N, G]
+        # Concatenate coverage_metric with colors
+        colors = torch.cat((colors, coverage_metric[None, ..., None]), dim=-1)
 
-    view_fig_metric = torch.sum(view_fig * sg_weights, dim=-1, keepdim=True)       # [N, 1]
+    if fig is not None:
+        colors = torch.cat((colors, fig[None]), dim=-1)
 
-    # Concatenate coverage_metric with colors
-    colors = torch.cat((colors, coverage_metric[None, ..., None], fig[None], view_fig_metric[None]), dim=-1)
+    if view_fig is not None:
+        sg_weights = spherical_gaussian_weights(input_view_dirs=dirs.squeeze(0), bin_dirs=bin_dirs, beta=concentration)       # [N, G]
+        view_fig_metric = torch.sum(view_fig * sg_weights, dim=-1, keepdim=True)       # [N, 1]
+        colors = torch.cat((colors, view_fig_metric[None]), dim=-1)
 
     ### END ###
 
@@ -3041,7 +3046,12 @@ def rasterization_with_coverage(
     # Rasterize to pixels
     if render_mode in ["RGB+D", "RGB+ED"]:
         safe_depths = torch.nan_to_num(depths, nan=0.0, posinf=far_plane, neginf=near_plane).detach()
+
+        # if fig is not None or view_fig is not None:
         colors = torch.cat((colors, (safe_depths**2)[..., None], safe_depths[..., None]), dim=-1)
+        # else:
+        #     colors = torch.cat((colors, safe_depths[..., None]), dim=-1)
+
         if backgrounds is not None:
             backgrounds = torch.cat(
                 [
