@@ -1,5 +1,7 @@
 """Custom pipeline for Shadow Splat"""
 
+import torch
+import gc
 from dataclasses import dataclass, field
 from typing import Literal, Type, Optional
 
@@ -30,6 +32,7 @@ class ShadowSplatPipelineConfig(VanillaPipelineConfig):
     """specifies the model config"""
     disable_light: bool = False
     """specifies whether to train without light"""
+
 
 class ShadowSplatPipeline(VanillaPipeline):
     def __init__(
@@ -123,6 +126,7 @@ class FisherSplatPipelineConfig(VanillaPipelineConfig):
     disable_light: bool = False
     """specifies whether to train without light"""
 
+
 class FisherSplatPipeline(ShadowSplatPipeline):
     def __init__(
         self,
@@ -141,6 +145,7 @@ class FisherSplatPipeline(ShadowSplatPipeline):
             local_rank=local_rank,
             grad_scaler=grad_scaler,
         )
+
 
 @dataclass
 class ViewSelectionPipelineConfig(VanillaPipelineConfig):
@@ -173,6 +178,7 @@ class ViewSelectionPipelineConfig(VanillaPipelineConfig):
     """Whether to use KD-tree filtering to reduce candidate pool for optics selection."""
     optics_num_nearest_neighbors: int = 5
     """Number of nearest neighbors to consider when using KD-tree filtering for optics selection."""
+
 
 class ViewSelectionPipeline(VanillaPipeline):
     def __init__(
@@ -230,6 +236,9 @@ class ViewSelectionPipeline(VanillaPipeline):
                 k=self.config.add_num_views, step=step, model=self._model, pipeline=self
             )
             self._model.training = True
+            # NOTE: diagnosing memory issues
+            torch.cuda.empty_cache()
+            gc.collect()
 
         cameras, batch, light = self.datamanager.next_train(step)
         if self.config.disable_light:

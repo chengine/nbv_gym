@@ -28,11 +28,15 @@ from shadow_splat.model import ShadowSplatModel
 from nerfstudio.data.dataparsers.nerfstudio_dataparser import NerfstudioDataParserConfig, Nerfstudio
 from nerfstudio.data.datasets.base_dataset import InputDataset
 
-class GaussianSplat():
-    def __init__(self, config_path: Path, res_factor=None,
+
+class GaussianSplat:
+    def __init__(
+        self,
+        config_path: Path,
+        res_factor=None,
         test_mode: Literal["test", "val", "inference"] = "inference",
-        dataset_mode: Literal["train", "val", "test"] = 'test',
-        device: Union[torch.device, str] = "cpu"
+        dataset_mode: Literal["train", "val", "test"] = "test",
+        device: Union[torch.device, str] = "cpu",
     ) -> None:
         # config path
         self.config_path = config_path
@@ -52,25 +56,23 @@ class GaussianSplat():
         # load cameras
         self.get_cameras()
 
-    def init_pipeline(self,
-        test_mode: Literal["test", "val", "inference"]
-    ):
+    def init_pipeline(self, test_mode: Literal["test", "val", "inference"]):
         # Get config and pipeline
         self.config, self.pipeline, _, _ = eval_setup(
-            self.config_path, 
+            self.config_path,
             test_mode=test_mode,
         )
 
-    def load_dataset(self,
-        dataset_mode: Literal["train", "val", "test"]
-    ):
+    def load_dataset(self, dataset_mode: Literal["train", "val", "test"]):
         # return dataset
         if dataset_mode == "train":
             self.dataset = self.pipeline.datamanager.train_dataset
         elif dataset_mode in ["val", "test"]:
             self.dataset = self.pipeline.datamanager.eval_dataset
         else:
-            ValueError('Incorrect value for datset_mode. Accepted values include: dataset_mode: Literal["train", "val", "test"].')
+            ValueError(
+                'Incorrect value for datset_mode. Accepted values include: dataset_mode: Literal["train", "val", "test"].'
+            )
 
     def get_cameras(self):
         # Camera object contains camera intrinsics and extrinsics
@@ -82,9 +84,11 @@ class GaussianSplat():
         return self.cameras
 
     def get_light_source(self):
-        
+
         if isinstance(self.pipeline.model, ShadowSplatModel):
-            self.light_source = self.pipeline.datamanager.train_dataparser_outputs.lights.to(self.device)
+            self.light_source = self.pipeline.datamanager.train_dataparser_outputs.lights.to(
+                self.device
+            )
         else:
             self.light_source = None
 
@@ -92,21 +96,22 @@ class GaussianSplat():
 
     def get_poses(self):
         return self.cameras.camera_to_worlds
-    
+
     def get_light_source_poses(self):
         if isinstance(self.pipeline.model, ShadowSplatModel):
             return self.light_source.camera_to_worlds
         else:
             return None
-    
+
     def get_images(self):
         # images
-        images = [self.dataset.get_image_float32(image_idx)
-                  for image_idx 
-                  in range(len(self.dataset._dataparser_outputs.image_filenames))]
-        
+        images = [
+            self.dataset.get_image_float32(image_idx)
+            for image_idx in range(len(self.dataset._dataparser_outputs.image_filenames))
+        ]
+
         return images
-    
+
     def get_camera_intrinsics(self):
         K = self.cameras[0].get_intrinsics_matrices().squeeze()
         # width and height
@@ -114,10 +119,12 @@ class GaussianSplat():
         H = int(self.cameras[0].height.item())
         return H, W, K
 
-    def render(self, camera, 
-               light_source: Optional[torch.Tensor] = None,
-               ):
-        
+    def render(
+        self,
+        camera,
+        light_source: Optional[torch.Tensor] = None,
+    ):
+
         # render outputs
         if type(self.pipeline.model) is SplatfactoModel:
             with torch.no_grad():
@@ -127,7 +134,8 @@ class GaussianSplat():
                 outputs = self.pipeline.model(camera, light_source)
 
         return outputs
-    
+
+
 # def load_dataset(data_path: Path,
 #     dataset_mode: Literal["train", "val", "test", "all"] # 'all' uses the entire dataset.
 # ):
@@ -144,7 +152,7 @@ class GaussianSplat():
 
 #     # load dataset
 #     dataset = InputDataset(data_parser_ouputs)
-    
+
 #     return dataset
 
 # def load_model(config_path: Path):
@@ -160,5 +168,5 @@ class GaussianSplat():
 #                 test_mode="test", # [options: "test", "inference", "val"]
 #                 dataset_mode="val",
 #                 device=device)
-    
+
 #     return gsplat

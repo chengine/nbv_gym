@@ -24,4 +24,4 @@ ns-train shadow_splat --data <path to the data> \
 
 To install Fisher-RF:
 `pip install -e . --no-build-isolation` at the following repo:
-`https://github.com/JiangWenPL/modified-diff-gaussian-rasterization-w-depth`
+`https://github.com/JiangWenPL/modified-diff-gaussian-rasterization-w-depth` (use `git clone --recursive` and gcc/g++ 11)
