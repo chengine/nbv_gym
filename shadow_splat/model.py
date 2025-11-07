@@ -582,7 +582,7 @@ class ShadowSplatModel(SplatfactoModel):
             "coverage": coverage,  # type: ignore
             "fig": fig_img,  # type: ignore
             "view_fig": view_fig_img,  # type: ignore
-            "shadow": shadow_img.squeeze(0),  # type: ignore
+            "shadow": shadow_img,  # type: ignore
             "light_depth": light_depth_image,  # type: ignore
             "light_variance": light_variance_image,  # type: ignore
             # "lighted_dissimilarity": lighted_dissimilarity,  # type: ignore
@@ -1538,7 +1538,7 @@ class FisherSplatModel(SplatfactoModel):
 
     @torch.no_grad()
     def coverage_score_for_camera(
-        self, camera: Cameras, intrinsics_scale: float = 1.0
+        self, camera: Cameras, intrinsics_scale: float = 1.0, metric: str = "none"
     ) -> torch.Tensor:
         """Compute coverage score for a candidate camera.
 
@@ -1590,7 +1590,7 @@ class FisherSplatModel(SplatfactoModel):
             outputs = self.get_outputs(camera, light=None)
 
             # Extract coverage from outputs
-            uncertainty = outputs["uncertainty"]
+            uncertainty = outputs["fisher_info"]
 
             # Sum all pixel values to get total coverage score
             # Detach to avoid keeping references to the computation graph
