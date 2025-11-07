@@ -124,7 +124,7 @@ class ViewSelectionPipelineConfig(VanillaPipelineConfig):
     add_every_n_steps: int = 1000
     add_num_views: int = 1
     view_selector: Optional[str] = None
-    """View selection mode: 'random', 'all', 'optics', or dotted path to custom ViewSelector class.
+    """View selection mode: 'random', 'all', 'optics', 'bayes', or dotted path to custom ViewSelector class.
     If None, defaults to random selection."""
 
     # Optics view selector configuration
@@ -134,6 +134,14 @@ class ViewSelectionPipelineConfig(VanillaPipelineConfig):
     """Whether to use KD-tree filtering to reduce candidate pool for optics selection."""
     optics_num_nearest_neighbors: int = 5
     """Number of nearest neighbors to consider when using KD-tree filtering for optics selection."""
+
+    # BayesRays view selector configuration
+    bayes_reduce_mode: str = "mean"
+    """How to aggregate per-pixel uncertainty for BayesRays: 'mean' or 'sum'."""
+    bayes_lod: int = 8
+    """Level of detail (log2 of grid resolution) for Hessian computation in BayesRays."""
+    bayes_max_hessian_batches: Optional[int] = None
+    """Maximum number of training batches to use for Hessian computation. None = use all."""
 
 
 class ViewSelectionPipeline(VanillaPipeline):
@@ -165,12 +173,35 @@ class ViewSelectionPipeline(VanillaPipeline):
                     intrinsics_scale=config.optics_intrinsics_scale,
                     use_kdtree_filter=config.optics_use_kdtree_filter,
                 )
+            # Pass BayesRays-specific config if using BayesRays selector
+            elif config.view_selector == "bayes" or config.view_selector == "bayesrays":
+                view_selector = create_view_selector(
+                    mode=config.view_selector,
+                    bayes_reduce_mode=config.bayes_reduce_mode,
+                    bayes_lod=config.bayes_lod,
+                )
             else:
                 view_selector = create_view_selector(config.view_selector)
             self.datamanager.view_selector = view_selector
             self._view_selector = view_selector
         else:
             self._view_selector = None
+
+        # Initialize Hessian computer if using BayesRays selector
+        self._hessian_computer = None
+        if config.view_selector == "bayes" or config.view_selector == "bayesrays":
+            try:
+                from shadow_splat.bayesrays_utils import HessianComputer
+
+                self._hessian_computer = HessianComputer(lod=config.bayes_lod, device=self.device)
+            except ImportError:
+                raise ImportError(
+                    "BayesRays selector requires bayesrays_utils module. "
+                    "Ensure bayesrays and related dependencies are installed."
+                )
+
+        self._cached_hessian = None
+        self._hessian_computed_at_step = -1
 
     @profiler.time_function
     def get_train_loss_dict(self, step: int):
@@ -182,8 +213,23 @@ class ViewSelectionPipeline(VanillaPipeline):
             and step % self.config.add_every_n_steps == 0
             and hasattr(self.datamanager, "expand_active_set")
         ):
+            # Compute Hessian if using BayesRays selector
+            hessian = None
+            if self._hessian_computer is not None:
+                # Only recompute Hessian if we haven't already at this step
+                if self._hessian_computed_at_step != step:
+                    hessian = self._hessian_computer.compute_hessian_from_datamanager(
+                        model=self._model,
+                        datamanager=self.datamanager,
+                        max_batches=self.config.bayes_max_hessian_batches,
+                    )
+                    self._cached_hessian = hessian
+                    self._hessian_computed_at_step = step
+                else:
+                    hessian = self._cached_hessian
+
             self.datamanager.expand_active_set(
-                k=self.config.add_num_views, step=step, model=self._model, pipeline=self
+                k=self.config.add_num_views, step=step, model=self._model, pipeline=self, hessian=hessian
             )
 
         cameras, batch, light = self.datamanager.next_train(step)

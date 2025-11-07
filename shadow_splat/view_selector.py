@@ -152,20 +152,106 @@ class OpticsViewSelector(ViewSelector):
         return selected_indices
 
 
+class BayesRaysViewSelector(ViewSelector):
+    """BayesRays-based view selection using uncertainty maximization."""
+
+    def __init__(
+        self,
+        reduce_mode: str = "mean",
+        lod: int = 8,
+    ):
+        """
+        Initialize BayesRays view selector.
+
+        Args:
+            reduce_mode: How to aggregate per-pixel uncertainty - "mean" or "sum"
+            lod: Level of detail for Hessian grid (log2 of resolution)
+        """
+        self.reduce_mode = reduce_mode.lower()
+        if self.reduce_mode not in ["mean", "sum"]:
+            raise ValueError(f"reduce_mode must be 'mean' or 'sum', got {self.reduce_mode}")
+        self.lod = lod
+
+    def select_views(
+        self, active_indices: List[int], remaining_indices: List[int], num_to_select: int, **kwargs
+    ) -> List[int]:
+        """
+        BayesRays-based view selection using uncertainty maximization.
+
+        Args:
+            active_indices: Current active view indices
+            remaining_indices: Available view indices not yet in active set
+            num_to_select: Number of views to select
+            **kwargs: Additional context including:
+                - model: The model instance (NeRF)
+                - datamanager: The datamanager instance
+                - step: Current training step
+                - pipeline: The pipeline instance
+                - hessian: Pre-computed Hessian tensor (required)
+
+        Returns:
+            List of selected view indices to add
+        """
+        if not remaining_indices:
+            return []
+
+        # Extract required context
+        model = kwargs.get("model")
+        datamanager = kwargs.get("datamanager")
+        hessian = kwargs.get("hessian")
+
+        if model is None or datamanager is None or hessian is None:
+            # Fall back to random if required context is missing
+            k = min(max(1, num_to_select), len(remaining_indices))
+            return random.sample(remaining_indices, k=k)
+
+        # Get candidate cameras from remaining indices
+        candidate_indices = remaining_indices.copy()
+
+        # Get all cameras from the dataset
+        all_cameras = datamanager.train_dataset.cameras
+        candidate_cameras = all_cameras[candidate_indices]
+
+        # Score each candidate camera using uncertainty
+        scores = []
+        for idx, cam_idx in enumerate(candidate_indices):
+            camera = candidate_cameras[idx : idx + 1].to(model.device)
+            try:
+                score = model.uncertainty_score_for_camera(
+                    camera, hessian=hessian, reduce_mode=self.reduce_mode, lod=self.lod
+                )
+                scores.append((cam_idx, score.item()))
+            except Exception as e:
+                # Handle errors gracefully - assign low score
+                print(f"Warning: Failed to score camera {cam_idx}: {e}")
+                scores.append((cam_idx, -float("inf")))
+
+        # Sort by score (descending) and select top candidates
+        scores.sort(key=lambda x: x[1], reverse=True)
+        k = min(num_to_select, len(scores))
+        selected_indices = [idx for idx, _ in scores[:k]]
+
+        return selected_indices
+
+
 def create_view_selector(
     mode: Optional[str] = None,
     num_nearest_neighbors: Optional[int] = None,
     intrinsics_scale: Optional[float] = None,
     use_kdtree_filter: Optional[bool] = None,
+    bayes_reduce_mode: Optional[str] = None,
+    bayes_lod: Optional[int] = None,
 ) -> ViewSelector:
     """
     Factory function to create a ViewSelector based on mode string.
 
     Args:
-        mode: Selection mode - "random", "all", "optics", or None (defaults to "random")
+        mode: Selection mode - "random", "all", "optics", "bayes", or None (defaults to "random")
         num_nearest_neighbors: Number of nearest neighbors for optics selector (optional)
         intrinsics_scale: Intrinsics scale for optics selector (optional)
         use_kdtree_filter: Whether to use KD-tree filtering for optics selector (optional)
+        bayes_reduce_mode: Aggregation mode for BayesRays - "mean" or "sum" (optional)
+        bayes_lod: Level of detail for Hessian grid for BayesRays (optional)
 
     Returns:
         ViewSelector instance
@@ -181,6 +267,12 @@ def create_view_selector(
             intrinsics_scale=intrinsics_scale if intrinsics_scale is not None else 1.0,
             use_kdtree_filter=use_kdtree_filter if use_kdtree_filter is not None else True,
         )
+    elif mode == "bayes" or mode == "bayesrays":
+        # Use provided config values or defaults
+        return BayesRaysViewSelector(
+            reduce_mode=bayes_reduce_mode if bayes_reduce_mode is not None else "mean",
+            lod=bayes_lod if bayes_lod is not None else 8,
+        )
     else:
         # Try to import from dotted path
         try:
@@ -195,6 +287,6 @@ def create_view_selector(
         except (ImportError, AttributeError, ValueError) as e:
             raise ValueError(
                 f"Unknown view selector mode '{mode}'. "
-                f"Expected 'random', 'all', 'optics', or a dotted path to a ViewSelector class. "
+                f"Expected 'random', 'all', 'optics', 'bayes', or a dotted path to a ViewSelector class. "
                 f"Error: {e}"
             )

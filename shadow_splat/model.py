@@ -640,3 +640,74 @@ class ShadowSplatModel(SplatfactoModel):
             self.train()
 
         return coverage_score
+
+    def uncertainty_score_for_camera(
+        self,
+        camera: Cameras,
+        hessian: torch.Tensor,
+        reduce_mode: str = "mean",
+        lod: int = 8,
+    ) -> torch.Tensor:
+        """
+        Compute BayesRays uncertainty score for a candidate camera.
+
+        Renders from the given camera and computes per-pixel uncertainty using the Hessian,
+        then aggregates to a single score. Higher scores indicate higher uncertainty.
+
+        Args:
+            camera: Camera object to evaluate
+            hessian: Pre-computed Hessian tensor [((2^lod)+1)^3]
+            reduce_mode: How to aggregate uncertainty - "mean" or "sum"
+            lod: Level of detail (log2 of grid resolution) used to compute Hessian
+
+        Returns:
+            Scalar tensor with the aggregated uncertainty score
+        """
+        import types
+        from bayesrays.scripts.output_uncertainty import get_uncertainty, get_output_fn
+
+        # Save current training state
+        was_training = self.training
+
+        # Set to eval mode for inference
+        self.eval()
+
+        try:
+            # Inject Hessian and uncertainty computation into model
+            self.filter_out = False
+            self.filter_thresh = 0.5
+            self.hessian = hessian
+            self.lod = lod
+            self.get_uncertainty = types.MethodType(get_uncertainty, self)
+            self.white_bg = False
+            self.black_bg = False
+            self.N = 4096 * 1000  # approx ray dataset size
+
+            # Get the appropriate get_outputs function for uncertainty
+            new_method = get_output_fn(self)
+            self.get_outputs = types.MethodType(new_method, self)
+
+            # Render from camera
+            outputs = self.get_outputs(camera)
+
+            # Extract uncertainty from outputs
+            if "uncertainty" in outputs:
+                uncertainty = outputs["uncertainty"]  # [H, W] or [H, W, 1]
+            else:
+                # Fallback: return low score if uncertainty not available
+                uncertainty = torch.zeros((camera.height.item(), camera.width.item()), device=self.device)
+
+            # Aggregate uncertainty to scalar score
+            if reduce_mode.lower() == "mean":
+                uncertainty_score = uncertainty.mean()
+            elif reduce_mode.lower() == "sum":
+                uncertainty_score = uncertainty.sum()
+            else:
+                raise ValueError(f"reduce_mode must be 'mean' or 'sum', got {reduce_mode}")
+
+        finally:
+            # Restore training state
+            if was_training:
+                self.train()
+
+        return uncertainty_score
