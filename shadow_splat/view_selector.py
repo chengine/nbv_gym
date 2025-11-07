@@ -1,10 +1,12 @@
 """View selector for progressive view selection in Shadow Splat"""
 
 import random
+import gc
 from typing import List, Optional
 from abc import ABC, abstractmethod
 import numpy as np
 from scipy.spatial import KDTree
+import torch
 
 
 class ViewSelector(ABC):
@@ -104,37 +106,25 @@ class OpticsViewSelector(ViewSelector):
             k = min(max(1, num_to_select), len(remaining_indices))
             return random.sample(remaining_indices, k=k)
 
-        # Get candidate cameras from remaining indices
-        candidate_indices = remaining_indices.copy()
+        # Clear model.info before scoring to free memory from previous operations
+        # This is critical for preventing memory leaks during view selection
+        if hasattr(model, "info"):
+            if isinstance(model.info, dict):
+                for key, value in list(model.info.items()):
+                    if isinstance(value, torch.Tensor):
+                        del value
+                model.info.clear()
+            model.info = {}
 
-        # Get all cameras from the dataset
-        all_cameras = datamanager.train_dataset.cameras
+        try:
+            # Get candidate cameras from remaining indices
+            candidate_indices = remaining_indices.copy()
 
-        # Extract camera origins for KD-tree filtering
-        # We'll access cameras individually since Cameras doesn't support list indexing
-        candidate_origins_list = []
-        for idx in candidate_indices:
-            cam = all_cameras[idx : idx + 1]
-            origin = cam.camera_to_worlds[0, :3, -1].cpu().numpy()
-            candidate_origins_list.append(origin)
-        candidate_origins = np.array(candidate_origins_list)
+            # Get all cameras from the dataset
+            all_cameras = datamanager.train_dataset.cameras
 
-        # Optionally filter candidates using KD-tree nearest neighbors
-        if self.use_kdtree_filter and len(active_indices) > 0:
-            # Use the last added view as the "root" pose
-            root_idx = active_indices[-1]
-            root_camera = all_cameras[root_idx : root_idx + 1]
-            root_origin = root_camera.camera_to_worlds[0, :3, -1].cpu().numpy()
-
-            # Build KD-tree and query nearest neighbors
-            kdtree = KDTree(candidate_origins)
-            k = min(self.num_nearest_neighbors, len(candidate_indices))
-            _, nearest_indices = kdtree.query(root_origin.reshape(1, 3), k=k)
-
-            # Filter to nearest neighbors
-            nearest_indices = nearest_indices.flatten()
-            candidate_indices = [candidate_indices[i] for i in nearest_indices]
-            # Recompute origins for filtered candidates
+            # Extract camera origins for KD-tree filtering
+            # We'll access cameras individually since Cameras doesn't support list indexing
             candidate_origins_list = []
             for idx in candidate_indices:
                 cam = all_cameras[idx : idx + 1]
@@ -142,25 +132,70 @@ class OpticsViewSelector(ViewSelector):
                 candidate_origins_list.append(origin)
             candidate_origins = np.array(candidate_origins_list)
 
-        # Score each candidate camera using coverage
-        scores = []
-        for cam_idx in candidate_indices:
-            # Access camera using slice notation (Cameras expects tuple/slice, not list)
-            camera = all_cameras[cam_idx : cam_idx + 1].to(model.device)
-            try:
-                score = model.coverage_score_for_camera(
-                    camera, intrinsics_scale=self.intrinsics_scale, metric=self.coverage_metric
-                )
-                scores.append((cam_idx, score.item()))
-            except Exception as e:
-                # Handle errors gracefully - assign high score
-                print(f"Warning: Failed to score camera {cam_idx}: {e}")
-                scores.append((cam_idx, float("inf")))
+            # Optionally filter candidates using KD-tree nearest neighbors
+            if self.use_kdtree_filter and len(active_indices) > 0:
+                # Use the last added view as the "root" pose
+                root_idx = active_indices[-1]
+                root_camera = all_cameras[root_idx : root_idx + 1]
+                root_origin = root_camera.camera_to_worlds[0, :3, -1].cpu().numpy()
 
-        # Sort by score (ascending) and select top candidates (lowest coverage = most novel views)
-        scores.sort(key=lambda x: x[1], reverse=False)
-        k = min(num_to_select, len(scores))
-        selected_indices = [idx for idx, _ in scores[:k]]
+                # Build KD-tree and query nearest neighbors
+                kdtree = KDTree(candidate_origins)
+                k = min(self.num_nearest_neighbors, len(candidate_indices))
+                _, nearest_indices = kdtree.query(root_origin.reshape(1, 3), k=k)
+
+                # Filter to nearest neighbors
+                nearest_indices = nearest_indices.flatten()
+                candidate_indices = [candidate_indices[i] for i in nearest_indices]
+                # Recompute origins for filtered candidates
+                candidate_origins_list = []
+                for idx in candidate_indices:
+                    cam = all_cameras[idx : idx + 1]
+                    origin = cam.camera_to_worlds[0, :3, -1].cpu().numpy()
+                    candidate_origins_list.append(origin)
+                candidate_origins = np.array(candidate_origins_list)
+
+            # Score each candidate camera using coverage
+            scores = []
+            for cam_idx in candidate_indices:
+                # Access camera using slice notation (Cameras expects tuple/slice, not list)
+                camera = all_cameras[cam_idx : cam_idx + 1].to(model.device)
+                try:
+                    score = model.coverage_score_for_camera(
+                        camera, intrinsics_scale=self.intrinsics_scale, metric=self.coverage_metric
+                    )
+                    scores.append((cam_idx, score.item()))
+                except Exception as e:
+                    # Handle errors gracefully - assign high score
+                    print(f"Warning: Failed to score camera {cam_idx}: {e}")
+                    scores.append((cam_idx, float("inf")))
+                finally:
+                    # Cleanup camera object after scoring to free memory
+                    # Note: coverage_score_for_camera already handles cleanup internally,
+                    # but we clean up the camera reference here as well
+                    del camera
+
+            # Sort by score (ascending) and select top candidates (lowest coverage = most novel views)
+            scores.sort(key=lambda x: x[1], reverse=False)
+            k = min(num_to_select, len(scores))
+            selected_indices = [idx for idx, _ in scores[:k]]
+
+        finally:
+            # Final cleanup: ensure all intermediate objects are deleted
+
+            # Clear model.info one more time to ensure all tensors are freed
+            if hasattr(model, "info"):
+                if isinstance(model.info, dict):
+                    for key, value in list(model.info.items()):
+                        if isinstance(value, torch.Tensor):
+                            del value
+                    model.info.clear()
+                model.info = {}
+
+            # Force garbage collection and CUDA cache clearing
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         return selected_indices
 
