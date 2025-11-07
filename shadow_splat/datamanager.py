@@ -143,6 +143,9 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
 @dataclass
 class ViewSelectionDataManagerConfig(FullImageDatamanagerConfig):
     _target: Type = field(default_factory=lambda: ViewSelectionDataManager)
+    # NOTE: changed for saving memory
+    cache_images: Literal["cpu", "gpu", "disk"] = "cpu"
+    cache_images_type: Literal["uint8", "float32"] = "uint8"
     start_num_views: int = 10
     """Number of initial views to randomly select at the start of training."""
     initial_view_seed: Optional[int] = None

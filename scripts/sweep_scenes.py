@@ -5,6 +5,9 @@ PROJECT_NAME = "shadow-splat"
 DATASETS = [
     "data/blender/master_chief",
     "data/blender/perseverance",
+    "data/captures/chair_3pm/",
+    "data/captures/space_laces_4pm/",
+    "data/captures/shiny_statue_6pm/",
 ]
 VIEW_SELECTORS = [
     "random",

@@ -7,15 +7,16 @@ import json
 import numpy as np
 from pathlib import Path
 import shutil
+from tqdm import tqdm
 
 EVAL_FRACTION = 0.1
 
 
 if __name__ == "__main__":
     data_path = Path(
-        os.path.expanduser("/home/shared/data_nerfstudio/ShadowSplat/captures/chair_3pm/")
+        os.path.expanduser("/home/shared/data_nerfstudio/ShadowSplat/blender/perseverance/")
     )
-    transforms_path = data_path / "transforms_original.json"
+    transforms_path = data_path / "transforms.json"
     image_path = data_path / "images_split"
     with open(transforms_path, "r") as f:
         transforms = json.load(f)
@@ -33,7 +34,7 @@ if __name__ == "__main__":
     transforms_split = transforms.copy()
     frames_split = []
 
-    for i, frame in enumerate(transforms["frames"]):
+    for i, frame in tqdm(enumerate(transforms["frames"])):
         pose = np.asarray(frame["transform_matrix"])
         filename = frame["file_path"].split("/")[-1]
 
