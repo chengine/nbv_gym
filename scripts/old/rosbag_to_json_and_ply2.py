@@ -12,17 +12,19 @@ from matplotlib import pyplot as plt
 
 from itertools import permutations, product
 
+
 def all_90deg_rotations():
     mats = []
     basis = np.eye(3)
-    for perm in permutations([0,1,2]):           # all axis permutations
-        for signs in product([-1,1], repeat=3):  # all combinations of axis flips
-            mat = np.zeros((3,3))
+    for perm in permutations([0, 1, 2]):  # all axis permutations
+        for signs in product([-1, 1], repeat=3):  # all combinations of axis flips
+            mat = np.zeros((3, 3))
             for i, p in enumerate(perm):
                 mat[i, p] = signs[i]
-            if np.linalg.det(mat) > 0.5:         # determinant +1, avoid reflections
+            if np.linalg.det(mat) > 0.5:  # determinant +1, avoid reflections
                 mats.append(mat)
     return mats
+
 
 rotations = all_90deg_rotations()
 print(f"Number of unique 90°-step rotation matrices: {len(rotations)}")
@@ -33,9 +35,32 @@ RGB_INTRINSICS = {
     "width": 1280,
     "distortion_model": "plumb_bob",
     "D": [0.0, 0.0, 0.0, 0.0, 0.0],
-    "K": [909.1692504882812, 0.0, 655.2548217773438, 0.0, 909.460693359375, 366.4031066894531, 0.0, 0.0, 1.0],
+    "K": [
+        909.1692504882812,
+        0.0,
+        655.2548217773438,
+        0.0,
+        909.460693359375,
+        366.4031066894531,
+        0.0,
+        0.0,
+        1.0,
+    ],
     "R": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-    "P": [909.1692504882812, 0.0, 655.2548217773438, 0.0, 0.0, 909.460693359375, 366.4031066894531, 0.0, 0.0, 0.0, 1.0, 0.0]
+    "P": [
+        909.1692504882812,
+        0.0,
+        655.2548217773438,
+        0.0,
+        0.0,
+        909.460693359375,
+        366.4031066894531,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+    ],
 }
 
 # DEPTH_INTRINSICS = {
@@ -47,12 +72,9 @@ RGB_INTRINSICS = {
 # }
 
 # OpenCV camera to OpenGL camera transform
-opencv_to_opengl = np.array([
-    [1,  0,  0, 0],
-    [0, -1,  0, 0],
-    [0,  0, -1, 0],
-    [0,  0,  0, 1]
-], dtype=np.float32)
+opencv_to_opengl = np.array(
+    [[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]], dtype=np.float32
+)
 
 # camera_to_mocap = np.array([
 #     [-1., 0., 0., 0.],
@@ -61,12 +83,10 @@ opencv_to_opengl = np.array([
 #     [0., 0., 0., 1.]
 # ], dtype=np.float32)
 
-camera_to_mocap = np.array([
-    [0., -1., 0., 0.],
-    [-1., 0., 0., 0.],
-    [0., 0., -1., 0.],
-    [0., 0., 0., 1.]
-], dtype=np.float32)
+camera_to_mocap = np.array(
+    [[0.0, -1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+    dtype=np.float32,
+)
 
 LIGHT_INTRINSICS = {}
 
@@ -80,21 +100,28 @@ start_idx = 45
 end_idx = 910
 
 SAVE_FOLDER = "data/figurines/figurines"
-Path(SAVE_FOLDER + '/images').mkdir(parents=True, exist_ok=True)
-Path(SAVE_FOLDER + '/depth').mkdir(parents=True, exist_ok=True)
+Path(SAVE_FOLDER + "/images").mkdir(parents=True, exist_ok=True)
+Path(SAVE_FOLDER + "/depth").mkdir(parents=True, exist_ok=True)
+
 
 def pose_msg_to_matrix(msg):
     pos = [msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]
-    quat = [msg.pose.orientation.x, msg.pose.orientation.y, msg.pose.orientation.z, msg.pose.orientation.w]
+    quat = [
+        msg.pose.orientation.x,
+        msg.pose.orientation.y,
+        msg.pose.orientation.z,
+        msg.pose.orientation.w,
+    ]
     rot = R.from_quat(quat).as_matrix()
     tf = np.eye(4)
-    tf[:3,:3] = rot
+    tf[:3, :3] = rot
     tf[:3, -1] = pos
     return tf
 
+
 def depth_to_points(depth_img, K, pose):
     K = np.array(K).reshape(3, 3)
-    fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
+    fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
     h, w = depth_img.shape
     xx, yy = np.meshgrid(np.arange(w), np.arange(h))
     valid = depth_img > 0
@@ -102,9 +129,10 @@ def depth_to_points(depth_img, K, pose):
     x = (xx[valid] - cx) * z / fx
     y = (yy[valid] - cy) * z / fy
     pts_cam = np.stack((x, y, z), axis=-1)
-    pts_hom = np.concatenate([pts_cam, np.ones((pts_cam.shape[0],1))], axis=1)
+    pts_hom = np.concatenate([pts_cam, np.ones((pts_cam.shape[0], 1))], axis=1)
     world_pts = (pose @ pts_hom.T).T[:, :3]
     return world_pts
+
 
 # 1. Load messages from bag
 typestore = get_typestore(Stores.LATEST)
@@ -150,7 +178,9 @@ for i, t in enumerate(color_ts):
         downsampled_indices.append(i)
         last_time = t
 
-print(f"Selected {len(downsampled_indices)} out of {len(color_ts)} color frames at ~{desired_rate_hz} Hz.")
+print(
+    f"Selected {len(downsampled_indices)} out of {len(color_ts)} color frames at ~{desired_rate_hz} Hz."
+)
 
 # 2. For each color image, find nearest depth, camera pose, and light pose. Skip frames if the timestamps are too far apart.
 frames = []
@@ -170,47 +200,53 @@ for out_idx, idx in enumerate(tqdm(downsampled_indices, desc="Processing frames"
     # Nearest depth
     i_depth = np.argmin(np.abs(np.array(depth_ts) - t_color))
     if np.abs(depth_ts[i_depth] - t_color) > min_delta_t:
-        print(f"Skipping frame {out_idx} at index {idx} due to large time difference with depth frame.")
+        print(
+            f"Skipping frame {out_idx} at index {idx} due to large time difference with depth frame."
+        )
         continue
     depth_msg = depth_msgs[i_depth]
 
     # Nearest camera pose
     i_pose = np.argmin(np.abs(np.array(cam_ts) - t_color))
     if np.abs(cam_ts[i_pose] - t_color) > min_delta_t:
-        print(f"Skipping frame {out_idx} at index {idx} due to large time difference with camera pose.")
+        print(
+            f"Skipping frame {out_idx} at index {idx} due to large time difference with camera pose."
+        )
         continue
     cam_pose = cam_poses[i_pose]
 
     # Nearest light pose
     i_light = np.argmin(np.abs(np.array(light_ts) - t_color))
     if np.abs(light_ts[i_light] - t_color) > min_delta_t:
-        print(f"Skipping frame {out_idx} at index {idx} due to large time difference with light pose.")
+        print(
+            f"Skipping frame {out_idx} at index {idx} due to large time difference with light pose."
+        )
         continue
     light_pose = light_poses[i_light]
 
     # Convert and save images
-    color_np = message_to_cvimage(color_msg, 'bgr8')
+    color_np = message_to_cvimage(color_msg, "bgr8")
     depth_np = message_to_cvimage(depth_msg)
-    
+
     # If depth is in uint16, convert to meters
     if depth_np.dtype == np.uint16:
         depth_m = depth_np.astype(np.float32) * 0.001
     else:
         depth_m = depth_np.astype(np.float32)
 
-    color_path = f'{SAVE_FOLDER}/images/rgb_{idx:04d}.png'
-    depth_path = f'{SAVE_FOLDER}/depth/depth_{idx:04d}.png'
+    color_path = f"{SAVE_FOLDER}/images/rgb_{idx:04d}.png"
+    depth_path = f"{SAVE_FOLDER}/depth/depth_{idx:04d}.png"
     cv2.imwrite(color_path, color_np)
-    cv2.imwrite(depth_path, (depth_m)) # save as 16UC1
+    cv2.imwrite(depth_path, (depth_m))  # save as 16UC1
     # Save depth as npy file
-    np.save(f'{SAVE_FOLDER}/depth/depth_{idx:04d}.npy', depth_m)
+    np.save(f"{SAVE_FOLDER}/depth/depth_{idx:04d}.npy", depth_m)
 
     # Camera and light poses
     cam_matrix_mocap = pose_msg_to_matrix(cam_pose)
     light_matrix_mocap = pose_msg_to_matrix(light_pose)
 
-    cam_matrix = cam_matrix_mocap @ camera_to_mocap # @ opencv_to_opengl
-    light_matrix = light_matrix_mocap # @ camera_to_mocap # @ opencv_to_opengl
+    cam_matrix = cam_matrix_mocap @ camera_to_mocap  # @ opencv_to_opengl
+    light_matrix = light_matrix_mocap  # @ camera_to_mocap # @ opencv_to_opengl
 
     # Project depth to point cloud
     # points = depth_to_points(depth_m, RGB_INTRINSICS['K'], cam_matrix)
@@ -233,12 +269,17 @@ for out_idx, idx in enumerate(tqdm(downsampled_indices, desc="Processing frames"
     world_pts = world_pts.T  # Shape (N, 3)
 
     # Take world pts and project into RGB image
-    K_rgb = np.array(RGB_INTRINSICS['K']).reshape(3, 3)
+    K_rgb = np.array(RGB_INTRINSICS["K"]).reshape(3, 3)
     uv_rgb = K_rgb @ pts_cam
     uv_rgb = uv_rgb[:2, :] / uv_rgb[2, :]  # Normalize by z to get pixel coordinates
     uv_rgb = np.round(uv_rgb.T).astype(np.int32)  # Shape (N, 2)
 
-    valid_rgb_mask = (uv_rgb[:, 0] >= 0) & (uv_rgb[:, 0] < RGB_INTRINSICS['width']) & (uv_rgb[:, 1] >= 0) & (uv_rgb[:, 1] < RGB_INTRINSICS['height'])
+    valid_rgb_mask = (
+        (uv_rgb[:, 0] >= 0)
+        & (uv_rgb[:, 0] < RGB_INTRINSICS["width"])
+        & (uv_rgb[:, 1] >= 0)
+        & (uv_rgb[:, 1] < RGB_INTRINSICS["height"])
+    )
     uv_rgb = uv_rgb[valid_rgb_mask]  # Filter valid pixel coordinates
     pts_pixels = color_np[uv_rgb[:, 1], uv_rgb[:, 0]]  # OpenCV uses (y, x) indexing
 
@@ -271,20 +312,21 @@ for out_idx, idx in enumerate(tqdm(downsampled_indices, desc="Processing frames"
     #     # Visualize the current point cloud
     #     o3d.visualization.draw_geometries([pcd_per_frame], window_name=f"Fused Point Cloud - Frame {out_idx}")
 
-    frames.append({
-        "file_path": f'images/rgb_{idx:04d}.png',
-        "depth_path": f'depth/depth_{idx:04d}.png',
-        "transform_matrix": cam_matrix.tolist(),
-        "light_pose": light_matrix.tolist(),
-        "bag_idx": idx
-    })
+    frames.append(
+        {
+            "file_path": f"images/rgb_{idx:04d}.png",
+            "depth_path": f"depth/depth_{idx:04d}.png",
+            "transform_matrix": cam_matrix.tolist(),
+            "light_pose": light_matrix.tolist(),
+            "bag_idx": idx,
+        }
+    )
 
 print(f"Processed {len(frames)} frames.")
 
 pcd = pcd.voxel_down_sample(voxel_size=0.01)
 print("Statistical oulier removal")
-cl, ind = pcd.remove_statistical_outlier(nb_neighbors=20,
-                                                    std_ratio=2.0)
+cl, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
 pcd = pcd.select_by_index(ind)
 
 target_num_points = 200000
@@ -292,6 +334,7 @@ target_num_points = 200000
 if len(pcd.points) > target_num_points:
     # Use random sampling for exact count (Open3D >= 0.15)
     import random
+
     indices = random.sample(range(len(pcd.points)), target_num_points)
     pcd = pcd.select_by_index(indices)
     print(f"Point cloud randomly downsampled to {target_num_points} points.")
@@ -309,11 +352,16 @@ for i, frame in enumerate(frames):
 
     # Create camera frustum
     cam_frustum = o3d.geometry.LineSet.create_camera_visualization(
-        intrinsic=o3d.camera.PinholeCameraIntrinsic(RGB_INTRINSICS['width'], RGB_INTRINSICS['height'], 
-                                                     RGB_INTRINSICS['K'][0], RGB_INTRINSICS['K'][4], 
-                                                     RGB_INTRINSICS['K'][2], RGB_INTRINSICS['K'][5]),
+        intrinsic=o3d.camera.PinholeCameraIntrinsic(
+            RGB_INTRINSICS["width"],
+            RGB_INTRINSICS["height"],
+            RGB_INTRINSICS["K"][0],
+            RGB_INTRINSICS["K"][4],
+            RGB_INTRINSICS["K"][2],
+            RGB_INTRINSICS["K"][5],
+        ),
         extrinsic=cam_matrix @ opencv_to_opengl,  # Convert to OpenGL convention
-        scale=1.0
+        scale=1.0,
     )
     vis_objs.append(cam_frustum)
 o3d.visualization.draw_geometries(vis_objs, window_name="Fused Point Cloud")
@@ -333,10 +381,9 @@ out_json = {
     "ply_file_path": ply_file_path,
     "applied_transform": np.eye(4)[:3].tolist(),
     "light_intrinsics": LIGHT_INTRINSICS,
-    "frames": frames
+    "frames": frames,
 }
 with open(f"{SAVE_FOLDER}/transforms.json", "w") as f:
     json.dump(out_json, f, indent=2)
 
 print("Export complete. See:", SAVE_FOLDER)
-

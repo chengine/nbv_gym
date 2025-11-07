@@ -37,7 +37,7 @@ from shadow_splat.shadow_splat_rendering import (
 try:
     from modified_diff_gaussian_rasterization_depth import (
         GaussianRasterizer as ModifiedGaussianRasterizer,
-        GaussianRasterizationSettings
+        GaussianRasterizationSettings,
     )
     from einops import repeat, reduce, rearrange
 except ImportError:
@@ -64,13 +64,16 @@ from shadow_splat.shadow_splat_rendering import (
     calculate_relighting_weights_from_point_cloud,
     generate_point_cloud_from_camera_depth,
 )
-from shadow_splat.util.coverage import update_view_coverage_for_frustum, fibonacci_sphere, update_fig_for_frustum
+from shadow_splat.util.coverage import (
+    update_view_coverage_for_frustum,
+    fibonacci_sphere,
+    update_fig_for_frustum,
+)
 
 import matplotlib.pyplot as plt
 
-def projection_matrix(
-    znear, zfar, fovx, fovy, device: Union[str, torch.device] = "cpu"
-):
+
+def projection_matrix(znear, zfar, fovx, fovy, device: Union[str, torch.device] = "cpu"):
     """
     Constructs an OpenGL-style perspective projection matrix.
     """
@@ -90,7 +93,11 @@ def projection_matrix(
         device=device,
     )
 
-to_homo = lambda x: torch.cat([x, torch.ones(x.shape[:-1] + (1, ), dtype=x.dtype, device=x.device)], dim=-1)
+
+to_homo = lambda x: torch.cat(
+    [x, torch.ones(x.shape[:-1] + (1,), dtype=x.dtype, device=x.device)], dim=-1
+)
+
 
 @dataclass
 class ShadowSplatModelConfig(SplatfactoModelConfig):
@@ -149,9 +156,7 @@ class ShadowSplatModel(SplatfactoModel):
             torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda")
         )
 
-        self.fig = torch.nn.Parameter(
-            torch.zeros((self.means.shape[0], 1), device="cuda")
-        )
+        self.fig = torch.nn.Parameter(torch.zeros((self.means.shape[0], 1), device="cuda"))
 
         self.view_fig = torch.nn.Parameter(
             torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda")
@@ -309,7 +314,7 @@ class ShadowSplatModel(SplatfactoModel):
 
         # TODO: Implement multi-light support
         if light is not None:
-            assert light.shape[0] == 1, "Only one light at a time"
+            assert light.shape[0] == 1, f"Only one light at a time, light shape: {light.shape}"
 
         # cropping
         if self.crop_box is not None and not self.training:
@@ -568,7 +573,7 @@ class ShadowSplatModel(SplatfactoModel):
             "lighted_dissimilarity": lighted_dissimilarity,  # type: ignore
         }  # type: ignore
 
-    # def update_coverage(self, camera: Cameras): 
+    # def update_coverage(self, camera: Cameras):
 
     # def update_
 
@@ -737,6 +742,7 @@ class ShadowSplatModel(SplatfactoModel):
 
         return coverage_score
 
+
 @dataclass
 class FisherSplatModelConfig(SplatfactoModelConfig):
     """FisherRF Model Config, nerfstudio's implementation of FisherRFGaussian Splatting"""
@@ -755,6 +761,7 @@ class FisherSplatModelConfig(SplatfactoModelConfig):
     depth_uncertainty_weight: float = 0.0
     """weight of depth uncertainty with the Hessian"""
     rgb_uncertainty_weight: float = 1.0
+
 
 class FisherSplatModel(SplatfactoModel):
     """Nerfstudio's implementation of FisherRF Gaussian Splatting
@@ -1089,7 +1096,7 @@ class FisherSplatModel(SplatfactoModel):
         if render_mode in ["ED", "RGB+ED"]:
             depth_im = render[:, ..., -1:].squeeze(0)
             depth_sqr_im = render[:, ..., -2:-1].squeeze(0)
-            variance_img = depth_sqr_im - depth_im ** 2
+            variance_img = depth_sqr_im - depth_im**2
 
             depth_im = torch.where(alpha.squeeze(0) > 0, depth_im, depth_im.detach().max())
             variance_img = torch.where(alpha.squeeze(0) > 0, variance_img, 0.0)
@@ -1106,7 +1113,9 @@ class FisherSplatModel(SplatfactoModel):
             rgb_weight = self.config.rgb_uncertainty_weight
             depth_weight = self.config.depth_uncertainty_weight
 
-            uncertainties = self.render_uncertainty_rgb_depth([camera], [camera], rgb_weight=rgb_weight, depth_weight=depth_weight)
+            uncertainties = self.render_uncertainty_rgb_depth(
+                [camera], [camera], rgb_weight=rgb_weight, depth_weight=depth_weight
+            )
             uncertainty = uncertainties[0].unsqueeze(2)
         else:
             uncertainty = None
@@ -1155,9 +1164,7 @@ class FisherSplatModel(SplatfactoModel):
         R = optimized_camera_to_world[:3, :3]  # 3 x 3
         T = optimized_camera_to_world[:3, 3:4]  # 3 x 1
         # flip the z and y axes to align with gsplat conventions
-        R_edit = torch.diag(
-            torch.tensor([1, -1, -1], device=self.device, dtype=R.dtype)
-        )
+        R_edit = torch.diag(torch.tensor([1, -1, -1], device=self.device, dtype=R.dtype))
         R = R @ R_edit
         # analytic matrix inverse to get world2camera matrix
         R_inv = R.T
@@ -1178,12 +1185,8 @@ class FisherSplatModel(SplatfactoModel):
         scales_crop = self.scales
         quats_crop = self.quats
 
-        colors_crop = torch.cat(
-            (features_dc_crop[:, None, :], features_rest_crop), dim=1
-        )
-        BLOCK_WIDTH = (
-            16  # this controls the tile size of rasterization, 16 is a good default
-        )
+        colors_crop = torch.cat((features_dc_crop[:, None, :], features_rest_crop), dim=1)
+        BLOCK_WIDTH = 16  # this controls the tile size of rasterization, 16 is a good default
 
         # rescale the camera back to original dimensions before returning
         camera.rescale_output_resolution(camera_downscale)
@@ -1235,9 +1238,7 @@ class FisherSplatModel(SplatfactoModel):
         return rasterizer, params
 
     @torch.no_grad()
-    def compute_diag_H_rgb_depth(
-        self, camera: Cameras, compute_rgb_H=False
-    ):
+    def compute_diag_H_rgb_depth(self, camera: Cameras, compute_rgb_H=False):
         """
         Compute diagonal hessian, on rgb or depth.
 
@@ -1255,10 +1256,7 @@ class FisherSplatModel(SplatfactoModel):
 
         # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
         screenspace_points = (
-            torch.zeros_like(
-                means3D, dtype=means3D.dtype, requires_grad=True, device="cuda"
-            )
-            + 0
+            torch.zeros_like(means3D, dtype=means3D.dtype, requires_grad=True, device="cuda") + 0
         )
         try:
             screenspace_points.retain_grad()
@@ -1280,7 +1278,7 @@ class FisherSplatModel(SplatfactoModel):
                 rendered_image.backward(gradient=torch.ones_like(rendered_image))
             else:
                 rendered_depth.backward(gradient=torch.ones_like(rendered_depth))
-        
+
         cur_H = [p.grad.detach().clone() for p in params]  # type: ignore
 
         # for p in params:
@@ -1294,21 +1292,29 @@ class FisherSplatModel(SplatfactoModel):
         return {"rgb": rgb, "H": cur_H, "depth": rendered_depth}  # type: ignore
 
     @torch.no_grad()
-    def render_uncertainty_rgb_depth(self, train_cameras: Iterable[Cameras], test_cameras: Iterable[Cameras], rgb_weight=1.0, depth_weight=0.0):
-        H_per_gaussian = torch.zeros(self.opacities.shape[0], device=self.opacities.device, dtype=self.opacities.dtype)
-        
+    def render_uncertainty_rgb_depth(
+        self,
+        train_cameras: Iterable[Cameras],
+        test_cameras: Iterable[Cameras],
+        rgb_weight=1.0,
+        depth_weight=0.0,
+    ):
+        H_per_gaussian = torch.zeros(
+            self.opacities.shape[0], device=self.opacities.device, dtype=self.opacities.dtype
+        )
+
         # go through provided training cameras
         for train_cam in train_cameras:
             # get rgb uncertainty
             H_info_rgb = self.compute_diag_H_rgb_depth(train_cam, compute_rgb_H=True)
-            H_info_rgb['H'] = [p * rgb_weight for p in H_info_rgb['H']]
-            H_per_gaussian += sum([reduce(p, "n ... -> n", "sum") for p in H_info_rgb['H']])
-        
+            H_info_rgb["H"] = [p * rgb_weight for p in H_info_rgb["H"]]
+            H_per_gaussian += sum([reduce(p, "n ... -> n", "sum") for p in H_info_rgb["H"]])
+
             # get depth uncertainty
             H_info_depth = self.compute_diag_H_rgb_depth(train_cam, compute_rgb_H=False)
-            H_info_depth['H'] = [p * depth_weight for p in H_info_depth['H']]
-            H_per_gaussian += sum([reduce(p, "n ... -> n", "sum") for p in H_info_depth['H']])
-        
+            H_info_depth["H"] = [p * depth_weight for p in H_info_depth["H"]]
+            H_per_gaussian += sum([reduce(p, "n ... -> n", "sum") for p in H_info_depth["H"]])
+
         hessian_color = repeat(H_per_gaussian.detach(), "n -> n c", c=3)
         uncern_maps = []
         for test_cam in test_cameras:
@@ -1316,7 +1322,10 @@ class FisherSplatModel(SplatfactoModel):
             means3D, shs, opacities, scales, rotations = params
 
             # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
-            screenspace_points = torch.zeros_like(means3D, dtype=means3D.dtype, requires_grad=True, device="cuda") + 0
+            screenspace_points = (
+                torch.zeros_like(means3D, dtype=means3D.dtype, requires_grad=True, device="cuda")
+                + 0
+            )
             try:
                 screenspace_points.retain_grad()
             except:
@@ -1336,11 +1345,12 @@ class FisherSplatModel(SplatfactoModel):
                 opacities=opacities,
                 scales=scales,
                 rotations=rotations,
-                cov3D_precomp=None)
-            
+                cov3D_precomp=None,
+            )
+
             uncern_maps.append(rendered_image[0])
 
-        return uncern_maps 
+        return uncern_maps
 
     def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
         """Computes and returns the losses dict.
@@ -1506,4 +1516,3 @@ class FisherSplatModel(SplatfactoModel):
             self.train()
 
         return coverage_score
-
