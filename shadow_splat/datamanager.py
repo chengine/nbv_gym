@@ -208,103 +208,9 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
             self.active_train_indices = (
                 random.sample(self.all_train_indices, k=start_k) if num_train_images > 0 else []
             )
-        # If the view selector is all, set the active train indices to all the train indices
-        if self.view_selector is not None and isinstance(self.view_selector, AllViewSelector):
-            self.active_train_indices = self.all_train_indices.copy()
-            self.active_unseen_cameras = self.all_train_indices.copy()
-        else:
-            self.active_unseen_cameras = list(self.active_train_indices)
+        self.active_unseen_cameras = list(self.active_train_indices)
 
-        # Log initial indices to wandb table
-        # self._log_active_indices_to_wandb(
-        #     iteration=0,
-        #     newly_added_indices=self.active_train_indices.copy(),
-        # )
-
-    def _log_active_indices_to_wandb(self, iteration: int, newly_added_indices: list[int]) -> None:
-        """Log active indices to wandb as a table row.
-
-        This logs each index update as a new row in a wandb table. All rows are tracked
-        and can be downloaded via the wandb API or UI for visualization (e.g., with plotly).
-
-        Args:
-            iteration: Current iteration number (0 for initialization)
-            newly_added_indices: List of newly added indices (or all indices for initialization)
-        """
-        if not WANDB_AVAILABLE:
-            return
-
-        try:
-            # Check if wandb is initialized
-            if wandb.run is None:
-                return
-
-            # Create table row data
-            # Sort indices for consistency and easier visualization
-            sorted_newly_added = sorted(newly_added_indices)
-            sorted_total_active = sorted(self.active_train_indices)
-
-            table_data = {
-                "iteration": iteration,
-                "newly_added_indices": sorted_newly_added,  # Keep as list for better serialization
-                "newly_added_indices_str": str(
-                    sorted_newly_added
-                ),  # String version for table display
-                "num_newly_added": len(newly_added_indices),
-                "total_active_indices": sorted_total_active,  # Keep as list for better serialization
-                "total_active_indices_str": str(
-                    sorted_total_active
-                ),  # String version for table display
-                "num_total_active": len(self.active_train_indices),
-            }
-
-            # Log as a table using wandb.Table for visualization in wandb UI
-            table = wandb.Table(
-                columns=[
-                    "iteration",
-                    "newly_added_indices",
-                    "num_newly_added",
-                    "total_active_indices",
-                    "num_total_active",
-                ],
-                data=[
-                    [
-                        table_data["iteration"],
-                        table_data["newly_added_indices_str"],
-                        table_data["num_newly_added"],
-                        table_data["total_active_indices_str"],
-                        table_data["num_total_active"],
-                    ]
-                ],
-            )
-
-            # Log the table at the current step
-            # Each log creates a new table version, which wandb tracks
-            # You can download all table versions via the wandb API or UI
-            wandb.log({"View Selection/Active Indices Table": table}, step=iteration)
-
-            # Also log structured data as JSON strings for easier programmatic access
-            # This makes it easier to download and process the data programmatically
-            wandb.log(
-                {
-                    "View Selection/Active Indices/iteration": iteration,
-                    "View Selection/Active Indices/newly_added_json": json.dumps(
-                        sorted_newly_added
-                    ),
-                    "View Selection/Active Indices/num_newly_added": table_data["num_newly_added"],
-                    "View Selection/Active Indices/total_active_json": json.dumps(
-                        sorted_total_active
-                    ),
-                    "View Selection/Active Indices/num_total_active": table_data[
-                        "num_total_active"
-                    ],
-                },
-                step=iteration,
-            )
-
-        except Exception:
-            # Silently fail if wandb logging fails
-            pass
+        self.log_added_views = []
 
     def expand_active_set(self, k: int = 1, step: Optional[int] = None, **kwargs) -> None:
         """Expand the active set by adding up to k remaining indices using the view selector."""
@@ -331,6 +237,8 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         self.active_train_indices.extend(add)
         # Make newly added indices available for immediate sampling
         self.active_unseen_cameras.extend(add)
+
+        self.log_added_views.append(add)
 
         # Log to wandb/tensorboard if step is provided
         if step is not None:
@@ -361,6 +269,7 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         Returns a `Cameras` object instead of a ray bundle to match the existing
         ShadowSplat pipeline/model interface.
         """
+        # print(f"Active train cameras: {len(self.active_train_indices)}")
         if not self.active_unseen_cameras:
             # Refill from the active set when we have seen all active cameras
             self.active_unseen_cameras = list(self.active_train_indices)

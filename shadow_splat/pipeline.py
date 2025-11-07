@@ -218,6 +218,9 @@ class ViewSelectionPipeline(VanillaPipeline):
                 view_selector = create_view_selector(config.view_selector)
             self.datamanager.view_selector = view_selector
             self._view_selector = view_selector
+            if config.view_selector == "all":
+                self.datamanager.active_train_indices = self.datamanager.all_train_indices.copy()
+                self.datamanager.active_unseen_cameras = self.datamanager.all_train_indices.copy()
         else:
             self._view_selector = None
 
@@ -231,14 +234,46 @@ class ViewSelectionPipeline(VanillaPipeline):
             and step % self.config.add_every_n_steps == 0
             and hasattr(self.datamanager, "expand_active_set")
         ):
-            self._model.training = False
-            self.datamanager.expand_active_set(
-                k=self.config.add_num_views, step=step, model=self._model, pipeline=self
-            )
-            self._model.training = True
-            # NOTE: diagnosing memory issues
-            torch.cuda.empty_cache()
+            # Clear model.info before view selection to free memory from previous renders
+            # This is critical for preventing memory leaks during view selection
+            if hasattr(self._model, "info"):
+                if isinstance(self._model.info, dict):
+                    for key, value in list(self._model.info.items()):
+                        if isinstance(value, torch.Tensor):
+                            del value
+                    self._model.info.clear()
+                self._model.info = {}
+
+            # Force initial cleanup before view selection
             gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            self._model.training = False
+            try:
+                self.datamanager.expand_active_set(
+                    k=self.config.add_num_views, step=step, model=self._model, pipeline=self
+                )
+            finally:
+                # Aggressive cleanup after view expansion
+                # Clear model.info again to ensure all tensors from view selection are freed
+                if hasattr(self._model, "info"):
+                    if isinstance(self._model.info, dict):
+                        for key, value in list(self._model.info.items()):
+                            if isinstance(value, torch.Tensor):
+                                del value
+                        self._model.info.clear()
+                    self._model.info = {}
+
+                # Restore training state
+                self._model.training = True
+
+                # Force aggressive cleanup after view expansion
+                # This is critical for preventing memory leaks
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()  # Ensure all operations are complete
 
         cameras, batch, light = self.datamanager.next_train(step)
         if self.config.disable_light:

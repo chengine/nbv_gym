@@ -10,7 +10,7 @@ import torch
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.data.dataparsers.base_dataparser import DataparserOutputs
 from nerfstudio.data.dataparsers.nerfstudio_dataparser import Nerfstudio, NerfstudioDataParserConfig
-
+from nerfstudio.utils.rich_utils import CONSOLE
 from nerfstudio.utils.io import load_from_json
 
 
@@ -88,6 +88,7 @@ class ShadowSplatDataParser(Nerfstudio):
 
         # Dataset has light info
         if "light_pose" in frames[0]:
+            CONSOLE.log("LOADING LIGHTS")
             # Load light poses only for the split frames
             light_poses = []
             for frame_idx in split_frame_indices:

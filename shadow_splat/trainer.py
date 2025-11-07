@@ -10,8 +10,10 @@ from nerfstudio.engine.trainer import TrainerConfig, Trainer
 from nerfstudio.engine.callbacks import TrainingCallbackAttributes
 from nerfstudio.viewer_legacy.server.viewer_state import ViewerLegacyState
 from nerfstudio.utils import writer, profiler
+from nerfstudio.utils.rich_utils import CONSOLE
 
 from shadow_splat.viewer import ShadowSplatViewer
+
 
 class ShadowSplatTrainer(Trainer):
     """Custom trainer that uses the ShadowSplat custom viewer."""
@@ -89,6 +91,22 @@ class ShadowSplatTrainer(Trainer):
         )
         writer.put_config(name="config", config_dict=dataclasses.asdict(self.config), step=0)
         profiler.setup_profiler(self.config.logging, writer_log_path)
+
+    def _after_train(self) -> None:
+        super()._after_train()
+        print(self.pipeline.datamanager.log_added_views)
+        # Save view selection log to outputs folder
+        if (
+            hasattr(self.pipeline.datamanager, "log_added_views")
+            and self.pipeline.datamanager.log_added_views
+        ):
+            import json
+
+            view_log_path = self.config.get_base_dir() / "view_selection_log.json"
+            with open(view_log_path, "w") as f:
+                json.dump(self.pipeline.datamanager.log_added_views, f, indent=2)
+
+            CONSOLE.log(f"View selection log saved to: {view_log_path}")
 
 
 @dataclass
