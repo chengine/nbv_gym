@@ -208,12 +208,7 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
             self.active_train_indices = (
                 random.sample(self.all_train_indices, k=start_k) if num_train_images > 0 else []
             )
-        # If the view selector is all, set the active train indices to all the train indices
-        if self.view_selector is not None and isinstance(self.view_selector, AllViewSelector):
-            self.active_train_indices = self.all_train_indices.copy()
-            self.active_unseen_cameras = self.all_train_indices.copy()
-        else:
-            self.active_unseen_cameras = list(self.active_train_indices)
+        self.active_unseen_cameras = list(self.active_train_indices)
 
         # Log initial indices to wandb table
         # self._log_active_indices_to_wandb(
@@ -361,6 +356,7 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         Returns a `Cameras` object instead of a ray bundle to match the existing
         ShadowSplat pipeline/model interface.
         """
+        # print(f"Active train cameras: {len(self.active_train_indices)}")
         if not self.active_unseen_cameras:
             # Refill from the active set when we have seen all active cameras
             self.active_unseen_cameras = list(self.active_train_indices)

@@ -218,6 +218,9 @@ class ViewSelectionPipeline(VanillaPipeline):
                 view_selector = create_view_selector(config.view_selector)
             self.datamanager.view_selector = view_selector
             self._view_selector = view_selector
+            if config.view_selector == "all":
+                self.datamanager.active_train_indices = self.datamanager.all_train_indices.copy()
+                self.datamanager.active_unseen_cameras = self.datamanager.all_train_indices.copy()
         else:
             self._view_selector = None
 

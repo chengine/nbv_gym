@@ -372,6 +372,9 @@ class ShadowSplatModel(SplatfactoModel):
         # NOTE: We need to render depth (and variance) for coverage metrics
         render_mode = "RGB+ED"
 
+        # NOTE: override for scannet
+        camera_model = "pinhole"
+
         if self.config.sh_degree > 0:
             sh_degree_to_use = min(
                 self.step // self.config.sh_degree_interval, self.config.sh_degree
@@ -491,8 +494,11 @@ class ShadowSplatModel(SplatfactoModel):
 
         fig_img = render[:, ..., 4:5].squeeze(0)
         # lighted_transmittance_img = transmittance_img
-
         view_fig_img = render[:, ..., 5:6].squeeze(0)
+
+        # Normalize
+        fig_img = fig_img / torch.max(self.fig)
+        view_fig_img = view_fig_img / torch.max(self.view_fig)
 
         # apply bilateral grid
         if self.config.use_bilateral_grid and self.training:
@@ -567,7 +573,7 @@ class ShadowSplatModel(SplatfactoModel):
             "coverage": coverage,  # type: ignore
             "fig": fig_img,  # type: ignore
             "view_fig": view_fig_img,  # type: ignore
-            "shadow": shadow_img,  # type: ignore
+            "shadow": shadow_img.squeeze(0),  # type: ignore
             "light_depth": light_depth_image,  # type: ignore
             "light_variance": light_variance_image,  # type: ignore
             "lighted_dissimilarity": lighted_dissimilarity,  # type: ignore

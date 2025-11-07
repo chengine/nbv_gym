@@ -184,6 +184,7 @@ def create_view_selector(
     Returns:
         ViewSelector instance
     """
+    print(f"Creating view selector for mode: {mode}")
     if mode is None or mode == "random":
         return RandomViewSelector()
     elif mode == "all":
