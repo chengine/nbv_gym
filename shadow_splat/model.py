@@ -1287,12 +1287,6 @@ class FisherSplatModel(SplatfactoModel):
 
         cur_H = [p.grad.detach().clone() for p in params]  # type: ignore
 
-        # for p in params:
-        #     if p is not None:
-        #         p.grad = None
-        #     else:
-        #         warnings.warn("A parameter with a NoneType was detected!")
-
         rgb = rearrange(rendered_image, "c h w -> h w c")
 
         return {"rgb": rgb, "H": cur_H, "depth": rendered_depth}  # type: ignore
@@ -1463,8 +1457,7 @@ class FisherSplatModel(SplatfactoModel):
 
     @torch.no_grad()
     def coverage_score_for_camera(
-        self, camera: Cameras, intrinsics_scale: float = 1.0, metric: str = "coverage"
-    ) -> torch.Tensor:
+        self, camera: Cameras, intrinsics_scale: float = 1.0) -> torch.Tensor:
         """Compute coverage score for a candidate camera.
 
         Renders from the given camera and computes the sum of all pixel values in the
@@ -1506,16 +1499,10 @@ class FisherSplatModel(SplatfactoModel):
         outputs = self.get_outputs(camera, light=None)
 
         # Extract coverage from outputs
-        if metric in outputs:
-            coverage = outputs[metric]  # [H, W] or [H, W, 1]
-        else:
-            # Fallback: coverage might be in render output
-            # This should not happen if render_mode is set correctly, but handle gracefully
-            coverage = torch.zeros((camera.height.item(), camera.width.item()), device=self.device)
-            print(f"{metric} not found in outputs")
+        uncertainty = outputs["uncertainty"]
 
         # Sum all pixel values to get total coverage score
-        coverage_score = coverage.sum()
+        coverage_score = uncertainty.sum()
 
         # Restore training state
         if was_training:

@@ -1,13 +1,18 @@
-import os, subprocess, wandb, datetime, pathlib, shlex
+import subprocess
+import pathlib
+import shlex
 
 
 PROJECT_NAME = "shadow-splat"
 DATASETS = [
-    "data/blender/master_chief",
-    "data/blender/perseverance",
+    # "data/blender/master_chief",
+    # "data/blender/perseverance",
     "data/captures/chair_3pm/",
     "data/captures/space_laces_4pm/",
     "data/captures/shiny_statue_6pm/",
+    "data/tandt/ignatius/",
+    "data/tandt/train/",
+    "data/tandt/caterpillar/",
 ]
 VIEW_SELECTORS = [
     "random",
@@ -25,8 +30,6 @@ def main():
             cmd = [
                 "ns-train",
                 method,
-                "--data",
-                ds,
                 "--vis=wandb",
                 "--project-name",
                 PROJECT_NAME,
@@ -36,6 +39,11 @@ def main():
                 vs,
                 "--viewer.quit-on-train-completion",
                 "True",
+                "shadow-splat-data",
+                "--data",
+                ds,
+                "--eval-mode",
+                "filename",
             ]
             print("Running:", " ".join(shlex.quote(c) for c in cmd))
             subprocess.run(cmd, check=True)
