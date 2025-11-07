@@ -33,6 +33,8 @@ from nerfstudio.data.datamanagers.full_images_datamanager import (
 )
 from nerfstudio.utils import writer
 
+from shadow_splat.view_selector import AllViewSelector
+
 try:
     import wandb
 
@@ -104,7 +106,11 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
         cameras.metadata["cam_idx"] = image_idx
 
         # NOTE: Added
-        if self.train_dataparser_outputs.lights is not None:
+        # if self.train_dataparser_outputs.lights is not None:
+        if (
+            hasattr(self.train_dataparser_outputs, "lights")
+            and self.train_dataparser_outputs.lights is not None
+        ):
             light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
             self.current_light = light
         else:
@@ -131,7 +137,10 @@ class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-
         assert len(self.eval_dataset.cameras.shape) == 1, "Assumes single batch dimension"
         camera = self.eval_dataset.cameras[image_idx : image_idx + 1].to(self.device)
 
-        if self.train_dataparser_outputs.lights is not None:
+        if (
+            hasattr(self.train_dataparser_outputs, "lights")
+            and self.train_dataparser_outputs.lights is not None
+        ):
             light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
             self.current_light = light
         else:
@@ -199,7 +208,12 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
             self.active_train_indices = (
                 random.sample(self.all_train_indices, k=start_k) if num_train_images > 0 else []
             )
-        self.active_unseen_cameras = list(self.active_train_indices)
+        # If the view selector is all, set the active train indices to all the train indices
+        if self.view_selector is not None and isinstance(self.view_selector, AllViewSelector):
+            self.active_train_indices = self.all_train_indices.copy()
+            self.active_unseen_cameras = self.all_train_indices.copy()
+        else:
+            self.active_unseen_cameras = list(self.active_train_indices)
 
         # Log initial indices to wandb table
         # self._log_active_indices_to_wandb(
@@ -364,7 +378,10 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
             cameras.metadata = {}
         cameras.metadata["cam_idx"] = image_idx
 
-        if self.train_dataparser_outputs.lights is not None:
+        if (
+            hasattr(self.train_dataparser_outputs, "lights")
+            and self.train_dataparser_outputs.lights is not None
+        ):
             light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
             self.current_light = light
         else:
@@ -390,7 +407,10 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         assert len(self.eval_dataset.cameras.shape) == 1, "Assumes single batch dimension"
         camera = self.eval_dataset.cameras[image_idx : image_idx + 1].to(self.device)
 
-        if self.train_dataparser_outputs.lights is not None:
+        if (
+            hasattr(self.train_dataparser_outputs, "lights")
+            and self.train_dataparser_outputs.lights is not None
+        ):
             light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
             self.current_light = light
         else:
