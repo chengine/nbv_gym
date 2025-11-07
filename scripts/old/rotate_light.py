@@ -1,14 +1,15 @@
-#%%
-import numpy as np 
+# %%
+import numpy as np
 import torch
 import time
-import open3d as o3d 
+import open3d as o3d
 from splat.utils import *
 from gsplat.cuda._wrapper import rasterize_to_indices_in_range
 import matplotlib.pyplot as plt
 from nerfacc import render_weight_from_alpha
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def RGB2SH(rgb):
     """
@@ -17,6 +18,7 @@ def RGB2SH(rgb):
     C0 = 0.28209479177387814
     return (rgb - 0.5) / C0
 
+
 def SH2RGB(sh):
     """
     Converts from the 0th spherical harmonic coefficient to RGB values [0,1]
@@ -24,11 +26,12 @@ def SH2RGB(sh):
     C0 = 0.28209479177387814
     return sh * C0 + 0.5
 
-config_path = Path('outputs/splato/splatfacto/2024-08-04_235629/config.yml')
 
-splat = NeRF(config_path, dataset_mode='train')
+config_path = Path("outputs/splato/splatfacto/2024-08-04_235629/config.yml")
 
-#%%
+splat = NeRF(config_path, dataset_mode="train")
+
+# %%
 # Recovers dataset poses
 poses = splat.get_poses()
 
@@ -39,7 +42,7 @@ for i in range(len(poses)):
     output = splat.render(poses[i])
     print("Elapsed: ", time.time() - tnow)
 
-    og_image = output['rgb'].cpu().numpy()
+    og_image = output["rgb"].cpu().numpy()
 
     # Parses render output for the intermediate rasterization variables
     info = output["info"]
@@ -59,7 +62,7 @@ for i in range(len(poses)):
         info["isect_offsets"],
         info["flatten_ids"],
     )
-    print('Elapsed: ', time.time() - tnow)
+    print("Elapsed: ", time.time() - tnow)
 
     means2d = info["means2d"]
     conics = info["conics"]
@@ -83,24 +86,20 @@ for i in range(len(poses)):
         + c[:, 1] * deltas[:, 0] * deltas[:, 1]
     )  # [M]
 
-    alphas = torch.clamp_max(
-        opacities[camera_ids, gs_ids] * torch.exp(-sigmas), 0.999
-    )
+    alphas = torch.clamp_max(opacities[camera_ids, gs_ids] * torch.exp(-sigmas), 0.999)
 
     indices = camera_ids * image_height * image_width + pixel_ids
     total_pixels = C * image_height * image_width
 
-    weights, trans = render_weight_from_alpha(
-        alphas, ray_indices=indices, n_rays=total_pixels
-    )
+    weights, trans = render_weight_from_alpha(alphas, ray_indices=indices, n_rays=total_pixels)
 
     sorted_list, sorted_ind = torch.sort(weights, descending=False)
     # img_plane_gs = gs_ids[sorted_ind[: image_height * image_width]]
     img_plane_gs = gs_ids[sorted_ind]
-    
+
     def shadow_fn(input):
         new_weights = torch.zeros(input.shape[0], device=input.device)
-        new_weights[img_plane_gs] = sorted_list**(1/2.2)
+        new_weights[img_plane_gs] = sorted_list ** (1 / 2.2)
 
         if input.dim() == 3:
             new_color = input
@@ -122,6 +121,6 @@ for i in range(len(poses)):
     pov_image = pov_output["rgb"].cpu().numpy()
 
     stacked_image = np.concatenate([og_image, new_image, pov_image], axis=1)
-    cv2.imwrite(f'renders_pov/r_{i}.png', cv2.cvtColor(stacked_image * 255, cv2.COLOR_BGR2RGB))
+    cv2.imwrite(f"renders_pov/r_{i}.png", cv2.cvtColor(stacked_image * 255, cv2.COLOR_BGR2RGB))
 
-#%%
+# %%
