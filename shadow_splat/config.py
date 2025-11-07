@@ -14,7 +14,11 @@ from nerfstudio.pipelines.base_pipeline import VanillaPipelineConfig
 from shadow_splat.model import ShadowSplatModelConfig, FisherSplatModelConfig
 from shadow_splat.dataparser import ShadowSplatDataParserConfig
 from shadow_splat.datamanager import ShadowSplatDataManagerConfig, ViewSelectionDataManagerConfig
-from shadow_splat.pipeline import ShadowSplatPipelineConfig, ViewSelectionPipelineConfig, FisherSplatPipelineConfig
+from shadow_splat.pipeline import (
+    ShadowSplatPipelineConfig,
+    ViewSelectionPipelineConfig,
+    FisherSplatPipelineConfig,
+)
 
 # NOTE: The ShadowSplatTrainer import is needed for some reason to make the viewer work
 from shadow_splat.trainer import ShadowSplatTrainerConfig, ShadowSplatTrainer
@@ -22,10 +26,10 @@ from shadow_splat.trainer import ShadowSplatTrainerConfig, ShadowSplatTrainer
 shadow_splat = MethodSpecification(
     ShadowSplatTrainerConfig(
         method_name="shadow-splat",
-        steps_per_eval_image=100,
-        steps_per_eval_batch=0,
-        steps_per_save=700,
-        steps_per_eval_all_images=1000,
+        steps_per_eval_image=500,
+        steps_per_eval_batch=500,
+        steps_per_save=1000,
+        steps_per_eval_all_images=5000,
         max_num_iterations=30000,
         mixed_precision=False,
         pipeline=ViewSelectionPipelineConfig(
@@ -134,7 +138,7 @@ fisher_splat = MethodSpecification(
             # model=ShadowSplatModelConfig(
             #     sh_degree=3,
             # ),
-                    # pipeline=ShadowSplatPipelineConfig(
+            # pipeline=ShadowSplatPipelineConfig(
             datamanager=ShadowSplatDataManagerConfig(
                 dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
                 cache_images_type="uint8",

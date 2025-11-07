@@ -199,10 +199,10 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         self.active_unseen_cameras = list(self.active_train_indices)
 
         # Log initial indices to wandb table
-        self._log_active_indices_to_wandb(
-            iteration=0,
-            newly_added_indices=self.active_train_indices.copy(),
-        )
+        # self._log_active_indices_to_wandb(
+        #     iteration=0,
+        #     newly_added_indices=self.active_train_indices.copy(),
+        # )
 
     def _log_active_indices_to_wandb(self, iteration: int, newly_added_indices: list[int]) -> None:
         """Log active indices to wandb as a table row.
@@ -329,10 +329,10 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
                 pass
 
             # Log to wandb table
-            self._log_active_indices_to_wandb(
-                iteration=step,
-                newly_added_indices=add,
-            )
+            # self._log_active_indices_to_wandb(
+            #     iteration=step,
+            #     newly_added_indices=add,
+            # )
 
         print(
             f"Expanded active set to {len(self.active_train_indices)} views (added {len(add)} views)"
