@@ -13,7 +13,12 @@ from nerfstudio.models.splatfacto import SplatfactoModel
 from nerfstudio.utils.writer import GLOBAL_BUFFER, EventName
 from nerfstudio.viewer.render_state_machine import RenderAction
 
-from shadow_splat.model import ShadowSplatModel, ShadowSplatModelConfig, FisherSplatModelConfig, FisherSplatModel
+from shadow_splat.model import (
+    ShadowSplatModel,
+    ShadowSplatModelConfig,
+    FisherSplatModelConfig,
+    FisherSplatModel,
+)
 
 
 class ShadowSplatViewer(Viewer):
@@ -36,7 +41,7 @@ class ShadowSplatViewer(Viewer):
             pass
         else:
             raise ValueError(f"Unsupported model type: {type(pipeline.model)}")
-        
+
         # Initialize the parent Viewer class
         super().__init__(*args, **kwargs)
 
@@ -56,11 +61,14 @@ class ShadowSplatViewer(Viewer):
                 initial_intensity=initial_intensity,
             )
 
-        # Toggle to show only active training views (from progressive view selection)
-        self._show_only_active = False
+        # Color settings for active vs inactive training views
+        self._highlight_active = True
         self._last_active_indices = set()
+        self._active_camera_color = (0.0, 1.0, 0.0)  # Green for active cameras
+        self._inactive_camera_color = (0.5, 0.5, 0.5)  # Gray for inactive cameras
+        self._default_camera_color = (1.0, 1.0, 1.0)  # White for default/unhighlighted cameras
         self.only_active_checkbox = self.viser_server.gui.add_checkbox(
-            label="Show only active train views", disabled=False, initial_value=False
+            label="Highlight active train views", disabled=False, initial_value=True
         )
         self.only_active_checkbox.on_update(lambda _: self._on_only_active_toggle())
 
@@ -212,7 +220,7 @@ class ShadowSplatViewer(Viewer):
                 self.update_step(step)
 
     def _on_only_active_toggle(self):
-        self._show_only_active = bool(self.only_active_checkbox.value)
+        self._highlight_active = bool(self.only_active_checkbox.value)
         self._update_train_camera_visibility(force=True)
 
     def _get_active_indices(self) -> set:
@@ -231,21 +239,39 @@ class ShadowSplatViewer(Viewer):
             return set()
 
     def _update_train_camera_visibility(self, force: bool = False) -> None:
-        """Hide non-active training frustums when the toggle is enabled.
+        """Color active training cameras differently from inactive ones.
+
+        All cameras are always visible. Active cameras are colored green,
+        inactive cameras are colored gray (when highlighting is enabled).
 
         Operates only on already-created frustums (Viewer limits number displayed).
         """
         if not hasattr(self, "camera_handles") or self.camera_handles is None:
             return
         active = self._get_active_indices()
-        if not force and active == self._last_active_indices and self._show_only_active is False:
-            return
+        # Only skip update if indices haven't changed, highlighting is off, and not forcing update
+        # But if highlighting was just toggled, we need to update colors
+        if not force and active == self._last_active_indices:
+            # If highlighting is off and indices haven't changed, we can skip
+            # (colors will already be set to default)
+            if not self._highlight_active:
+                return
         self._last_active_indices = active
 
-        # Apply visibility filter
+        # Apply color differentiation: all cameras are visible, but colored differently
         for idx, handle in self.camera_handles.items():
             try:
-                handle.visible = (idx in active) if self._show_only_active else True
+                # Always show all cameras
+                handle.visible = True
+                # Apply color based on active status if highlighting is enabled
+                if self._highlight_active:
+                    if idx in active:
+                        handle.color = self._active_camera_color
+                    else:
+                        handle.color = self._inactive_camera_color
+                else:
+                    # When highlighting is disabled, restore default color
+                    handle.color = self._default_camera_color
             except Exception:
                 continue
 
@@ -339,6 +365,7 @@ class ShadowSplatViewer(Viewer):
 
         self._trigger_rerender()
 
+
 def camera_to_world_transform(azimuth_rad, elevation_rad, origin, radius):
     # Compute the camera position in Cartesian coordinates
     x = radius * torch.cos(elevation_rad) * torch.cos(azimuth_rad)
@@ -354,6 +381,7 @@ def camera_to_world_transform(azimuth_rad, elevation_rad, origin, radius):
     transform_matrix[:3, 3] = camera_position
 
     return transform_matrix
+
 
 def look_at(location, target, up):
     z = location - target
