@@ -33,9 +33,9 @@ shadow_splat = MethodSpecification(
         max_num_iterations=10000,
         mixed_precision=False,
         pipeline=ViewSelectionPipelineConfig(
-            add_every_n_steps=1000,
-            add_num_views=5,
-            view_selector="random",
+            add_every_n_steps=200,
+            add_num_views=1,
+            view_selector="optics",
             datamanager=ViewSelectionDataManagerConfig(
                 dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
                 cache_images_type="uint8",
@@ -118,9 +118,9 @@ fisher_splat = MethodSpecification(
         max_num_iterations=10000,
         mixed_precision=False,
         pipeline=ViewSelectionPipelineConfig(
-            add_every_n_steps=1000,
-            add_num_views=5,
-            view_selector="random",
+            add_every_n_steps=200,
+            add_num_views=1,
+            view_selector="optics",
             datamanager=ViewSelectionDataManagerConfig(
                 dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
                 cache_images_type="uint8",
