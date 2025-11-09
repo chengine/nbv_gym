@@ -1142,7 +1142,7 @@ def moment_rasterization(
         )
 
     # We use expected depth
-    render_moments = render_moments / render_alphas.clamp(min=1e-10)
+    # render_moments = render_moments / render_alphas.clamp(min=1e-10)
 
     return render_moments, render_alphas, meta
 

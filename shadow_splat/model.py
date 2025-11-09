@@ -380,8 +380,8 @@ class ShadowSplatModel(SplatfactoModel):
             view_fig = None
         else:
             coverage_counts = self.coverage_counts.detach()
-            fig = torch.sqrt(self.fig.detach())
-            view_fig = torch.sqrt(self.view_fig.detach())
+            fig = self.fig.detach()
+            view_fig = self.view_fig.detach()
 
         render, alpha, self.info = rasterization_with_coverage(
             means=means_crop,
@@ -661,8 +661,11 @@ class ShadowSplatModel(SplatfactoModel):
             )
 
             depth_image = moments[..., 0].squeeze(0)
+            depth_image = torch.where(alphas.squeeze(0) > 0, depth_image, depth_image.detach().max())
+
             depth_sqr_image = moments[..., 1].squeeze(0)
             variance_image = depth_sqr_image - depth_image**2
+            variance_image = torch.where(alphas.squeeze(0) > 0, variance_image, 0.0)
 
             is_updated_fig = update_fig_for_frustum(
                 means=self.means,
@@ -776,9 +779,9 @@ class ShadowSplatModel(SplatfactoModel):
             A dictionary of metrics.
         """
         metrics_dict, images_dict = super().get_image_metrics_and_images(outputs, batch)
-        shadow_rgb = outputs["shadow"].repeat(1, 1, 3)
-        combined_rgb = torch.cat([images_dict["img"], shadow_rgb], dim=1)
-        images_dict["img"] = combined_rgb
+        # shadow_rgb = outputs["shadow"].repeat(1, 1, 3)
+        # combined_rgb = torch.cat([images_dict["img"], shadow_rgb], dim=1)
+        # images_dict["img"] = combined_rgb
 
         return metrics_dict, images_dict
 
@@ -1589,9 +1592,9 @@ class FisherSplatModel(SplatfactoModel):
             A dictionary of metrics.
         """
         metrics_dict, images_dict = super().get_image_metrics_and_images(outputs, batch)
-        shadow_rgb = outputs["shadow"].repeat(1, 1, 3)
-        combined_rgb = torch.cat([images_dict["img"], shadow_rgb], dim=1)
-        images_dict["img"] = combined_rgb
+        # shadow_rgb = outputs["shadow"].repeat(1, 1, 3)
+        # combined_rgb = torch.cat([images_dict["img"], shadow_rgb], dim=1)
+        # images_dict["img"] = combined_rgb
 
         return metrics_dict, images_dict
 
