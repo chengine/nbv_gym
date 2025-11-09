@@ -1,6 +1,6 @@
 """Custom viewer for Shadow Splat"""
 
-from typing import Optional
+from typing import Optional, Literal
 
 import time
 import numpy as np
@@ -12,6 +12,7 @@ from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.models.splatfacto import SplatfactoModel
 from nerfstudio.utils.writer import GLOBAL_BUFFER, EventName
 from nerfstudio.viewer.render_state_machine import RenderAction
+from nerfstudio.data.datasets.base_dataset import InputDataset
 
 from shadow_splat.model import (
     ShadowSplatModel,
@@ -223,6 +224,20 @@ class ShadowSplatViewer(Viewer):
         self._highlight_active = bool(self.only_active_checkbox.value)
         self._update_train_camera_visibility(force=True)
 
+    def init_scene(
+        self,
+        train_dataset: InputDataset,
+        train_state: Literal["training", "paused", "completed"],
+        eval_dataset: Optional[InputDataset] = None,
+    ) -> None:
+        """Override init_scene to set camera colors immediately after creation."""
+        # Call parent's init_scene to create the cameras
+        super().init_scene(train_dataset, train_state, eval_dataset)
+
+        # Immediately set camera colors based on active/inactive status
+        # This ensures colors are set right away, not waiting for update_scene()
+        self._update_train_camera_visibility(force=True)
+
     def _get_active_indices(self) -> set:
         """Return the active training indices from the datamanager if present, else all indices."""
         dm = self.pipeline.datamanager
@@ -246,6 +261,7 @@ class ShadowSplatViewer(Viewer):
 
         Operates only on already-created frustums (Viewer limits number displayed).
         """
+        print("update_train_camera_visibility")
         if not hasattr(self, "camera_handles") or self.camera_handles is None:
             return
         active = self._get_active_indices()
@@ -260,20 +276,22 @@ class ShadowSplatViewer(Viewer):
 
         # Apply color differentiation: all cameras are visible, but colored differently
         for idx, handle in self.camera_handles.items():
-            try:
-                # Always show all cameras
-                handle.visible = True
-                # Apply color based on active status if highlighting is enabled
-                if self._highlight_active:
-                    if idx in active:
-                        handle.color = self._active_camera_color
-                    else:
-                        handle.color = self._inactive_camera_color
-                else:
-                    # When highlighting is disabled, restore default color
-                    handle.color = self._default_camera_color
-            except Exception:
-                continue
+            if idx in active:
+                # Remove and re-add the handle to apply the color
+                # Setting the color with handle.color doesn't work
+                handle.remove()
+                camera_handle = self.viser_server.scene.add_camera_frustum(
+                    name=handle.name,
+                    fov=handle.fov,
+                    aspect=handle.aspect,
+                    scale=handle.scale,
+                    image=handle.image,
+                    wxyz=handle.wxyz,
+                    position=handle.position,
+                    color=(0.0, 1.0, 0.0),
+                    line_width=3.0,
+                )
+                # camera_handle.on_click(self.create_on_click_callback(idx))
 
     def update_training_light_source_frustum(self):
         if self.pipeline.datamanager.current_light is None:
