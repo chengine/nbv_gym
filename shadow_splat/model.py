@@ -148,9 +148,13 @@ class ShadowSplatModel(SplatfactoModel):
         ### THIS IS FOR COVERAGE ###
         self.bin_dirs = fibonacci_sphere(n_bins=self.config.n_sphere_bins, device="cuda")
 
-        self.coverage_counts = torch.nn.Parameter(torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda"))
+        self.coverage_counts = torch.nn.Parameter(
+            torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda")
+        )
         self.fig = torch.nn.Parameter(torch.zeros((self.means.shape[0], 1), device="cuda"))
-        self.view_fig = torch.nn.Parameter(torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda"))
+        self.view_fig = torch.nn.Parameter(
+            torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda")
+        )
 
         self.gauss_params["coverage_counts"] = self.coverage_counts
         self.gauss_params["fig"] = self.fig
@@ -206,7 +210,7 @@ class ShadowSplatModel(SplatfactoModel):
 
     def step_post_backward(self, step):
         assert step == self.step
- 
+
         if isinstance(self.strategy, DefaultStrategy):
             self.strategy.step_post_backward(
                 params=self.gauss_params,
@@ -899,6 +903,7 @@ class ShadowSplatModel(SplatfactoModel):
             torch.cuda.empty_cache()
 
         return coverage_score
+
 
 @dataclass
 class FisherSplatModelConfig(SplatfactoModelConfig):

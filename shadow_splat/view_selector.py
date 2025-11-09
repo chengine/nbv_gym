@@ -34,13 +34,75 @@ class ViewSelector(ABC):
 class RandomViewSelector(ViewSelector):
     """Randomly selects views from remaining indices."""
 
+    def __init__(
+        self,
+        num_nearest_neighbors: int = 5,
+        use_kdtree_filter: bool = False,
+    ):
+        """
+        Initialize random view selector.
+
+        Args:
+            num_nearest_neighbors: Number of nearest neighbors to consider when using KD-tree filtering
+            use_kdtree_filter: Whether to use KD-tree filtering to reduce candidate pool before random selection
+        """
+        self.num_nearest_neighbors = num_nearest_neighbors
+        self.use_kdtree_filter = use_kdtree_filter
+
     def select_views(
         self, active_indices: List[int], remaining_indices: List[int], num_to_select: int, **kwargs
     ) -> List[int]:
+        """
+        Randomly selects views from remaining indices, optionally filtered by KD-tree.
+
+        Args:
+            active_indices: Current active view indices
+            remaining_indices: Available view indices not yet in active set
+            num_to_select: Number of views to select
+            **kwargs: Additional context including:
+                - datamanager: The ViewSelectionDataManager instance (required for KD-tree filtering)
+
+        Returns:
+            List of selected view indices to add
+        """
         if not remaining_indices:
             return []
-        k = min(max(1, num_to_select), len(remaining_indices))
-        return random.sample(remaining_indices, k=k)
+
+        # Get candidate indices - start with all remaining indices
+        candidate_indices = remaining_indices.copy()
+
+        # Optionally filter candidates using KD-tree nearest neighbors
+        if self.use_kdtree_filter and len(active_indices) > 0:
+            datamanager = kwargs.get("datamanager")
+            if datamanager is not None:
+                # Get all cameras from the dataset
+                all_cameras = datamanager.train_dataset.cameras
+
+                # Extract camera origins for KD-tree filtering
+                candidate_origins_list = []
+                for idx in candidate_indices:
+                    cam = all_cameras[idx : idx + 1]
+                    origin = cam.camera_to_worlds[0, :3, -1].cpu().numpy()
+                    candidate_origins_list.append(origin)
+                candidate_origins = np.array(candidate_origins_list)
+
+                # Use the last added view as the "root" pose
+                root_idx = active_indices[-1]
+                root_camera = all_cameras[root_idx : root_idx + 1]
+                root_origin = root_camera.camera_to_worlds[0, :3, -1].cpu().numpy()
+
+                # Build KD-tree and query nearest neighbors
+                kdtree = KDTree(candidate_origins)
+                k = min(self.num_nearest_neighbors, len(candidate_indices))
+                _, nearest_indices = kdtree.query(root_origin.reshape(1, 3), k=k)
+
+                # Filter to nearest neighbors
+                nearest_indices = nearest_indices.flatten()
+                candidate_indices = [candidate_indices[i] for i in nearest_indices]
+
+        # Randomly select from candidates (filtered or unfiltered)
+        k = min(max(1, num_to_select), len(candidate_indices))
+        return random.sample(candidate_indices, k=k)
 
 
 class AllViewSelector(ViewSelector):
@@ -236,16 +298,21 @@ def create_view_selector(
 
     Args:
         mode: Selection mode - "random", "all", "optics", or None (defaults to "random")
-        num_nearest_neighbors: Number of nearest neighbors for optics selector (optional)
+        num_nearest_neighbors: Number of nearest neighbors for KD-tree filtering (optional, applies to random and optics selectors)
         intrinsics_scale: Intrinsics scale for optics selector (optional)
-        use_kdtree_filter: Whether to use KD-tree filtering for optics selector (optional)
+        use_kdtree_filter: Whether to use KD-tree filtering (optional, applies to random and optics selectors)
+        coverage_metric: Coverage metric for optics selector (optional)
 
     Returns:
         ViewSelector instance
     """
     print(f"Creating view selector for mode: {mode}")
     if mode is None or mode == "random":
-        return RandomViewSelector()
+        # Use provided config values or defaults for random selector
+        return RandomViewSelector(
+            num_nearest_neighbors=num_nearest_neighbors if num_nearest_neighbors is not None else 5,
+            use_kdtree_filter=use_kdtree_filter if use_kdtree_filter is not None else False,
+        )
     elif mode == "all":
         return AllViewSelector()
     elif mode == "optics":
