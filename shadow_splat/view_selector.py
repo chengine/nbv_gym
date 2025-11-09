@@ -155,6 +155,27 @@ class OpticsViewSelector(ViewSelector):
                     candidate_origins_list.append(origin)
                 candidate_origins = np.array(candidate_origins_list)
 
+            # Feed the "training cameras" to the model to update coverage metrics.
+            # Fisher-RF has its own way to use "training cameras".
+            # TODO: Need to add a flag to choose a subset of the training cameras to use, or maybe just a sliding window.
+            if self.coverage_metric == "coverage":
+                model.reset_coverage()
+
+                if len(active_indices) > 0:
+                    model.update_coverage(all_cameras, active_indices)
+                else:
+                    # If there are no active views, we don't need to do anything
+                    pass
+
+            elif self.coverage_metric == "fig" or self.coverage_metric == "view_fig":
+                model.reset_fig()
+
+                if len(active_indices) > 0:
+                    model.update_fig(all_cameras, active_indices)
+                else:
+                    # If there are no active views, we don't need to do anything
+                    pass
+
             # Score each candidate camera using coverage
             scores = []
             for cam_idx in candidate_indices:
@@ -179,6 +200,9 @@ class OpticsViewSelector(ViewSelector):
             scores.sort(key=lambda x: x[1], reverse=False)
             k = min(num_to_select, len(scores))
             selected_indices = [idx for idx, _ in scores[:k]]
+
+        # except:
+        #     raise Exception("Failed to select views. Check if the metric name is valid.")
 
         finally:
             # Final cleanup: ensure all intermediate objects are deleted

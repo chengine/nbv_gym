@@ -33,6 +33,7 @@ except ImportError:
     print("Please install gsplat>=1.0.0")
 from shadow_splat.shadow_splat_rendering import (
     rasterization_with_coverage,
+    moment_rasterization,
 )
 
 try:
@@ -55,8 +56,6 @@ from nerfstudio.model_components.lib_bilagrid import (
     slice,
     total_variation_loss,
 )
-
-import open3d as o3d
 
 from shadow_splat.util.nerfstudio import get_viewmat
 from shadow_splat.shadow_splat_rendering import (
@@ -92,11 +91,9 @@ def projection_matrix(znear, zfar, fovx, fovy, device: Union[str, torch.device] 
         device=device,
     )
 
-
 to_homo = lambda x: torch.cat(
     [x, torch.ones(x.shape[:-1] + (1,), dtype=x.dtype, device=x.device)], dim=-1
 )
-
 
 @dataclass
 class ShadowSplatModelConfig(SplatfactoModelConfig):
@@ -113,7 +110,6 @@ class ShadowSplatModelConfig(SplatfactoModelConfig):
     n_sphere_bins: int = 128
     """Number of bins on the unit sphere for coverage computation."""
     concentration: float = 5.0
-
 
 class ShadowSplatModel(SplatfactoModel):
     """Nerfstudio's implementation of Shadow Splatting
@@ -162,7 +158,6 @@ class ShadowSplatModel(SplatfactoModel):
 
         self.seen_cam_idx = []
 
-    # TODO: What's the best way to return features_dc/rest to reflect the shadows conditioned on a light source?
     @property
     def features_dc(self):
         return self.gauss_params["features_dc"]
@@ -364,7 +359,7 @@ class ShadowSplatModel(SplatfactoModel):
         else:
             render_mode = "RGB"
 
-        # TODO: MAKE THIS MORE ELEGANT
+        # TODO: HARDCODED. MAKE THIS MORE ELEGANT.
         camera_model = "pinhole"
 
         if self.config.sh_degree > 0:
@@ -529,49 +524,49 @@ class ShadowSplatModel(SplatfactoModel):
         if background.shape[0] == 3 and not self.training:
             background = background.expand(H, W, 3)
 
-        if self.training:
-            cam_idx = camera.metadata["cam_idx"]
-            if cam_idx not in self.seen_cam_idx:
-                ### UPDATE COVERAGE METRICS ###
-                is_updated_coverage = update_view_coverage_for_frustum(
-                    means=means_crop,
-                    quats=quats_crop,
-                    scales=torch.exp(scales_crop),
-                    viewmats=viewmat,
-                    Ks=K,
-                    width=W,
-                    height=H,
-                    coverage_counts=self.coverage_counts,
-                    bin_dirs=self.bin_dirs,
-                    camera_model=camera_model,
-                    near_plane=0.01,
-                    far_plane=1e10,
-                )
+        # if self.training:
+        #     cam_idx = camera.metadata["cam_idx"]
+        #     if cam_idx not in self.seen_cam_idx:
+        #         ### UPDATE COVERAGE METRICS ###
+        #         is_updated_coverage = update_view_coverage_for_frustum(
+        #             means=means_crop,
+        #             quats=quats_crop,
+        #             scales=torch.exp(scales_crop),
+        #             viewmats=viewmat,
+        #             Ks=K,
+        #             width=W,
+        #             height=H,
+        #             coverage_counts=self.coverage_counts,
+        #             bin_dirs=self.bin_dirs,
+        #             camera_model=camera_model,
+        #             near_plane=0.01,
+        #             far_plane=1e10,
+        #         )
 
-                # is_updated_fig = update_fig_for_frustum(
-                #     means=means_crop,
-                #     quats=quats_crop,
-                #     scales=torch.exp(scales_crop),
-                #     viewmats=viewmat,
-                #     Ks=K,
-                #     width=W,
-                #     height=H,
-                #     depth_image=depth_im,
-                #     variance_image=variance_img,
-                #     bin_dirs=self.bin_dirs,
-                #     fig=self.fig,
-                #     view_fig=self.view_fig,
-                #     camera_model=camera_model,
-                #     near_plane=0.01,
-                #     far_plane=1e10,
-                #     concentration=self.config.concentration,
-                # )
+        #         # is_updated_fig = update_fig_for_frustum(
+        #         #     means=means_crop,
+        #         #     quats=quats_crop,
+        #         #     scales=torch.exp(scales_crop),
+        #         #     viewmats=viewmat,
+        #         #     Ks=K,
+        #         #     width=W,
+        #         #     height=H,
+        #         #     depth_image=depth_im,
+        #         #     variance_image=variance_img,
+        #         #     bin_dirs=self.bin_dirs,
+        #         #     fig=self.fig,
+        #         #     view_fig=self.view_fig,
+        #         #     camera_model=camera_model,
+        #         #     near_plane=0.01,
+        #         #     far_plane=1e10,
+        #         #     concentration=self.config.concentration,
+        #         # )
 
-                ### END ###
-                self.seen_cam_idx.append(cam_idx)
+        #         ### END ###
+        #         self.seen_cam_idx.append(cam_idx)
 
-                # Put this in fancy text
-                print(f"Updated coverage counts from camera {cam_idx}!")
+        #         # Put this in fancy text
+        #         print(f"Updated coverage counts from camera {cam_idx}!")
 
         return {
             "rgb": rgb.squeeze(0),  # type: ignore
@@ -589,28 +584,100 @@ class ShadowSplatModel(SplatfactoModel):
         }  # type: ignore
 
     @torch.no_grad()
-    def update_coverage(self, camera: Cameras):
+    def update_coverage(self, cameras: Cameras, camera_indices: List[int]):
         # Update coverage counts based on all cameras in the camera batch, conditioned on the current state of the scene
-        is_updated_coverage = update_view_coverage_for_frustum(
-            means=means_crop,
-            quats=quats_crop,
-            scales=torch.exp(scales_crop),
-            viewmats=viewmat,
-            Ks=K,
-            width=W,
-            height=H,
-            coverage_counts=self.coverage_counts,
-            bin_dirs=self.bin_dirs,
-            camera_model=camera_model,
-            near_plane=0.01,
-            far_plane=1e10,
-        )
+
+        # TODO: Might be able to optimize this by batching the update_view_coverage_for_frustum calls.
+        for cam_idx in camera_indices:
+            camera = cameras[cam_idx:cam_idx + 1].to(self.device)
+
+            camera_scale_fac = self._get_downscale_factor()
+            camera.rescale_output_resolution(1 / camera_scale_fac)
+            viewmat = get_viewmat(camera.camera_to_worlds)
+            K = camera.get_intrinsics_matrices().cuda()
+            W, H = int(camera.width.item()), int(camera.height.item())
+            camera.rescale_output_resolution(camera_scale_fac)  # type: ignore
+
+            # NOTE: HARDCODED. MAKE THIS MORE ELEGANT.
+            camera_model = "pinhole"
+
+            is_updated_coverage = update_view_coverage_for_frustum(
+                means=self.means,
+                quats=self.quats,
+                scales=torch.exp(self.scales),
+                viewmats=viewmat,
+                Ks=K,
+                width=W,
+                height=H,
+                coverage_counts=self.coverage_counts,
+                bin_dirs=self.bin_dirs,
+                camera_model=camera_model,
+                near_plane=0.01,
+                far_plane=1e10,
+            )
 
     @torch.no_grad()
-    def update_fig(self, camera: Cameras):
+    def update_fig(self, cameras: Cameras, camera_indices: List[int]):
 
         # Update fig based on all cameras in the camera batch, conditioned on the current state of the scene
-        pass
+        for cam_idx in camera_indices:
+            camera = cameras[cam_idx:cam_idx + 1].to(self.device)
+
+            camera_scale_fac = self._get_downscale_factor()
+            camera.rescale_output_resolution(1 / camera_scale_fac)
+            viewmat = get_viewmat(camera.camera_to_worlds)
+            K = camera.get_intrinsics_matrices().cuda()
+            W, H = int(camera.width.item()), int(camera.height.item())
+            camera.rescale_output_resolution(camera_scale_fac)  # type: ignore
+
+            # NOTE: HARDCODED. MAKE THIS MORE ELEGANT.
+            camera_model = "pinhole"
+
+            moments, alphas, meta = moment_rasterization(
+                self.means,  # [N, 3]
+                self.quats,  # [N, 4]
+                torch.exp(self.scales),  # [N, 3]
+                torch.sigmoid(self.opacities).squeeze(-1),  # [N]
+                viewmat,  # [C, 4, 4]
+                K,  # [C, 3, 3]
+                W,
+                H,
+                near_plane=0.01,
+                far_plane=1e10,
+                radius_clip=3.0,
+                eps2d=0.3,
+                packed=True,
+                tile_size=16,
+                sparse_grad=False,
+                absgrad=False,
+                rasterize_mode=self.config.rasterize_mode,
+                channel_chunk=32,
+                distributed=False,
+                camera_model=camera_model,
+            )
+
+            depth_image = moments[..., 0].squeeze(0)
+            depth_sqr_image = moments[..., 1].squeeze(0)
+            variance_image = depth_sqr_image - depth_image**2
+
+            is_updated_fig = update_fig_for_frustum(
+                means=self.means,
+                quats=self.quats,
+                scales=torch.exp(self.scales),
+                viewmats=viewmat,
+                Ks=K,
+                width=W,
+                height=H,
+                depth_image=depth_image,
+                variance_image=variance_image,
+                bin_dirs=self.bin_dirs,
+                fig=self.fig,
+                view_fig=self.view_fig,
+                camera_model=camera_model,
+                near_plane=0.01,
+                far_plane=1e10,
+                concentration=self.config.concentration,
+            )
 
     @torch.no_grad()
     def reset_coverage(self):
