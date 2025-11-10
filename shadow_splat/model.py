@@ -865,9 +865,11 @@ class ShadowSplatModel(SplatfactoModel):
                 )
                 print(f"{metric} not found in outputs")
 
-            # Sum all pixel values to get total coverage score
+            valid_mask = outputs["accumulation"] > 0
+
+            # Sum all pixel values where alphas is > 0 to get total coverage score
             # Detach to avoid keeping references to the computation graph
-            coverage_score = coverage.mean().detach()
+            coverage_score = ( (coverage * valid_mask).sum() / valid_mask.sum() ).detach()
             # Delete coverage tensor after extracting score
             del coverage
 
@@ -1667,7 +1669,10 @@ class FisherSplatModel(SplatfactoModel):
 
             # Sum all pixel values to get total coverage score
             # Detach to avoid keeping references to the computation graph
-            coverage_score = [-unc_map.mean().detach() for unc_map in uncertainty]
+            coverage_score = []
+            for unc_map in uncertainty:
+                valid_mask = unc_map > 0
+                coverage_score.append( -(unc_map * valid_mask).sum() / valid_mask.sum() )
             # Delete uncertainty tensor after extracting score
             del uncertainty
 
