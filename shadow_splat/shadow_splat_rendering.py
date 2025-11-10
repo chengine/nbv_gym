@@ -383,23 +383,30 @@ def calculate_relighting_weights_from_point_cloud(
     assert not torch.isinf(moments[..., 1]).any(), "Depth squared is inf"
     assert not torch.isinf(moments[..., 0]).any(), "Depth is inf"
 
-    depth_image = moments[..., 0].squeeze()
+    # depth_image = moments[..., 0].squeeze()
 
-    if fix_variance:
-        # TODO: Implement fix_variance
-        variance_image = torch.ones_like(depth_image)
-    else:
-        depth_sqr_image = moments[..., 1].squeeze()
-        variance_image = depth_sqr_image - depth_image**2
+    # if fix_variance:
+    #     # TODO: Implement fix_variance
+    #     variance_image = torch.ones_like(depth_image)
+    # else:
+    #     depth_sqr_image = moments[..., 1].squeeze()
+    #     variance_image = depth_sqr_image - depth_image**2
 
-    # Gaussian blur both the depth and variance images
-    depth_image = gaussian_blur(depth_image[None], kernel_size=5, sigma=1.0)
-    variance_image = gaussian_blur(variance_image[None], kernel_size=5, sigma=1.0)
-    depth_image = depth_image.squeeze()
-    variance_image = variance_image.squeeze().clamp(min=1e-3)
+    # # Gaussian blur both the depth and variance images
+    # depth_image = gaussian_blur(depth_image[None], kernel_size=5, sigma=1.0)
+    # variance_image = gaussian_blur(variance_image[None], kernel_size=5, sigma=1.0)
+    # depth_image = depth_image.squeeze()
+    # variance_image = variance_image.squeeze().clamp(min=1e-3)
 
-    assert torch.isnan(depth_image).any() == False, "Depth image is nan"
-    assert torch.isnan(variance_image).any() == False, "Variance image is nan"
+    # assert torch.isnan(depth_image).any() == False, "Depth image is nan"
+    # assert torch.isnan(variance_image).any() == False, "Variance image is nan"
+
+    depth_image = moments[..., 0].squeeze(0)
+    depth_image = torch.where(alphas.squeeze(0).squeeze(-1) > 0, depth_image, depth_image.detach().max())
+
+    depth_sqr_image = moments[..., 1].squeeze(0)
+    variance_image = depth_sqr_image - depth_image**2
+    variance_image = torch.where(alphas.squeeze(0).squeeze(-1) > 0, variance_image, 0.0)
 
     # Project point cloud onto the light source camera
     # Project Gaussians to 2D. Directly pass in {quats, scales} is faster than precomputing covars.
@@ -1142,7 +1149,7 @@ def moment_rasterization(
         )
 
     # We use expected depth
-    render_moments = render_moments / render_alphas.clamp(min=1e-10)
+    # render_moments = render_moments / render_alphas.clamp(min=1e-10)
 
     return render_moments, render_alphas, meta
 

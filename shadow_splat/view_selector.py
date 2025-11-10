@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 from scipy.spatial import KDTree
 import torch
+from shadow_splat.model import ShadowSplatModel, FisherSplatModel
 
 
 class ViewSelector(ABC):
@@ -137,6 +138,7 @@ class OpticsViewSelector(ViewSelector):
         self.intrinsics_scale = intrinsics_scale
         self.use_kdtree_filter = use_kdtree_filter
 
+    # NOTE: OLDER CODE
     def select_views(
         self, active_indices: List[int], remaining_indices: List[int], num_to_select: int, **kwargs
     ) -> List[int]:
@@ -156,7 +158,7 @@ class OpticsViewSelector(ViewSelector):
         Returns:
             List of selected view indices to add (views with lowest coverage scores)
         """
-        if not remaining_indices:
+        if not remaining_indices or len(remaining_indices) == 0:
             return []
 
         # Extract required context from kwargs
@@ -217,46 +219,63 @@ class OpticsViewSelector(ViewSelector):
                     candidate_origins_list.append(origin)
                 candidate_origins = np.array(candidate_origins_list)
 
-            # Feed the "training cameras" to the model to update coverage metrics.
-            # Fisher-RF has its own way to use "training cameras".
-            # TODO: Need to add a flag to choose a subset of the training cameras to use, or maybe just a sliding window.
-            if self.coverage_metric == "coverage":
-                model.reset_coverage()
 
-                if len(active_indices) > 0:
-                    model.update_coverage(all_cameras, active_indices)
+            if isinstance(model, ShadowSplatModel):
+                if self.coverage_metric in ["coverage", "fig", "view_fig"]:
+
+                    # Feed the "training cameras" to the model to update coverage metrics.
+                    # Fisher-RF has its own way to use "training cameras".
+                    # TODO: Need to add a flag to choose a subset of the training cameras to use, or maybe just a sliding window.
+                    if self.coverage_metric == "coverage":
+                        model.reset_coverage()
+
+                        if len(active_indices) > 0:
+                            training_cameras = [all_cameras[idx:idx+1] for idx in active_indices]
+                            model.update_coverage(training_cameras)
+                        else:
+                            # If there are no active views, we don't need to do anything
+                            pass
+
+                    elif self.coverage_metric in ["fig", "view_fig"]:
+                        model.reset_fig()
+
+                        if len(active_indices) > 0:
+                            training_cameras = [all_cameras[idx:idx+1] for idx in active_indices]
+                            model.update_fig(training_cameras)
+                        else:
+                            # If there are no active views, we don't need to do anything
+                            pass
+
+                    # Score each candidate camera using coverage
+                    scores = []
+                    for cam_idx in candidate_indices:
+                        # Access camera using slice notation (Cameras expects tuple/slice, not list)
+                        camera = all_cameras[cam_idx : cam_idx + 1].to(model.device)
+                        try:
+                            score = model.coverage_score_for_camera(
+                                camera, intrinsics_scale=self.intrinsics_scale, metric=self.coverage_metric
+                            )
+                            scores.append((cam_idx, score.item()))
+                        except Exception as e:
+                            # Handle errors gracefully - assign high score
+                            print(f"Warning: Failed to score camera {cam_idx}: {e}")
+                            scores.append((cam_idx, float("inf")))
+                        finally:
+                            # Cleanup camera object after scoring to free memory
+                            # Note: coverage_score_for_camera already handles cleanup internally,
+                            # but we clean up the camera reference here as well
+                            del camera
                 else:
-                    # If there are no active views, we don't need to do anything
-                    pass
+                    raise ValueError(f"Invalid coverage metric: {self.coverage_metric}")
 
-            elif self.coverage_metric == "fig" or self.coverage_metric == "view_fig":
-                model.reset_fig()
+            elif isinstance(model, FisherSplatModel):
+                training_cameras = [all_cameras[idx:idx+1] for idx in active_indices]
+                candidate_cameras = [all_cameras[idx:idx+1] for idx in candidate_indices]
+                scores = model.coverage_score_for_camera(training_cameras, candidate_cameras)
 
-                if len(active_indices) > 0:
-                    model.update_fig(all_cameras, active_indices)
-                else:
-                    # If there are no active views, we don't need to do anything
-                    pass
-
-            # Score each candidate camera using coverage
-            scores = []
-            for cam_idx in candidate_indices:
-                # Access camera using slice notation (Cameras expects tuple/slice, not list)
-                camera = all_cameras[cam_idx : cam_idx + 1].to(model.device)
-                try:
-                    score = model.coverage_score_for_camera(
-                        camera, intrinsics_scale=self.intrinsics_scale, metric=self.coverage_metric
-                    )
-                    scores.append((cam_idx, score.item()))
-                except Exception as e:
-                    # Handle errors gracefully - assign high score
-                    print(f"Warning: Failed to score camera {cam_idx}: {e}")
-                    scores.append((cam_idx, float("inf")))
-                finally:
-                    # Cleanup camera object after scoring to free memory
-                    # Note: coverage_score_for_camera already handles cleanup internally,
-                    # but we clean up the camera reference here as well
-                    del camera
+                scores = [(candidate_indices[idx], score.item()) for idx, score in enumerate(scores)]
+            else:
+                raise ValueError(f"Invalid model type: {type(model)}")
 
             # Sort by score (ascending) and select top candidates (lowest coverage = most novel views)
             scores.sort(key=lambda x: x[1], reverse=False)
@@ -284,6 +303,150 @@ class OpticsViewSelector(ViewSelector):
                 torch.cuda.empty_cache()
 
         return selected_indices
+
+    # NOTE: Newer code that does rollouts
+    # def select_views(
+    #     self, active_indices: List[int], remaining_indices: List[int], num_to_select: int, **kwargs
+    # ) -> List[int]:
+    #     """
+    #     Optics-based view selection using coverage/FIG scoring with a greedy policy:
+    #     iteratively pick the best camera, hypothetically add it to training,
+    #     update coverage/fig for just that camera, then rescore.
+    #     """
+    #     if not remaining_indices or len(remaining_indices) == 0:
+    #         return []
+
+    #     # Context
+    #     model = kwargs.get("model")
+    #     datamanager = kwargs.get("datamanager")
+    #     if model is None or datamanager is None:
+    #         k = min(max(1, num_to_select), len(remaining_indices))
+    #         return random.sample(remaining_indices, k=k)
+
+    #     # Clear any previous render info to avoid leaks
+    #     if hasattr(model, "info"):
+    #         if isinstance(model.info, dict):
+    #             for _, v in list(model.info.items()):
+    #                 if isinstance(v, torch.Tensor):
+    #                     del v
+    #             model.info.clear()
+    #         model.info = {}
+
+    #     try:
+    #         # Candidate pool (with optional KD-tree filtering around last active)
+    #         candidate_indices = remaining_indices.copy()
+    #         all_cameras = datamanager.train_dataset.cameras
+
+    #         # Precompute candidate origins for optional KD-tree reduction
+    #         cand_origins = []
+    #         for idx in candidate_indices:
+    #             cam = all_cameras[idx:idx+1]
+    #             cand_origins.append(cam.camera_to_worlds[0, :3, -1].cpu().numpy())
+    #         cand_origins = np.array(cand_origins)
+
+    #         if self.use_kdtree_filter and len(active_indices) > 0:
+    #             root_idx = active_indices[-1]
+    #             root_cam = all_cameras[root_idx:root_idx+1]
+    #             root_origin = root_cam.camera_to_worlds[0, :3, -1].cpu().numpy()
+    #             kdt = KDTree(cand_origins)
+    #             k = min(self.num_nearest_neighbors, len(candidate_indices))
+    #             _, nn_idx = kdt.query(root_origin.reshape(1, 3), k=k)
+    #             nn_idx = nn_idx.flatten()
+    #             candidate_indices = [candidate_indices[i] for i in nn_idx]
+
+    #         selected_indices: List[int] = []
+
+    #         # ---- Seed the internal model state with current active views ----
+    #         if isinstance(model, ShadowSplatModel):
+    #             # Reset and build the current coverage/fig state from active set once
+    #             if self.coverage_metric == "coverage":
+    #                 model.reset_coverage()
+    #                 if len(active_indices) > 0:
+    #                     model.update_coverage([all_cameras[i:i+1] for i in active_indices])
+    #             elif self.coverage_metric in ["fig", "view_fig"]:
+    #                 model.reset_fig()
+    #                 if len(active_indices) > 0:
+    #                     model.update_fig([all_cameras[i:i+1] for i in active_indices])
+    #             else:
+    #                 raise ValueError(f"Invalid coverage metric: {self.coverage_metric}")
+
+    #         elif isinstance(model, FisherSplatModel):
+    #             # For Fisher, we pass training_cameras each scoring round (no internal reset needed)
+    #             pass
+    #         else:
+    #             raise ValueError(f"Invalid model type: {type(model)}")
+
+    #         # ---- Greedy loop ----
+    #         picks = min(num_to_select, len(candidate_indices))
+    #         for _ in range(picks):
+    #             if len(candidate_indices) == 0:
+    #                 break
+
+    #             # Score the current pool
+    #             scores: List[tuple[int, float]] = []
+    #             if isinstance(model, ShadowSplatModel):
+    #                 for cam_idx in candidate_indices:
+    #                     cam = all_cameras[cam_idx:cam_idx+1].to(model.device)
+    #                     try:
+    #                         s = model.coverage_score_for_camera(
+    #                             cam, intrinsics_scale=self.intrinsics_scale, metric=self.coverage_metric
+    #                         )  # lower is better
+    #                         scores.append((cam_idx, float(s.item())))
+    #                     except Exception as e:
+    #                         print(f"Warning: Failed to score camera {cam_idx}: {e}")
+    #                         scores.append((cam_idx, float("inf")))
+    #                     finally:
+    #                         del cam
+
+    #             else:  # FisherSplatModel
+    #                 training_cams = [all_cameras[i:i+1] for i in (active_indices + selected_indices)]
+    #                 candidate_cams = [all_cameras[i:i+1] for i in candidate_indices]
+    #                 fisher_scores = model.coverage_score_for_camera(training_cams, candidate_cams)
+    #                 # fisher_scores is a list/iterable of tensors; lower is better (we negate mean uncertainty upstream)
+    #                 scores = [(candidate_indices[i], float(fisher_scores[i].item())) for i in range(len(candidate_indices))]
+
+    #             # Pick the lowest score
+    #             scores.sort(key=lambda x: x[1])
+    #             best_idx = scores[0][0]
+    #             selected_indices.append(best_idx)
+    #             candidate_indices.remove(best_idx)
+
+    #             # Update internal state incrementally for ShadowSplatModel
+    #             if isinstance(model, ShadowSplatModel):
+    #                 best_cam = all_cameras[best_idx:best_idx+1]
+    #                 if self.coverage_metric == "coverage":
+    #                     model.update_coverage([best_cam])
+    #                 else:  # "fig" or "view_fig"
+    #                     model.update_fig([best_cam])
+
+    #                 print("Updating hypothetical coverage/fig using camera", best_idx)
+
+    #             # Memory hygiene between iterations
+    #             if hasattr(model, "info"):
+    #                 if isinstance(model.info, dict):
+    #                     for _, v in list(model.info.items()):
+    #                         if isinstance(v, torch.Tensor):
+    #                             del v
+    #                     model.info.clear()
+    #                 model.info = {}
+    #             gc.collect()
+    #             if torch.cuda.is_available():
+    #                 torch.cuda.empty_cache()
+
+    #     finally:
+    #         # Final cleanup
+    #         if hasattr(model, "info"):
+    #             if isinstance(model.info, dict):
+    #                 for _, v in list(model.info.items()):
+    #                     if isinstance(v, torch.Tensor):
+    #                         del v
+    #                 model.info.clear()
+    #             model.info = {}
+    #         gc.collect()
+    #         if torch.cuda.is_available():
+    #             torch.cuda.empty_cache()
+
+    #     return selected_indices
 
 
 def create_view_selector(

@@ -380,8 +380,8 @@ class ShadowSplatModel(SplatfactoModel):
             view_fig = None
         else:
             coverage_counts = self.coverage_counts.detach()
-            fig = torch.sqrt(self.fig.detach())
-            view_fig = torch.sqrt(self.view_fig.detach())
+            fig = self.fig.detach()
+            view_fig = self.view_fig.detach()
 
         render, alpha, self.info = rasterization_with_coverage(
             means=means_crop,
@@ -588,12 +588,12 @@ class ShadowSplatModel(SplatfactoModel):
         }  # type: ignore
 
     @torch.no_grad()
-    def update_coverage(self, cameras: Cameras, camera_indices: List[int]):
+    def update_coverage(self, cameras: List[Cameras]):
         # Update coverage counts based on all cameras in the camera batch, conditioned on the current state of the scene
 
         # TODO: Might be able to optimize this by batching the update_view_coverage_for_frustum calls.
-        for cam_idx in camera_indices:
-            camera = cameras[cam_idx:cam_idx + 1].to(self.device)
+        for camera in cameras:
+            camera = camera.to(self.device)
 
             camera_scale_fac = self._get_downscale_factor()
             camera.rescale_output_resolution(1 / camera_scale_fac)
@@ -621,11 +621,11 @@ class ShadowSplatModel(SplatfactoModel):
             )
 
     @torch.no_grad()
-    def update_fig(self, cameras: Cameras, camera_indices: List[int]):
+    def update_fig(self, cameras: List[Cameras]):
 
         # Update fig based on all cameras in the camera batch, conditioned on the current state of the scene
-        for cam_idx in camera_indices:
-            camera = cameras[cam_idx:cam_idx + 1].to(self.device)
+        for camera in cameras:
+            camera = camera.to(self.device)
 
             camera_scale_fac = self._get_downscale_factor()
             camera.rescale_output_resolution(1 / camera_scale_fac)
@@ -661,8 +661,11 @@ class ShadowSplatModel(SplatfactoModel):
             )
 
             depth_image = moments[..., 0].squeeze(0)
+            depth_image = torch.where(alphas.squeeze(0).squeeze(-1) > 0, depth_image, depth_image.detach().max())
+
             depth_sqr_image = moments[..., 1].squeeze(0)
             variance_image = depth_sqr_image - depth_image**2
+            variance_image = torch.where(alphas.squeeze(0).squeeze(-1) > 0, variance_image, 0.0)
 
             is_updated_fig = update_fig_for_frustum(
                 means=self.means,
@@ -776,9 +779,9 @@ class ShadowSplatModel(SplatfactoModel):
             A dictionary of metrics.
         """
         metrics_dict, images_dict = super().get_image_metrics_and_images(outputs, batch)
-        shadow_rgb = outputs["shadow"].repeat(1, 1, 3)
-        combined_rgb = torch.cat([images_dict["img"], shadow_rgb], dim=1)
-        images_dict["img"] = combined_rgb
+        # shadow_rgb = outputs["shadow"].repeat(1, 1, 3)
+        # combined_rgb = torch.cat([images_dict["img"], shadow_rgb], dim=1)
+        # images_dict["img"] = combined_rgb
 
         return metrics_dict, images_dict
 
@@ -826,22 +829,25 @@ class ShadowSplatModel(SplatfactoModel):
         self.info = {}
 
         # Optionally downscale camera intrinsics for faster evaluation
-        scaled_camera = None
-        if intrinsics_scale != 1.0:
-            # Create a new camera with scaled intrinsics
-            scaled_camera = Cameras(
-                camera_to_worlds=camera.camera_to_worlds,
-                fx=camera.fx * intrinsics_scale,
-                fy=camera.fy * intrinsics_scale,
-                cx=camera.cx * intrinsics_scale,
-                cy=camera.cy * intrinsics_scale,
-                width=(camera.width * intrinsics_scale).int(),
-                height=(camera.height * intrinsics_scale).int(),
-                camera_type=camera.camera_type,
-                times=camera.times,
-            ).to(camera.device)
-            camera = scaled_camera
+        # scaled_camera = None
+        # if intrinsics_scale != 1.0:
+        #     # Create a new camera with scaled intrinsics
+        #     scaled_camera = Cameras(
+        #         camera_to_worlds=camera.camera_to_worlds,
+        #         fx=camera.fx * intrinsics_scale,
+        #         fy=camera.fy * intrinsics_scale,
+        #         cx=camera.cx * intrinsics_scale,
+        #         cy=camera.cy * intrinsics_scale,
+        #         width=(camera.width * intrinsics_scale).int(),
+        #         height=(camera.height * intrinsics_scale).int(),
+        #         camera_type=camera.camera_type,
+        #         times=camera.times,
+        #     ).to(camera.device)
+        #     camera = scaled_camera
 
+        camera_scale_fac = self._get_downscale_factor()
+        camera.rescale_output_resolution(1 / camera_scale_fac)
+            
         outputs = None
         coverage_score = None
         try:
@@ -859,9 +865,11 @@ class ShadowSplatModel(SplatfactoModel):
                 )
                 print(f"{metric} not found in outputs")
 
-            # Sum all pixel values to get total coverage score
+            valid_mask = outputs["accumulation"] > 0
+
+            # Sum all pixel values where alphas is > 0 to get total coverage score
             # Detach to avoid keeping references to the computation graph
-            coverage_score = coverage.sum().detach()
+            coverage_score = ( (coverage * valid_mask).sum() / valid_mask.sum() ).detach()
             # Delete coverage tensor after extracting score
             del coverage
 
@@ -883,10 +891,6 @@ class ShadowSplatModel(SplatfactoModel):
                         del value
                 self.info.clear()
 
-            # Delete scaled camera if it was created
-            if scaled_camera is not None:
-                del scaled_camera
-
             # Clear old_info references
             if isinstance(old_info, dict):
                 for key, value in list(old_info.items()):
@@ -902,6 +906,7 @@ class ShadowSplatModel(SplatfactoModel):
             gc.collect()
             torch.cuda.empty_cache()
 
+        camera.rescale_output_resolution(camera_scale_fac)  # type: ignore
         return coverage_score
 
 
@@ -920,7 +925,7 @@ class FisherSplatModelConfig(SplatfactoModelConfig):
 
     render_uncertainty: bool = True
     """whether or not to render uncertainty during GS training. NOTE: This will slow down training significantly."""
-    depth_uncertainty_weight: float = 0.0
+    depth_uncertainty_weight: float = 1.0
     """weight of depth uncertainty with the Hessian"""
     rgb_uncertainty_weight: float = 1.0
 
@@ -1450,14 +1455,20 @@ class FisherSplatModel(SplatfactoModel):
         train_cameras: Iterable[Cameras],
         test_cameras: Iterable[Cameras],
         rgb_weight=1.0,
-        depth_weight=0.0,
+        depth_weight=1.0,
     ):
         H_per_gaussian = torch.zeros(
             self.opacities.shape[0], device=self.opacities.device, dtype=self.opacities.dtype
         )
 
+        # Optionally downscale camera intrinsics for faster evaluation
+        camera_scale_fac = self._get_downscale_factor()
+
         # go through provided training cameras
         for train_cam in train_cameras:
+            train_cam = train_cam.to(self.device)
+            train_cam.rescale_output_resolution(1 / camera_scale_fac)
+
             # get rgb uncertainty
             H_info_rgb = self.compute_diag_H_rgb_depth(train_cam, compute_rgb_H=True)
             H_info_rgb["H"] = [p * rgb_weight for p in H_info_rgb["H"]]
@@ -1468,9 +1479,14 @@ class FisherSplatModel(SplatfactoModel):
             H_info_depth["H"] = [p * depth_weight for p in H_info_depth["H"]]
             H_per_gaussian += sum([reduce(p, "n ... -> n", "sum") for p in H_info_depth["H"]])
 
+            train_cam.rescale_output_resolution(camera_scale_fac)
+
         hessian_color = repeat(H_per_gaussian.detach(), "n -> n c", c=3)
         uncern_maps = []
         for test_cam in test_cameras:
+            test_cam = test_cam.to(self.device)
+            test_cam.rescale_output_resolution(1 / camera_scale_fac)
+
             rasterizer, params = self.prepare_rasterizer(test_cam)
             means3D, shs, opacities, scales, rotations = params
 
@@ -1500,8 +1516,10 @@ class FisherSplatModel(SplatfactoModel):
                 rotations=rotations,
                 cov3D_precomp=None,
             )
-
+            rendered_image[0] = rendered_image[0]
             uncern_maps.append(rendered_image[0])
+
+            test_cam.rescale_output_resolution(camera_scale_fac)
 
         return uncern_maps
 
@@ -1589,9 +1607,9 @@ class FisherSplatModel(SplatfactoModel):
             A dictionary of metrics.
         """
         metrics_dict, images_dict = super().get_image_metrics_and_images(outputs, batch)
-        shadow_rgb = outputs["shadow"].repeat(1, 1, 3)
-        combined_rgb = torch.cat([images_dict["img"], shadow_rgb], dim=1)
-        images_dict["img"] = combined_rgb
+        # shadow_rgb = outputs["shadow"].repeat(1, 1, 3)
+        # combined_rgb = torch.cat([images_dict["img"], shadow_rgb], dim=1)
+        # images_dict["img"] = combined_rgb
 
         return metrics_dict, images_dict
 
@@ -1610,7 +1628,7 @@ class FisherSplatModel(SplatfactoModel):
 
     @torch.no_grad()
     def coverage_score_for_camera(
-        self, camera: Cameras, intrinsics_scale: float = 1.0, metric: str = "none"
+        self, training_cameras: List[Cameras], test_camera: List[Cameras], intrinsics_scale: float = 1.0
     ) -> torch.Tensor:
         """Compute coverage score for a candidate camera.
 
@@ -1638,48 +1656,36 @@ class FisherSplatModel(SplatfactoModel):
         old_info = self.info
         self.info = {}
 
-        # Optionally downscale camera intrinsics for faster evaluation
-        scaled_camera = None
-        if intrinsics_scale != 1.0:
-            # Create a new camera with scaled intrinsics
-            scaled_camera = Cameras(
-                camera_to_worlds=camera.camera_to_worlds,
-                fx=camera.fx * intrinsics_scale,
-                fy=camera.fy * intrinsics_scale,
-                cx=camera.cx * intrinsics_scale,
-                cy=camera.cy * intrinsics_scale,
-                width=(camera.width * intrinsics_scale).int(),
-                height=(camera.height * intrinsics_scale).int(),
-                camera_type=camera.camera_type,
-                times=camera.times,
-            ).to(camera.device)
-            camera = scaled_camera
-
-        outputs = None
+        # outputs = None
         coverage_score = None
         try:
             # Render from camera - get_outputs will use render_mode="RGB+ED" which includes coverage
-            outputs = self.get_outputs(camera, light=None)
-
-            # Extract coverage from outputs
-            uncertainty = outputs["fisher_info"]
+            uncertainty = self.render_uncertainty_rgb_depth(
+                training_cameras,
+                test_camera,
+                rgb_weight=self.config.rgb_uncertainty_weight,
+                depth_weight=self.config.depth_uncertainty_weight,
+            )
 
             # Sum all pixel values to get total coverage score
             # Detach to avoid keeping references to the computation graph
-            coverage_score = -uncertainty.sum().detach()
+            coverage_score = []
+            for unc_map in uncertainty:
+                valid_mask = unc_map > 0
+                coverage_score.append( -(unc_map * valid_mask).sum() / valid_mask.sum() )
             # Delete uncertainty tensor after extracting score
             del uncertainty
 
         finally:
             # Cleanup: explicitly delete intermediate outputs and clear self.info
             # This is critical for preventing memory leaks during view selection
-            if outputs is not None:
-                # Delete all tensors in outputs dict
-                for key, value in list(outputs.items()):
-                    if isinstance(value, torch.Tensor):
-                        del value
-                outputs.clear()
-                del outputs
+            # if outputs is not None:
+            #     # Delete all tensors in outputs dict
+            #     for key, value in list(outputs.items()):
+            #         if isinstance(value, torch.Tensor):
+            #             del value
+            #     outputs.clear()
+            #     del outputs
 
             # Clear self.info to free all intermediate tensors
             if isinstance(self.info, dict):
@@ -1687,10 +1693,6 @@ class FisherSplatModel(SplatfactoModel):
                     if isinstance(value, torch.Tensor):
                         del value
                 self.info.clear()
-
-            # Delete scaled camera if it was created
-            if scaled_camera is not None:
-                del scaled_camera
 
             # Clear old_info references
             if isinstance(old_info, dict):
