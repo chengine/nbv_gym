@@ -236,14 +236,15 @@ class ViewSelectionPipeline(VanillaPipeline):
         result = self.datamanager.next_train(step)
         if len(result) == 3:
             cameras, batch, light = result
+            if self.config.disable_light:
+                model_outputs = self._model(cameras)
+            else:
+                model_outputs = self._model(cameras, light)
         else:
-            cameras, batch = result
-            light = None
+            ray_bundle, batch = result
+            # Ray-batched datamanager returns RayBundle directly
+            model_outputs = self._model(ray_bundle)
 
-        if self.config.disable_light:
-            model_outputs = self._model(cameras)
-        else:
-            model_outputs = self._model(cameras, light)
         metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
         loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
         return model_outputs, loss_dict, metrics_dict
@@ -270,11 +271,18 @@ class ViewSelectionPipeline(VanillaPipeline):
     @profiler.time_function
     def get_eval_image_metrics_and_images(self, step: int):
         self.eval()
-        camera, batch, light = self.datamanager.next_eval_image(step)
-        if self.config.disable_light:
-            outputs = self.model(camera)
+        result = self.datamanager.next_eval_image(step)
+        if len(result) == 3:
+            camera, batch, light = result
+            if self.config.disable_light:
+                outputs = self.model(camera)
+            else:
+                outputs = self.model(camera, light)
         else:
-            outputs = self.model(camera, light)
+            camera, batch = result
+            # Ray-batched datamanager case (should rarely reach here for eval_image)
+            outputs = self.model(camera)
+
         metrics_dict, images_dict = self.model.get_image_metrics_and_images(outputs, batch)
         assert "num_rays" not in metrics_dict
         metrics_dict["num_rays"] = (camera.height * camera.width * camera.size).item()

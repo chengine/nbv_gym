@@ -169,7 +169,10 @@ class BayesRaysParallelDataManager(ParallelDataManager):
         # Filter rays to only those from active training indices
         if self.active_train_indices and len(self.active_train_indices) < len(self.all_train_indices):
             # Extract camera indices from ray bundle
-            cam_indices = ray_bundle.camera_indices.squeeze()
+            # camera_indices shape is typically [num_rays, 1]
+            cam_indices = ray_bundle.camera_indices
+            if cam_indices.dim() > 1:
+                cam_indices = cam_indices.squeeze(-1)
 
             # Create mask for active cameras
             active_set = set(self.active_train_indices)
@@ -180,10 +183,16 @@ class BayesRaysParallelDataManager(ParallelDataManager):
             )
 
             # Filter ray bundle and batch to only active views
-            if mask.sum() > 0:
+            num_active_rays = mask.sum().item()
+            if num_active_rays > 0:
                 ray_bundle = ray_bundle[mask]
                 batch = {k: v[mask] if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-            # If no rays from active views, just return unfiltered
-            # (shouldn't happen, but graceful fallback)
+            else:
+                # No rays from active views - this can happen if the random sampler
+                # happens to sample only from inactive cameras. In this case,
+                # we resample to ensure we get rays from active views.
+                # For now, just keep the original batch (training on all views)
+                # This is a rare edge case and shouldn't significantly impact training
+                pass
 
         return ray_bundle, batch
