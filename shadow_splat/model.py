@@ -91,9 +91,11 @@ def projection_matrix(znear, zfar, fovx, fovy, device: Union[str, torch.device] 
         device=device,
     )
 
+
 to_homo = lambda x: torch.cat(
     [x, torch.ones(x.shape[:-1] + (1,), dtype=x.dtype, device=x.device)], dim=-1
 )
+
 
 @dataclass
 class ShadowSplatModelConfig(SplatfactoModelConfig):
@@ -110,6 +112,7 @@ class ShadowSplatModelConfig(SplatfactoModelConfig):
     n_sphere_bins: int = 128
     """Number of bins on the unit sphere for coverage computation."""
     concentration: float = 5.0
+
 
 class ShadowSplatModel(SplatfactoModel):
     """Nerfstudio's implementation of Shadow Splatting
@@ -622,7 +625,6 @@ class ShadowSplatModel(SplatfactoModel):
 
     @torch.no_grad()
     def update_fig(self, cameras: List[Cameras]):
-
         # Update fig based on all cameras in the camera batch, conditioned on the current state of the scene
         for camera in cameras:
             camera = camera.to(self.device)
@@ -661,7 +663,9 @@ class ShadowSplatModel(SplatfactoModel):
             )
 
             depth_image = moments[..., 0].squeeze(0)
-            depth_image = torch.where(alphas.squeeze(0).squeeze(-1) > 0, depth_image, depth_image.detach().max())
+            depth_image = torch.where(
+                alphas.squeeze(0).squeeze(-1) > 0, depth_image, depth_image.detach().max()
+            )
 
             depth_sqr_image = moments[..., 1].squeeze(0)
             variance_image = depth_sqr_image - depth_image**2
@@ -847,7 +851,7 @@ class ShadowSplatModel(SplatfactoModel):
 
         camera_scale_fac = self._get_downscale_factor()
         camera.rescale_output_resolution(1 / camera_scale_fac)
-            
+
         outputs = None
         coverage_score = None
         try:
@@ -869,7 +873,7 @@ class ShadowSplatModel(SplatfactoModel):
 
             # Sum all pixel values where alphas is > 0 to get total coverage score
             # Detach to avoid keeping references to the computation graph
-            coverage_score = ( (coverage * valid_mask).sum() / valid_mask.sum() ).detach()
+            coverage_score = ((coverage * valid_mask).sum() / valid_mask.sum()).detach()
             # Delete coverage tensor after extracting score
             del coverage
 
@@ -1628,7 +1632,10 @@ class FisherSplatModel(SplatfactoModel):
 
     @torch.no_grad()
     def coverage_score_for_camera(
-        self, training_cameras: List[Cameras], test_camera: List[Cameras], intrinsics_scale: float = 1.0
+        self,
+        training_cameras: List[Cameras],
+        test_camera: List[Cameras],
+        intrinsics_scale: float = 1.0,
     ) -> torch.Tensor:
         """Compute coverage score for a candidate camera.
 
@@ -1672,7 +1679,7 @@ class FisherSplatModel(SplatfactoModel):
             coverage_score = []
             for unc_map in uncertainty:
                 valid_mask = unc_map > 0
-                coverage_score.append( -(unc_map * valid_mask).sum() / valid_mask.sum() )
+                coverage_score.append(-(unc_map * valid_mask).sum() / valid_mask.sum())
             # Delete uncertainty tensor after extracting score
             del uncertainty
 

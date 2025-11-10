@@ -159,6 +159,8 @@ class ViewSelectionDataManagerConfig(FullImageDatamanagerConfig):
     """Number of initial views to randomly select at the start of training."""
     initial_view_seed: Optional[int] = None
     """Random seed for initial view selection. If None, uses a random seed. Set to a value to get reproducible initial views per scene."""
+    bias_views: bool = False
+    """Whether to restrict available views to subset of indices."""
 
 
 class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstract-method
@@ -212,11 +214,23 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
 
         self.log_added_views = []
 
+        if self.config.bias_views:
+            self.available_indices = self.all_train_indices[
+                : int(0.2 * len(self.all_train_indices))
+            ]
+            for i, idx in enumerate(
+                self.all_train_indices[int(0.2 * len(self.all_train_indices)) :]
+            ):
+                if i % 10 == 0:
+                    self.available_indices.append(idx)
+        else:
+            self.available_indices = self.all_train_indices
+
     def expand_active_set(self, k: int = 1, step: Optional[int] = None, **kwargs) -> None:
         """Expand the active set by adding up to k remaining indices using the view selector."""
         if not self.all_train_indices:
             return
-        remaining = list(set(self.all_train_indices) - set(self.active_train_indices))
+        remaining = list(set(self.available_indices) - set(self.active_train_indices))
         if not remaining:
             return
 
@@ -278,7 +292,11 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
             random.randint(0, len(self.active_unseen_cameras) - 1)
         )
 
-        data = deepcopy(self.cached_train[image_idx])
+        # data = deepcopy(self.cached_train[image_idx])
+        # Avoid deepcopy - just reference and move to device
+        data = self.cached_train[image_idx]
+        # Create a shallow copy of the dict, but don't copy the image tensor yet
+        data = {k: v for k, v in data.items()}
         data["image"] = data["image"].to(self.device)
 
         assert len(self.train_dataset.cameras.shape) == 1, "Assumes single batch dimension"
@@ -310,8 +328,10 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         )
         if len(self.eval_unseen_cameras) == 0:
             self.eval_unseen_cameras = [i for i in range(len(self.eval_dataset))]
+
         data = self.cached_eval[image_idx]
-        data = data.copy()
+        # data = data.copy()
+        data = {k: v for k, v in data.items()}
         data["image"] = data["image"].to(self.device)
         assert len(self.eval_dataset.cameras.shape) == 1, "Assumes single batch dimension"
         camera = self.eval_dataset.cameras[image_idx : image_idx + 1].to(self.device)

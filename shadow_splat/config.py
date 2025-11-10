@@ -35,7 +35,7 @@ shadow_splat = MethodSpecification(
         pipeline=ViewSelectionPipelineConfig(
             add_every_n_steps=200,
             add_num_views=1,
-            view_selector="optics",
+            view_selector="all",
             datamanager=ViewSelectionDataManagerConfig(
                 dataparser=ShadowSplatDataParserConfig(load_3D_points=True),
                 cache_images_type="uint8",
