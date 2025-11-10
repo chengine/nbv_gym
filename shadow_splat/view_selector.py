@@ -210,12 +210,22 @@ class BayesRaysViewSelector(ViewSelector):
 
         # Get all cameras from the dataset
         all_cameras = datamanager.train_dataset.cameras
-        candidate_cameras = all_cameras[candidate_indices]
 
         # Score each candidate camera using uncertainty
         scores = []
-        for idx, cam_idx in enumerate(candidate_indices):
-            camera = candidate_cameras[idx : idx + 1].to(model.device)
+
+        # Check if model has uncertainty scoring capability
+        has_uncertainty_method = hasattr(model, 'uncertainty_score_for_camera') and callable(getattr(model, 'uncertainty_score_for_camera'))
+
+        if not has_uncertainty_method:
+            # Model doesn't support uncertainty scoring (e.g., standard Nerfacto)
+            # Fall back to random selection for candidates
+            k = min(num_to_select, len(candidate_indices))
+            return random.sample(candidate_indices, k=k)
+
+        for cam_idx in candidate_indices:
+            # Get single camera at this index
+            camera = all_cameras[cam_idx : cam_idx + 1].to(model.device)
             try:
                 score = model.uncertainty_score_for_camera(
                     camera, hessian=hessian, reduce_mode=self.reduce_mode, lod=self.lod
@@ -223,7 +233,6 @@ class BayesRaysViewSelector(ViewSelector):
                 scores.append((cam_idx, score.item()))
             except Exception as e:
                 # Handle errors gracefully - assign low score
-                print(f"Warning: Failed to score camera {cam_idx}: {e}")
                 scores.append((cam_idx, -float("inf")))
 
         # Sort by score (descending) and select top candidates

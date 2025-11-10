@@ -143,6 +143,8 @@ class HessianComputer:
         Returns:
             Accumulated Hessian tensor [((2^lod)+1)^3]
         """
+        from nerfstudio.cameras.rays import RayBundle
+
         # Set AABB for this scene
         self.aabb = model.scene_box.aabb.to(self.device)
 
@@ -158,26 +160,25 @@ class HessianComputer:
         model.eval()
 
         try:
-            with torch.no_grad():
-                for step in tqdm(
-                    range(num_batches), desc="BayesRays: Computing Hessian", leave=False
-                ):
-                    # Get next training batch
-                    # Handle both (cameras, batch) and (cameras, batch, light) returns
-                    result = datamanager.next_train(step)
-                    if len(result) == 3:
-                        cameras, batch, _ = result  # Ignore light
-                    else:
-                        cameras, batch = result
-
+            for step in tqdm(
+                range(num_batches), desc="BayesRays: Computing Hessian", leave=False
+            ):
+                # Get next training batch
+                # Handle both (ray_bundle, batch) from ray-batched and (cameras, batch, light) from full-image
+                result = datamanager.next_train(step)
+                if len(result) == 3:
+                    cameras, batch, _ = result  # Ignore light (full-image datamanager)
                     # Convert cameras to ray bundle
                     ray_bundle = cameras.generate_rays(
                         camera_indices=torch.arange(
                             cameras.size, device=self.device, dtype=torch.long
                         )
                     )
+                else:
+                    ray_bundle, batch = result  # Already a RayBundle (ray-batched datamanager)
 
-                    # Forward pass to get ray samples and RGB
+                # Forward pass to get ray samples and RGB (with gradients enabled for deform_points)
+                with torch.enable_grad():
                     outputs, points, offsets = self._get_unc_nerfacto(ray_bundle, model)
 
                     # Compute Hessian contribution
