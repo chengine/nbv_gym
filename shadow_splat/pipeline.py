@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Literal, Type, Optional
 
+import torch
 from torch.cuda.amp.grad_scaler import GradScaler
 
 from nerfstudio.models.base_model import ModelConfig
@@ -281,17 +282,26 @@ class ViewSelectionPipeline(VanillaPipeline):
         result = self.datamanager.next_eval_image(step)
         if len(result) == 3:
             camera, batch, light = result
+            # Convert Cameras to RayBundle for the model
+            ray_bundle = camera.generate_rays(
+                camera_indices=torch.arange(
+                    camera.size, device=self.device, dtype=torch.long
+                )
+            )
             if self.config.disable_light:
-                outputs = self.model(camera)
+                outputs = self.model(ray_bundle)
             else:
-                outputs = self.model(camera, light)
+                outputs = self.model(ray_bundle, light)
         else:
-            camera, batch = result
+            ray_bundle, batch = result
             # Ray-batched datamanager case (should rarely reach here for eval_image)
-            outputs = self.model(camera)
+            outputs = self.model(ray_bundle)
 
         metrics_dict, images_dict = self.model.get_image_metrics_and_images(outputs, batch)
         assert "num_rays" not in metrics_dict
+        # Use original camera for num_rays calculation
+        if len(result) == 3:
+            camera = result[0]
         metrics_dict["num_rays"] = (camera.height * camera.width * camera.size).item()
         self.train()
         return metrics_dict, images_dict
