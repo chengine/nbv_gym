@@ -1,7 +1,7 @@
 import subprocess
 import pathlib
 import shlex
-
+from datetime import datetime
 # -----------------------------
 # Batch experiment configuration
 # -----------------------------
@@ -22,7 +22,7 @@ DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 # Methods / information gain metrics to compare.
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
-    #"coverage",
+    "coverage",
     "fig",
     "view_fig",
     "fisher_info",
@@ -53,6 +53,7 @@ def build_cmd(dataset: str, method: str) -> list[str]:
       - random: model=shadow-splat, view-selector=random, no metric flag.
     """
     dataset_name = pathlib.Path(dataset.rstrip("/\\")).name
+    ts = datetime.now().strftime("%Y%m%d-%H%M")
 
     if method == "random":
         model = "shadow-splat"
@@ -72,13 +73,16 @@ def build_cmd(dataset: str, method: str) -> list[str]:
     else:
         raise ValueError(f"Unknown method: {method}")
 
+    project_for_dataset = f"{PROJECT_NAME}__{dataset_name}"
+    exp_name = f"{exp_suffix}__{ts}"
+
     try:
         cmd = [
             "ns-train",
             model,
             f"--vis={VIS}",
-            "--project-name", PROJECT_NAME,
-            "--experiment-name", exp_suffix,
+            "--project-name", project_for_dataset,
+            "--experiment-name", exp_name,
             "--pipeline.view-selector", view_selector,
             "--pipeline.optics-coverage-metric", method,
             "--viewer.quit-on-train-completion", str(QUIT_VIEWER_ON_DONE),
