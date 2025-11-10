@@ -1,7 +1,29 @@
 import subprocess
 import pathlib
 import shlex
+import os
 from datetime import datetime
+
+# Optional WandB support - set to True to enable logging
+USE_WANDB = True
+
+# WandB configuration
+WANDB_ENTITY = None  # Set to your WandB username if needed, otherwise uses default
+WANDB_PROJECT_PREFIX = "next-best-view"
+
+# If WandB is enabled, try to initialize it
+if USE_WANDB:
+    try:
+        import wandb
+        # Try to login - will use existing credentials or prompt
+        wandb.login(anonymous="allow")
+    except ImportError:
+        print("Warning: WandB not installed. Install with: pip install wandb")
+        USE_WANDB = False
+    except Exception as e:
+        print(f"Warning: Could not initialize WandB: {e}")
+        USE_WANDB = False
+
 # -----------------------------
 # Batch experiment configuration
 # -----------------------------
@@ -85,6 +107,15 @@ def build_cmd(dataset: str, method: str) -> list[str]:
 
     project_for_dataset = f"{PROJECT_NAME}__{dataset_name}"
     exp_name = f"{exp_suffix}__{ts}"
+    run_name = f"{dataset_name}__{method}___{ts}"
+
+    # Set WandB environment variables for metadata
+    if USE_WANDB:
+        os.environ["WANDB_PROJECT"] = project_for_dataset
+        if WANDB_ENTITY:
+            os.environ["WANDB_ENTITY"] = WANDB_ENTITY
+        os.environ["WANDB_TAGS"] = f"method:{method},dataset:{dataset_name},model:{model}"
+        os.environ["WANDB_NOTES"] = f"View selection: {view_selector}, Dataset: {dataset_name}"
 
     try:
         cmd = [
@@ -93,8 +124,13 @@ def build_cmd(dataset: str, method: str) -> list[str]:
             f"--vis={VIS}",
             "--project-name", project_for_dataset,
             "--experiment-name", exp_name,
-            "--viewer.quit-on-train-completion", str(QUIT_VIEWER_ON_DONE),
         ]
+
+        # Add run name for WandB tracking
+        if USE_WANDB:
+            cmd.extend(["--run-name", run_name])
+
+        cmd.extend(["--viewer.quit-on-train-completion", str(QUIT_VIEWER_ON_DONE)])
 
         # BayesRays uses standard nerfstudio data format, others use shadow-splat
         if method == "bayes-rays":
@@ -117,11 +153,33 @@ def build_cmd(dataset: str, method: str) -> list[str]:
     return cmd
 
 def main() -> None:
+    # Set WandB run group for this sweep (groups all runs together)
+    if USE_WANDB:
+        sweep_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        os.environ["WANDB_RUN_GROUP"] = sweep_id
+        print(f"🎯 Starting sweep with group ID: {sweep_id}")
+
+    total_runs = len(DATASETS) * len(METHODS)
+    current_run = 0
+
     for ds in DATASETS:
         for method in METHODS:
+            current_run += 1
+            print(f"\n📊 Run {current_run}/{total_runs}: {pathlib.Path(ds).name} with {method}")
+
             cmd = build_cmd(ds, method)
-            print("Running:", " ".join(shlex.quote(c) for c in cmd))
-            subprocess.run(cmd, check=True)
+            print("Command:", " ".join(shlex.quote(c) for c in cmd))
+
+            try:
+                subprocess.run(cmd, check=True)
+                print(f"✓ Completed: {pathlib.Path(ds).name} with {method}")
+            except subprocess.CalledProcessError as e:
+                print(f"✗ Failed: {pathlib.Path(ds).name} with {method}")
+                print(f"  Error: {e}")
+                # Continue with next run instead of stopping
+                continue
+
+    print(f"\n✅ Sweep complete! {total_runs} runs attempted.")
 
 
 if __name__ == "__main__":
