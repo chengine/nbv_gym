@@ -296,16 +296,44 @@ class ViewSelectionPipeline(VanillaPipeline):
         else:
             camera, batch = result
             # Ray-batched datamanager case (parallel datamanager)
-            # camera is already in the right format for ray generation
+            # Generate full rays from camera
             ray_bundle = camera.generate_rays(
                 camera_indices=torch.arange(
                     camera.size, device=self.device, dtype=torch.long
                 )
             )
-            outputs = self.model(ray_bundle)
+            # Process rays in chunks to avoid OOM during eval
+            # Use the model's configured chunk size for evaluation
+            chunk_size = getattr(self.model.config, 'eval_num_rays_per_chunk', 4096)
+            num_rays = ray_bundle.origins.shape[0]
+            outputs_list = []
+
+            for i in range(0, num_rays, chunk_size):
+                chunk_ray_bundle = ray_bundle[i:i+chunk_size]
+                chunk_outputs = self.model(chunk_ray_bundle)
+                outputs_list.append(chunk_outputs)
+
+            # Merge chunk outputs
+            outputs = self._merge_outputs(outputs_list)
 
         metrics_dict, images_dict = self.model.get_image_metrics_and_images(outputs, batch)
         assert "num_rays" not in metrics_dict
         metrics_dict["num_rays"] = (camera.height * camera.width * camera.size).item()
         self.train()
         return metrics_dict, images_dict
+
+    def _merge_outputs(self, outputs_list):
+        """Merge outputs from multiple chunks."""
+        if not outputs_list:
+            return {}
+
+        merged = {}
+        for key in outputs_list[0].keys():
+            values = [o[key] for o in outputs_list]
+            if isinstance(values[0], torch.Tensor):
+                merged[key] = torch.cat(values, dim=0)
+            elif isinstance(values[0], list):
+                merged[key] = [item for sublist in values for item in sublist]
+            else:
+                merged[key] = values[0]  # Use first value for non-tensor types
+        return merged
