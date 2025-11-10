@@ -22,7 +22,7 @@ DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 # Methods / information gain metrics to compare.
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
-    "coverage",
+    #"coverage",
     "fig",
     "view_fig",
     "fisher_info",
@@ -72,20 +72,23 @@ def build_cmd(dataset: str, method: str) -> list[str]:
     else:
         raise ValueError(f"Unknown method: {method}")
 
-    cmd = [
-        "ns-train",
-        model,
-        f"--vis={VIS}",
-        "--project-name", PROJECT_NAME,
-        "--experiment-name", exp_suffix,
-        "--pipeline.view-selector", view_selector,
-        "--pipeline.optics-coverage-metric", method,
-        "--viewer.quit-on-train-completion", str(QUIT_VIEWER_ON_DONE),
-        # Data spec (keep consistent with existing scripts)
-        "shadow-splat-data",
-        "--data", dataset,
-        # "--eval-mode", EVAL_MODE,
-    ]
+    try:
+        cmd = [
+            "ns-train",
+            model,
+            f"--vis={VIS}",
+            "--project-name", PROJECT_NAME,
+            "--experiment-name", exp_suffix,
+            "--pipeline.view-selector", view_selector,
+            "--pipeline.optics-coverage-metric", method,
+            "--viewer.quit-on-train-completion", str(QUIT_VIEWER_ON_DONE),
+            # Data spec (keep consistent with existing scripts)
+            "shadow-splat-data",
+            "--data", dataset,
+            # "--eval-mode", EVAL_MODE,
+        ]
+    except Exception as e:
+        print(f"Error building command for {dataset} with {method}: {e}")
 
     # cmd += extra_metric_args
     return cmd
