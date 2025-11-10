@@ -202,6 +202,7 @@ class BayesRaysViewSelector(ViewSelector):
 
         if model is None or datamanager is None or hessian is None:
             # Fall back to random if required context is missing
+            print("Warning: Missing context for BayesRays view selection, falling back to random.")
             k = min(max(1, num_to_select), len(remaining_indices))
             return random.sample(remaining_indices, k=k)
 
@@ -220,6 +221,7 @@ class BayesRaysViewSelector(ViewSelector):
         if not has_uncertainty_method:
             # Model doesn't support uncertainty scoring (e.g., standard Nerfacto)
             # Fall back to random selection for candidates
+            print("Warning: Model does not support uncertainty scoring, falling back to random selection.")
             k = min(num_to_select, len(candidate_indices))
             return random.sample(candidate_indices, k=k)
 
