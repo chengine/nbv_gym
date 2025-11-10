@@ -1,42 +1,127 @@
-import os, subprocess, wandb, datetime, pathlib, shlex
+import subprocess
+import pathlib
+import shlex
+from datetime import datetime
+# -----------------------------
+# Batch experiment configuration
+# -----------------------------
+PROJECT_NAME = "next-best-view"
 
+# Datasets to sweep
+BASE_DATA_DIR = pathlib.Path("/home/admin/StanfordMSL/shadow_splat/data")
+SCENES = [
+# "caterpillar",
+# "train",
+# "ignatius",
+# "shiny_statue_6pm",
+# "space_laces_4pm",
+# "chair_3pm",
+"master_chief_cycles"
+]
+DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 
-def main():
-    wandb.init(project="shadow-splat")  # project default if env not set
+# Methods / information gain metrics to compare.
+# Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random", "bayes", "bayes-rays"
+METHODS = [
+    # "coverage",
+    # "fig",
+    # "view_fig",
+    # "fisher_info",
+    # "random",
+    # "bayes",  # BayesRays with Gaussian splatting
+    "bayes-rays"  # BayesRays with Nerfacto ray-batched training
+]
 
-    ds = wandb.config["data"]
-    method = wandb.config["method"]
-    seed = int(wandb.config.get("seed", 0))
+# Visualization backends. Example: "viewer+wandb" or just "wandb"
+VIS = "viewer+wandb"
 
-    # Group by timestamp when sweep starts (write once via env or make here)
-    if not os.getenv("WANDB_RUN_GROUP"):
-        ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        os.environ["WANDB_RUN_GROUP"] = ts
+# Quit the viewer on train completion to avoid hangs in sweeps
+QUIT_VIEWER_ON_DONE = True
 
-    dataset_name = pathlib.Path(ds).name
-    run_name = f"{dataset_name}__{method}__s{seed}"
+# Use filename-based eval mode for reproducibility across datasets
+EVAL_MODE = "filename"
 
-    os.environ["WANDB_NAME"] = run_name
-    os.environ["WANDB_TAGS"] = f"dataset:{dataset_name},method:{method},seed:{seed},nerfstudio"
+# -----------------------------
+# Internal helpers
+# -----------------------------
 
-    cmd = [
-        "ns-train",
-        method,
-        "--data",
-        ds,
-        "--seed",
-        str(seed),
-        "--experiment-name",
-        os.environ["WANDB_RUN_GROUP"],
-        "--run-name",
-        run_name,
-        "--max-num-iterations",
-        "30000",
-        "--mixed-precision",
-        "True",
-    ]
-    print("Running:", " ".join(shlex.quote(c) for c in cmd))
-    subprocess.run(cmd, check=True)
+def build_cmd(dataset: str, method: str) -> list[str]:
+    """Construct an ns-train command for a (dataset, method) pair.
+
+    Rules:
+      - coverage / fig / view_fig: model=shadow-splat, view-selector=optics,
+        and set --pipeline.optics-coverage-metric accordingly.
+      - fisher_info: model=fisher-splat, view-selector=optics,
+        and set --pipeline.optics-coverage-metric=fisher_info.
+      - random: model=shadow-splat, view-selector=random, no metric flag.
+      - bayes-rays: method=bayes-rays, uses Nerfacto with ray-batched BayesRays
+        view selection, no optics args needed.
+    """
+    dataset_name = pathlib.Path(dataset.rstrip("/\\")).name
+    ts = datetime.now().strftime("%Y%m%d-%H%M")
+
+    if method == "random":
+        model = "shadow-splat"
+        view_selector = "random"
+        extra_metric_args = []
+        exp_suffix = f"{dataset_name}__{method}"
+    elif method in {"coverage", "fig", "view_fig"}:
+        model = "shadow-splat"
+        view_selector = "optics"
+        extra_metric_args = ["--pipeline.optics-coverage-metric", method]
+        exp_suffix = f"{dataset_name}__{method}__optics"
+    elif method == "fisher_info":
+        model = "fisher-splat"
+        view_selector = "optics"
+        extra_metric_args = ["--pipeline.optics-coverage-metric", method]
+        exp_suffix = f"{dataset_name}__{method}__optics"
+    elif method == "bayes-rays":
+        model = "bayes-rays"
+        view_selector = "bayes"  # Uses Hessian-based uncertainty
+        extra_metric_args = []
+        exp_suffix = f"{dataset_name}__{method}"
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
+    project_for_dataset = f"{PROJECT_NAME}__{dataset_name}"
+    exp_name = f"{exp_suffix}__{ts}"
+
+    try:
+        cmd = [
+            "ns-train",
+            model,
+            f"--vis={VIS}",
+            "--project-name", project_for_dataset,
+            "--experiment-name", exp_name,
+            "--viewer.quit-on-train-completion", str(QUIT_VIEWER_ON_DONE),
+        ]
+
+        # BayesRays uses standard nerfstudio data format, others use shadow-splat
+        if method == "bayes-rays":
+            cmd.extend(["--data", dataset])
+        else:
+            # Gaussian splat methods use shadow-splat-data parser
+            cmd.extend([
+                "--pipeline.view-selector", view_selector,
+                "--pipeline.optics-coverage-metric", method,
+                "shadow-splat-data",
+                "--data", dataset,
+            ])
+
+        # Add eval mode if specified
+        # cmd.extend(["--eval-mode", EVAL_MODE])
+    except Exception as e:
+        print(f"Error building command for {dataset} with {method}: {e}")
+
+    cmd += extra_metric_args
+    return cmd
+
+def main() -> None:
+    for ds in DATASETS:
+        for method in METHODS:
+            cmd = build_cmd(ds, method)
+            print("Running:", " ".join(shlex.quote(c) for c in cmd))
+            subprocess.run(cmd, check=True)
 
 
 if __name__ == "__main__":
