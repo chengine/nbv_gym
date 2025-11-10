@@ -179,10 +179,10 @@ shadow_splat = MethodSpecification(
 bayes_rays = MethodSpecification(
     TrainerConfig(
         method_name="bayes-rays",
-        steps_per_eval_image=100,
-        steps_per_eval_batch=0,
+        steps_per_eval_image=0,  # Disabled to avoid OOM on full image evals with ray-batched training
+        steps_per_eval_batch=100,  # Use batch eval instead (faster and lower memory)
         steps_per_save=700,
-        steps_per_eval_all_images=1000,
+        steps_per_eval_all_images=0,  # Disabled for ray-batched training
         max_num_iterations=30000,
         mixed_precision=False,
         pipeline=ViewSelectionPipelineConfig(
