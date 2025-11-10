@@ -10,10 +10,12 @@ from nerfstudio.plugins.types import MethodSpecification
 from nerfstudio.data.datamanagers.full_images_datamanager import FullImageDatamanagerConfig
 from nerfstudio.data.dataparsers.nerfstudio_dataparser import NerfstudioDataParserConfig
 from nerfstudio.pipelines.base_pipeline import VanillaPipelineConfig
+from nerfstudio.models.nerfacto import NerfactoModelConfig
 
 from shadow_splat.model import ShadowSplatModelConfig
 from shadow_splat.dataparser import ShadowSplatDataParserConfig
 from shadow_splat.datamanager import ShadowSplatDataManagerConfig, ViewSelectionDataManagerConfig
+from shadow_splat.bayes_rays_datamanager import BayesRaysParallelDataManagerConfig
 from shadow_splat.pipeline import ShadowSplatPipelineConfig, ViewSelectionPipelineConfig
 # from shadow_splat.model_2dgs import ShadowSplat2DGSModelConfig
 
@@ -173,3 +175,55 @@ shadow_splat = MethodSpecification(
 #     ),
 #     description="Config for ShadowSplat2DGS",
 # )
+
+bayes_rays = MethodSpecification(
+    TrainerConfig(
+        method_name="bayes-rays",
+        steps_per_eval_image=100,
+        steps_per_eval_batch=0,
+        steps_per_save=700,
+        steps_per_eval_all_images=1000,
+        max_num_iterations=30000,
+        mixed_precision=False,
+        pipeline=ViewSelectionPipelineConfig(
+            # Use ray-batched datamanager with view selection (proper nerfacto architecture)
+            datamanager=BayesRaysParallelDataManagerConfig(
+                dataparser=NerfstudioDataParserConfig(),
+                train_num_rays_per_batch=4096,  # Standard nerfacto setting
+                eval_num_rays_per_batch=4096,
+                start_num_views=1,  # Start with 1 view, expand via BayesRays
+            ),
+            model=NerfactoModelConfig(),  # Use standard nerfacto (no wrapper needed)
+            add_every_n_steps=1000,
+            add_num_views=1,
+            view_selector="bayes",
+            bayes_reduce_mode="mean",
+            bayes_lod=8,
+            bayes_max_hessian_batches=None,
+            disable_light=True,
+        ),
+        optimizers={
+            "proposal_networks": {
+                "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
+                "scheduler": ExponentialDecaySchedulerConfig(
+                    lr_final=1e-4, max_steps=30000, warmup_steps=0
+                ),
+            },
+            "fields": {
+                "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
+                "scheduler": ExponentialDecaySchedulerConfig(
+                    lr_final=1e-4, max_steps=30000, warmup_steps=0
+                ),
+            },
+            "camera_opt": {
+                "optimizer": AdamOptimizerConfig(lr=1e-3, eps=1e-15),
+                "scheduler": ExponentialDecaySchedulerConfig(
+                    lr_final=1e-4, max_steps=30000, warmup_steps=0
+                ),
+            },
+        },
+        viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
+        vis="viewer",
+    ),
+    description="Nerfacto with BayesRays progressive view selection (ray-batched)",
+)

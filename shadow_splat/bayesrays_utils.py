@@ -163,7 +163,19 @@ class HessianComputer:
                     range(num_batches), desc="BayesRays: Computing Hessian", leave=False
                 ):
                     # Get next training batch
-                    ray_bundle, batch = datamanager.next_train(step)
+                    # Handle both (cameras, batch) and (cameras, batch, light) returns
+                    result = datamanager.next_train(step)
+                    if len(result) == 3:
+                        cameras, batch, _ = result  # Ignore light
+                    else:
+                        cameras, batch = result
+
+                    # Convert cameras to ray bundle
+                    ray_bundle = cameras.generate_rays(
+                        camera_indices=torch.arange(
+                            cameras.size, device=self.device, dtype=torch.long
+                        )
+                    )
 
                     # Forward pass to get ray samples and RGB
                     outputs, points, offsets = self._get_unc_nerfacto(ray_bundle, model)

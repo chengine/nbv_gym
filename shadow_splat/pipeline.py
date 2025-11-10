@@ -232,7 +232,14 @@ class ViewSelectionPipeline(VanillaPipeline):
                 k=self.config.add_num_views, step=step, model=self._model, pipeline=self, hessian=hessian
             )
 
-        cameras, batch, light = self.datamanager.next_train(step)
+        # Handle both 3-tuple (cameras, batch, light) and 2-tuple (ray_bundle, batch)
+        result = self.datamanager.next_train(step)
+        if len(result) == 3:
+            cameras, batch, light = result
+        else:
+            cameras, batch = result
+            light = None
+
         if self.config.disable_light:
             model_outputs = self._model(cameras)
         else:
@@ -244,7 +251,13 @@ class ViewSelectionPipeline(VanillaPipeline):
     @profiler.time_function
     def get_eval_loss_dict(self, step: int):
         self.eval()
-        ray_bundle, batch, light = self.datamanager.next_eval(step)
+        result = self.datamanager.next_eval(step)
+        if len(result) == 3:
+            ray_bundle, batch, light = result
+        else:
+            ray_bundle, batch = result
+            light = None
+
         if self.config.disable_light:
             model_outputs = self.model(ray_bundle)
         else:
