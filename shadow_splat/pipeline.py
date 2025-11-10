@@ -282,6 +282,7 @@ class ViewSelectionPipeline(VanillaPipeline):
         result = self.datamanager.next_eval_image(step)
         if len(result) == 3:
             camera, batch, light = result
+            # Full-image datamanager case (shadow-splat style)
             # Convert Cameras to RayBundle for the model
             ray_bundle = camera.generate_rays(
                 camera_indices=torch.arange(
@@ -293,15 +294,18 @@ class ViewSelectionPipeline(VanillaPipeline):
             else:
                 outputs = self.model(ray_bundle, light)
         else:
-            ray_bundle, batch = result
-            # Ray-batched datamanager case (should rarely reach here for eval_image)
+            camera, batch = result
+            # Ray-batched datamanager case (parallel datamanager)
+            # camera is already in the right format for ray generation
+            ray_bundle = camera.generate_rays(
+                camera_indices=torch.arange(
+                    camera.size, device=self.device, dtype=torch.long
+                )
+            )
             outputs = self.model(ray_bundle)
 
         metrics_dict, images_dict = self.model.get_image_metrics_and_images(outputs, batch)
         assert "num_rays" not in metrics_dict
-        # Use original camera for num_rays calculation
-        if len(result) == 3:
-            camera = result[0]
         metrics_dict["num_rays"] = (camera.height * camera.width * camera.size).item()
         self.train()
         return metrics_dict, images_dict
