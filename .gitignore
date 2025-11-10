@@ -8,6 +8,7 @@ pyrightconfig.json
 *.zip
 *.mp4
 *.avi
+todo.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
