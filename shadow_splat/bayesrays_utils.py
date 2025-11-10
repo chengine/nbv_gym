@@ -186,10 +186,16 @@ class HessianComputer:
                         points, offsets, outputs["rgb"], model.field.spatial_distortion
                     )
                     self.hessian += hessian_contrib.clone().detach()
+
+                # Clean up any gradients from this iteration
+                torch.cuda.empty_cache()
         finally:
-            # Restore training state
+            # Restore training state and clean up
             if was_training:
                 model.train()
+            # Make sure to clear any leftover gradients
+            model.zero_grad()
+            torch.cuda.empty_cache()
 
         return self.hessian
 

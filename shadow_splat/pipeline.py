@@ -216,21 +216,28 @@ class ViewSelectionPipeline(VanillaPipeline):
             # Compute Hessian if using BayesRays selector
             hessian = None
             if self._hessian_computer is not None:
-                # Only recompute Hessian if we haven't already at this step
-                if self._hessian_computed_at_step != step:
-                    hessian = self._hessian_computer.compute_hessian_from_datamanager(
-                        model=self._model,
-                        datamanager=self.datamanager,
-                        max_batches=self.config.bayes_max_hessian_batches,
-                    )
-                    self._cached_hessian = hessian
-                    self._hessian_computed_at_step = step
-                else:
-                    hessian = self._cached_hessian
+                try:
+                    # Only recompute Hessian if we haven't already at this step
+                    if self._hessian_computed_at_step != step:
+                        hessian = self._hessian_computer.compute_hessian_from_datamanager(
+                            model=self._model,
+                            datamanager=self.datamanager,
+                            max_batches=self.config.bayes_max_hessian_batches,
+                        )
+                        self._cached_hessian = hessian
+                        self._hessian_computed_at_step = step
+                    else:
+                        hessian = self._cached_hessian
+                except Exception as e:
+                    print(f"Warning: Failed to compute Hessian for view selection: {e}")
+                    hessian = None
 
-            self.datamanager.expand_active_set(
-                k=self.config.add_num_views, step=step, model=self._model, pipeline=self, hessian=hessian
-            )
+            try:
+                self.datamanager.expand_active_set(
+                    k=self.config.add_num_views, step=step, model=self._model, pipeline=self, hessian=hessian
+                )
+            except Exception as e:
+                print(f"Warning: Failed to expand active set: {e}")
 
         # Handle both 3-tuple (cameras, batch, light) and 2-tuple (ray_bundle, batch)
         result = self.datamanager.next_train(step)

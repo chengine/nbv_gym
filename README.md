@@ -16,7 +16,7 @@
 ### Now, you can run `shadow_splat` like other models in Nerfstudio using the `ns-train shadow_splat` command.
 ### For example:
 ```python 
-ns-train shadow_splat --data <path to the data> \
+ns-train shadow-splat --data <path to the data> \
     --output-dir <path to the output directory> \
     --pipeline.model.camera-optimizer.mode SO3xR3 \
     --pipeline.model.rasterize-mode antialiased
