@@ -24,7 +24,7 @@ DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 # Methods / information gain metrics to compare.
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
-    # "coverage",
+    "coverage",
     "fig",
     "view_fig",
     "fisher_info",
@@ -38,7 +38,9 @@ VIS = "viewer+wandb"
 QUIT_VIEWER_ON_DONE = True
 
 # Biased dataset
-BIASED = True
+BIASED = False
+
+MAX_ITERATIONS = 30000
 
 # -----------------------------
 # Internal helpers
@@ -88,6 +90,8 @@ def build_cmd(dataset: str, method: str) -> list[str]:
             project_for_dataset,
             "--experiment-name",
             exp_name,
+            "--max-num-iterations",
+            str(MAX_ITERATIONS),
             "--pipeline.view-selector",
             view_selector,
             "--pipeline.optics-coverage-metric",

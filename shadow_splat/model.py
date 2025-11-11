@@ -19,7 +19,6 @@ Gaussian Splatting implementation that combines many recent advancements.
 
 from __future__ import annotations
 import os
-import gc
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple, Type, Union
@@ -735,7 +734,7 @@ class ShadowSplatModel(SplatfactoModel):
             )
 
     @torch.no_grad()
-    def update_fig(self, cameras: List[Cameras], update_attributes: bool=True):
+    def update_fig(self, cameras: List[Cameras], update_attributes: bool = True):
         # Update fig based on all cameras in the camera batch, conditioned on the current state of the scene
         outputs = []
         for camera in cameras:
@@ -803,21 +802,29 @@ class ShadowSplatModel(SplatfactoModel):
                 update_attributes=update_attributes,
             )
             outputs.append(output)
-        
+
         if not update_attributes:
-            transmittances = torch.stack([output["transmittance_squared"] for output in outputs], dim=0)
-            view_transmittances = torch.stack([output["view_transmittance_squared"] for output in outputs], dim=0)
+            transmittances = torch.stack(
+                [output["transmittance_squared"] for output in outputs], dim=0
+            )
+            view_transmittances = torch.stack(
+                [output["view_transmittance_squared"] for output in outputs], dim=0
+            )
 
             outputs = {
                 "transmittance_squared": transmittances,
                 "view_transmittance_squared": view_transmittances,
             }
-        
+
         return outputs
 
     @torch.no_grad()
     def coverage_score_for_camera(
-        self, camera: Cameras, light=None, intrinsics_scale: float = 1.0, metric: Literal["coverage", "fig", "view_fig", "coverage_lit"] = "coverage"
+        self,
+        camera: Cameras,
+        light=None,
+        intrinsics_scale: float = 1.0,
+        metric: Literal["coverage", "fig", "view_fig", "coverage_lit"] = "coverage",
     ) -> torch.Tensor:
         """Compute coverage score for a candidate camera.
 
@@ -867,7 +874,11 @@ class ShadowSplatModel(SplatfactoModel):
 
     @torch.no_grad()
     def coverage_score_for_camera_rollouts(
-        self, training_cameras: List[Cameras], test_cameras: List[Cameras], light=None, metric: Literal["coverage", "fig", "view_fig", "coverage_lit"] = "coverage",
+        self,
+        training_cameras: List[Cameras],
+        test_cameras: List[Cameras],
+        light=None,
+        metric: Literal["coverage", "fig", "view_fig", "coverage_lit"] = "coverage",
         num_rollouts: int = 10,
     ) -> torch.Tensor:
         """Compute coverage score for set of candidate cameras.
@@ -918,7 +929,6 @@ class ShadowSplatModel(SplatfactoModel):
                 )  # lower is better
                 scores.append((cam_idx, float(s.item())))
 
-
             # Pick the lowest score
             scores.sort(key=lambda x: x[1])
             best_idx = scores[0][0]
@@ -927,7 +937,7 @@ class ShadowSplatModel(SplatfactoModel):
 
             # Update internal state incrementally for ShadowSplatModel
             if isinstance(model, ShadowSplatModel):
-                best_cam = all_cameras[best_idx:best_idx+1]
+                best_cam = all_cameras[best_idx : best_idx + 1]
                 if self.coverage_metric == "coverage":
                     model.update_coverage([best_cam])
                 else:  # "fig" or "view_fig"
@@ -943,7 +953,7 @@ class ShadowSplatModel(SplatfactoModel):
                             del v
                     model.info.clear()
                 model.info = {}
-            gc.collect()
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
@@ -959,9 +969,7 @@ class ShadowSplatModel(SplatfactoModel):
         else:
             # Fallback: coverage might be in render output
             # This should not happen if render_mode is set correctly, but handle gracefully
-            coverage = torch.zeros(
-                (camera.height.item(), camera.width.item()), device=self.device
-            )
+            coverage = torch.zeros((camera.height.item(), camera.width.item()), device=self.device)
             print(f"{metric} not found in outputs")
 
         valid_mask = outputs["accumulation"] > 0
@@ -1740,7 +1748,7 @@ class FisherSplatModel(SplatfactoModel):
         for unc_map in uncertainty:
             valid_mask = unc_map > 0
             coverage_score.append(-(unc_map * valid_mask).sum() / valid_mask.sum())
-       
+
         # Restore training state
         if was_training:
             self.train()
