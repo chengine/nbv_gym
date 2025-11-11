@@ -309,9 +309,10 @@ class ShadowSplatModel(SplatfactoModel):
         else:
             optimized_camera_to_world = camera.camera_to_worlds
 
-        # TODO: Implement multi-light support
-        if light is not None:
-            assert light.shape[0] == 1, f"Only one light at a time, light shape: {light.shape}"
+        # # TODO: Implement multi-light support
+        # print(light.shape)
+        # if light is not None:
+        #     assert light.shape[0] == 1, f"Only one light at a time, light shape: {light.shape}"
 
         # cropping
         if self.crop_box is not None and not self.training:
@@ -440,14 +441,18 @@ class ShadowSplatModel(SplatfactoModel):
             #     optimized_light_to_world = self.light_optimizer.apply_to_camera(light)
             # else:
             optimized_light_to_world = light.camera_to_worlds
-
-            light_camera_to_world = optimized_light_to_world
+            light_camera_to_world = optimized_light_to_world.cuda()
             light.rescale_output_resolution(1 / camera_scale_fac)
-            light_viewmat = get_viewmat(light_camera_to_world)
             light_K = light.get_intrinsics_matrices().cuda()
             light_W, light_H = int(light.width.item()), int(light.height.item())
             self.light_last_size = (light_H, light_W)
             light.rescale_output_resolution(camera_scale_fac)  # type: ignore
+
+            if light_camera_to_world.dim() < 3:
+                light_camera_to_world = light_camera_to_world.unsqueeze(0)
+                light_K = light_K.unsqueeze(0)
+
+            light_viewmat = get_viewmat(light_camera_to_world)
 
             if light.camera_type == CameraType.PERSPECTIVE.value:
                 light_model = "pinhole"
@@ -804,7 +809,7 @@ class ShadowSplatModel(SplatfactoModel):
 
     @torch.no_grad()
     def coverage_score_for_camera(
-        self, camera: Cameras, intrinsics_scale: float = 1.0, metric: str = "coverage"
+        self, camera: Cameras, light=None, intrinsics_scale: float = 1.0, metric: str = "coverage"
     ) -> torch.Tensor:
         """Compute coverage score for a candidate camera.
 
@@ -856,7 +861,7 @@ class ShadowSplatModel(SplatfactoModel):
         coverage_score = None
         try:
             # Render from camera - get_outputs will use render_mode="RGB+ED" which includes coverage
-            outputs = self.get_outputs(camera, light=None)
+            outputs = self.get_outputs(camera, light=light)
 
             # Extract coverage from outputs
             if metric in outputs:
