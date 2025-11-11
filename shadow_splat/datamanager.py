@@ -157,7 +157,7 @@ class ViewSelectionDataManagerConfig(FullImageDatamanagerConfig):
     cache_images_type: Literal["uint8", "float32"] = "uint8"
     start_num_views: int = 10
     """Number of initial views to randomly select at the start of training."""
-    initial_view_seed: Optional[int] = None
+    initial_view_seed: Optional[int] = 0
     """Random seed for initial view selection. If None, uses a random seed. Set to a value to get reproducible initial views per scene."""
     bias_views: bool = False
     """Whether to restrict available views to subset of indices."""

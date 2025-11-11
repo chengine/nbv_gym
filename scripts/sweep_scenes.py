@@ -24,10 +24,10 @@ DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 # Methods / information gain metrics to compare.
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
-    "coverage",
-    "fig",
-    "view_fig",
-    "fisher_info",
+    # "coverage",
+    # "fig",
+    # "view_fig",
+    # "fisher_info",
     "random",
 ]
 
@@ -114,7 +114,6 @@ def main() -> None:
             cmd = build_cmd(ds, method)
             print("Running:", " ".join(shlex.quote(c) for c in cmd))
             subprocess.run(cmd, check=True)
-
 
 if __name__ == "__main__":
     main()
