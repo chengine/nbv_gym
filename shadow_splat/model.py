@@ -598,115 +598,6 @@ class ShadowSplatModel(SplatfactoModel):
             "coverage_lit": coverage_lit,  # type: ignore
         }  # type: ignore
 
-    @torch.no_grad()
-    def update_coverage(self, cameras: List[Cameras]):
-        # Update coverage counts based on all cameras in the camera batch, conditioned on the current state of the scene
-
-        # TODO: Might be able to optimize this by batching the update_view_coverage_for_frustum calls.
-        for camera in cameras:
-            camera = camera.to(self.device)
-
-            camera_scale_fac = self._get_downscale_factor()
-            camera.rescale_output_resolution(1 / camera_scale_fac)
-            viewmat = get_viewmat(camera.camera_to_worlds)
-            K = camera.get_intrinsics_matrices().cuda()
-            W, H = int(camera.width.item()), int(camera.height.item())
-            camera.rescale_output_resolution(camera_scale_fac)  # type: ignore
-
-            # NOTE: HARDCODED. MAKE THIS MORE ELEGANT.
-            camera_model = "pinhole"
-
-            is_updated_coverage = update_view_coverage_for_frustum(
-                means=self.means,
-                quats=self.quats,
-                scales=torch.exp(self.scales),
-                viewmats=viewmat,
-                Ks=K,
-                width=W,
-                height=H,
-                coverage_counts=self.coverage_counts,
-                bin_dirs=self.bin_dirs,
-                camera_model=camera_model,
-                near_plane=0.01,
-                far_plane=1e10,
-            )
-
-    @torch.no_grad()
-    def update_fig(self, cameras: List[Cameras]):
-        # Update fig based on all cameras in the camera batch, conditioned on the current state of the scene
-        for camera in cameras:
-            camera = camera.to(self.device)
-
-            camera_scale_fac = self._get_downscale_factor()
-            camera.rescale_output_resolution(1 / camera_scale_fac)
-            viewmat = get_viewmat(camera.camera_to_worlds)
-            K = camera.get_intrinsics_matrices().cuda()
-            W, H = int(camera.width.item()), int(camera.height.item())
-            camera.rescale_output_resolution(camera_scale_fac)  # type: ignore
-
-            # NOTE: HARDCODED. MAKE THIS MORE ELEGANT.
-            camera_model = "pinhole"
-
-            moments, alphas, meta = moment_rasterization(
-                self.means,  # [N, 3]
-                self.quats,  # [N, 4]
-                torch.exp(self.scales),  # [N, 3]
-                torch.sigmoid(self.opacities).squeeze(-1),  # [N]
-                viewmat,  # [C, 4, 4]
-                K,  # [C, 3, 3]
-                W,
-                H,
-                near_plane=0.01,
-                far_plane=1e10,
-                radius_clip=3.0,
-                eps2d=0.3,
-                packed=True,
-                tile_size=16,
-                sparse_grad=False,
-                absgrad=False,
-                rasterize_mode=self.config.rasterize_mode,
-                channel_chunk=32,
-                distributed=False,
-                camera_model=camera_model,
-            )
-
-            depth_image = moments[..., 0].squeeze(0)
-            depth_image = torch.where(
-                alphas.squeeze(0).squeeze(-1) > 0, depth_image, depth_image.detach().max()
-            )
-
-            depth_sqr_image = moments[..., 1].squeeze(0)
-            variance_image = depth_sqr_image - depth_image**2
-            variance_image = torch.where(alphas.squeeze(0).squeeze(-1) > 0, variance_image, 0.0)
-
-            is_updated_fig = update_fig_for_frustum(
-                means=self.means,
-                quats=self.quats,
-                scales=torch.exp(self.scales),
-                viewmats=viewmat,
-                Ks=K,
-                width=W,
-                height=H,
-                depth_image=depth_image,
-                variance_image=variance_image,
-                bin_dirs=self.bin_dirs,
-                fig=self.fig,
-                view_fig=self.view_fig,
-                camera_model=camera_model,
-                near_plane=0.01,
-                far_plane=1e10,
-                concentration=self.config.concentration,
-            )
-
-    @torch.no_grad()
-    def reset_coverage(self):
-        self.gauss_params["coverage_counts"].zero_()
-
-    @torch.no_grad()
-    def reset_fig(self):
-        self.gauss_params["fig"].zero_()
-        self.gauss_params["view_fig"].zero_()
-
     def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
         """Computes and returns the losses dict.
 
@@ -811,8 +702,122 @@ class ShadowSplatModel(SplatfactoModel):
         return metrics_dict
 
     @torch.no_grad()
+    def update_coverage(self, cameras: List[Cameras]):
+        # Update coverage counts based on all cameras in the camera batch, conditioned on the current state of the scene
+
+        # TODO: Might be able to optimize this by batching the update_view_coverage_for_frustum calls.
+        for camera in cameras:
+            camera = camera.to(self.device)
+
+            camera_scale_fac = self._get_downscale_factor()
+            camera.rescale_output_resolution(1 / camera_scale_fac)
+            viewmat = get_viewmat(camera.camera_to_worlds)
+            K = camera.get_intrinsics_matrices().cuda()
+            W, H = int(camera.width.item()), int(camera.height.item())
+            camera.rescale_output_resolution(camera_scale_fac)  # type: ignore
+
+            # NOTE: HARDCODED. MAKE THIS MORE ELEGANT.
+            camera_model = "pinhole"
+
+            is_updated_coverage = update_view_coverage_for_frustum(
+                means=self.means,
+                quats=self.quats,
+                scales=torch.exp(self.scales),
+                viewmats=viewmat,
+                Ks=K,
+                width=W,
+                height=H,
+                coverage_counts=self.coverage_counts,
+                bin_dirs=self.bin_dirs,
+                camera_model=camera_model,
+                near_plane=0.01,
+                far_plane=1e10,
+            )
+
+    @torch.no_grad()
+    def update_fig(self, cameras: List[Cameras], update_attributes: bool=True):
+        # Update fig based on all cameras in the camera batch, conditioned on the current state of the scene
+        outputs = []
+        for camera in cameras:
+            camera = camera.to(self.device)
+
+            camera_scale_fac = self._get_downscale_factor()
+            camera.rescale_output_resolution(1 / camera_scale_fac)
+            viewmat = get_viewmat(camera.camera_to_worlds)
+            K = camera.get_intrinsics_matrices().cuda()
+            W, H = int(camera.width.item()), int(camera.height.item())
+            camera.rescale_output_resolution(camera_scale_fac)  # type: ignore
+
+            # NOTE: HARDCODED. MAKE THIS MORE ELEGANT.
+            camera_model = "pinhole"
+
+            moments, alphas, meta = moment_rasterization(
+                self.means,  # [N, 3]
+                self.quats,  # [N, 4]
+                torch.exp(self.scales),  # [N, 3]
+                torch.sigmoid(self.opacities).squeeze(-1),  # [N]
+                viewmat,  # [C, 4, 4]
+                K,  # [C, 3, 3]
+                W,
+                H,
+                near_plane=0.01,
+                far_plane=1e10,
+                radius_clip=3.0,
+                eps2d=0.3,
+                packed=True,
+                tile_size=16,
+                sparse_grad=False,
+                absgrad=False,
+                rasterize_mode=self.config.rasterize_mode,
+                channel_chunk=32,
+                distributed=False,
+                camera_model=camera_model,
+            )
+
+            depth_image = moments[..., 0].squeeze(0)
+            depth_image = torch.where(
+                alphas.squeeze(0).squeeze(-1) > 0, depth_image, depth_image.detach().max()
+            )
+
+            depth_sqr_image = moments[..., 1].squeeze(0)
+            variance_image = depth_sqr_image - depth_image**2
+            variance_image = torch.where(alphas.squeeze(0).squeeze(-1) > 0, variance_image, 0.0)
+
+            output = update_fig_for_frustum(
+                means=self.means,
+                quats=self.quats,
+                scales=torch.exp(self.scales),
+                viewmats=viewmat,
+                Ks=K,
+                width=W,
+                height=H,
+                depth_image=depth_image,
+                variance_image=variance_image,
+                bin_dirs=self.bin_dirs,
+                fig=self.fig,
+                view_fig=self.view_fig,
+                camera_model=camera_model,
+                near_plane=0.01,
+                far_plane=1e10,
+                concentration=self.config.concentration,
+                update_attributes=update_attributes,
+            )
+            outputs.append(output)
+        
+        if not update_attributes:
+            transmittances = torch.stack([output["transmittance_squared"] for output in outputs], dim=0)
+            view_transmittances = torch.stack([output["view_transmittance_squared"] for output in outputs], dim=0)
+
+            outputs = {
+                "transmittance_squared": transmittances,
+                "view_transmittance_squared": view_transmittances,
+            }
+        
+        return outputs
+
+    @torch.no_grad()
     def coverage_score_for_camera(
-        self, camera: Cameras, light=None, intrinsics_scale: float = 1.0, metric: str = "coverage"
+        self, camera: Cameras, light=None, intrinsics_scale: float = 1.0, metric: Literal["coverage", "fig", "view_fig", "coverage_lit"] = "coverage"
     ) -> torch.Tensor:
         """Compute coverage score for a candidate camera.
 
@@ -835,91 +840,151 @@ class ShadowSplatModel(SplatfactoModel):
         # Set to eval mode for faster inference
         self.eval()
 
-        # Clear self.info before rendering to free memory from previous renders
-        # This is critical for preventing memory leaks during view selection
-        old_info = self.info
-        self.info = {}
+        camera_scale_fac = self._get_downscale_factor()
+        camera.rescale_output_resolution(1 / camera_scale_fac)
 
-        # Optionally downscale camera intrinsics for faster evaluation
-        # scaled_camera = None
-        # if intrinsics_scale != 1.0:
-        #     # Create a new camera with scaled intrinsics
-        #     scaled_camera = Cameras(
-        #         camera_to_worlds=camera.camera_to_worlds,
-        #         fx=camera.fx * intrinsics_scale,
-        #         fy=camera.fy * intrinsics_scale,
-        #         cx=camera.cx * intrinsics_scale,
-        #         cy=camera.cy * intrinsics_scale,
-        #         width=(camera.width * intrinsics_scale).int(),
-        #         height=(camera.height * intrinsics_scale).int(),
-        #         camera_type=camera.camera_type,
-        #         times=camera.times,
-        #     ).to(camera.device)
-        #     camera = scaled_camera
+        # Render from camera - get_outputs will use render_mode="RGB+ED" which includes coverage
+        outputs = self.get_outputs(camera, light=light)
+
+        # Extract coverage from outputs
+        if metric in outputs:
+            coverage = outputs[metric]  # [H, W] or [H, W, 1]
+        else:
+            raise ValueError(f"Metric {metric} not found in outputs")
+
+        valid_mask = outputs["accumulation"] > 0
+
+        # Sum all pixel values where alphas is > 0 to get total coverage score
+        # Detach to avoid keeping references to the computation graph
+        coverage_score = ((coverage * valid_mask).sum() / valid_mask.sum()).detach()
+
+        # Restore training state
+        if was_training:
+            self.train()
+
+        camera.rescale_output_resolution(camera_scale_fac)  # type: ignore
+        return coverage_score
+
+    @torch.no_grad()
+    def coverage_score_for_camera_rollouts(
+        self, training_cameras: List[Cameras], test_cameras: List[Cameras], light=None, metric: Literal["coverage", "fig", "view_fig", "coverage_lit"] = "coverage",
+        num_rollouts: int = 10,
+    ) -> torch.Tensor:
+        """Compute coverage score for set of candidate cameras.
+
+        Renders from the given camera and computes the sum of all pixel values in the
+        coverage image. Higher scores indicate better coverage (more Gaussians seen from
+        more directions). Lower scores indicate novel/uncovered areas.
+
+        Args:
+            camera: Camera object to evaluate
+            intrinsics_scale: Scale factor for camera intrinsics (for faster evaluation).
+                Values < 1.0 downscale the resolution.
+
+        Returns:
+            Scalar tensor with the total coverage score (sum of all coverage pixels).
+            Lower values indicate views that see poorly-covered areas.
+        """
+        # Save current training state
+        was_training = self.training
+
+        # Set to eval mode for faster inference
+        self.eval()
+
+        if self.coverage_metric in ["coverage", "coverage_lit"]:
+            update_fn = self.update_coverage
+            reset_fn = self.reset_coverage
+
+        elif self.coverage_metric in ["fig", "view_fig"]:
+            update_fn = self.update_fig
+            reset_fn = self.reset_fig
+
+        else:
+            raise ValueError(f"Invalid coverage metric: {self.coverage_metric}")
+
+        # Update coverage metric for training cameras
+
+        picks = min(num_rollouts, len(test_cameras))
+        for _ in range(picks):
+            if len(candidate_indices) == 0:
+                break
+
+            # Score the current pool
+            scores: List[tuple[int, float]] = []
+
+            for test_cam in test_cameras:
+                s = self.coverage_score_for_camera(
+                    test_cam, intrinsics_scale=self.intrinsics_scale, metric=self.coverage_metric
+                )  # lower is better
+                scores.append((cam_idx, float(s.item())))
+
+
+            # Pick the lowest score
+            scores.sort(key=lambda x: x[1])
+            best_idx = scores[0][0]
+            selected_indices.append(best_idx)
+            candidate_indices.remove(best_idx)
+
+            # Update internal state incrementally for ShadowSplatModel
+            if isinstance(model, ShadowSplatModel):
+                best_cam = all_cameras[best_idx:best_idx+1]
+                if self.coverage_metric == "coverage":
+                    model.update_coverage([best_cam])
+                else:  # "fig" or "view_fig"
+                    model.update_fig([best_cam])
+
+                print("Updating hypothetical coverage/fig using camera", best_idx)
+
+            # Memory hygiene between iterations
+            if hasattr(model, "info"):
+                if isinstance(model.info, dict):
+                    for _, v in list(model.info.items()):
+                        if isinstance(v, torch.Tensor):
+                            del v
+                    model.info.clear()
+                model.info = {}
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         camera_scale_fac = self._get_downscale_factor()
         camera.rescale_output_resolution(1 / camera_scale_fac)
 
-        outputs = None
-        coverage_score = None
-        try:
-            # Render from camera - get_outputs will use render_mode="RGB+ED" which includes coverage
-            outputs = self.get_outputs(camera, light=light)
+        # Render from camera - get_outputs will use render_mode="RGB+ED" which includes coverage
+        outputs = self.get_outputs(camera, light=light)
 
-            # Extract coverage from outputs
-            if metric in outputs:
-                coverage = outputs[metric]  # [H, W] or [H, W, 1]
-            else:
-                # Fallback: coverage might be in render output
-                # This should not happen if render_mode is set correctly, but handle gracefully
-                coverage = torch.zeros(
-                    (camera.height.item(), camera.width.item()), device=self.device
-                )
-                print(f"{metric} not found in outputs")
+        # Extract coverage from outputs
+        if metric in outputs:
+            coverage = outputs[metric]  # [H, W] or [H, W, 1]
+        else:
+            # Fallback: coverage might be in render output
+            # This should not happen if render_mode is set correctly, but handle gracefully
+            coverage = torch.zeros(
+                (camera.height.item(), camera.width.item()), device=self.device
+            )
+            print(f"{metric} not found in outputs")
 
-            valid_mask = outputs["accumulation"] > 0
+        valid_mask = outputs["accumulation"] > 0
 
-            # Sum all pixel values where alphas is > 0 to get total coverage score
-            # Detach to avoid keeping references to the computation graph
-            coverage_score = ((coverage * valid_mask).sum() / valid_mask.sum()).detach()
-            # Delete coverage tensor after extracting score
-            del coverage
+        # Sum all pixel values where alphas is > 0 to get total coverage score
+        # Detach to avoid keeping references to the computation graph
+        coverage_score = ((coverage * valid_mask).sum() / valid_mask.sum()).detach()
 
-        finally:
-            # Cleanup: explicitly delete intermediate outputs and clear self.info
-            # This is critical for preventing memory leaks during view selection
-            if outputs is not None:
-                # Delete all tensors in outputs dict
-                for key, value in list(outputs.items()):
-                    if isinstance(value, torch.Tensor):
-                        del value
-                outputs.clear()
-                del outputs
-
-            # Clear self.info to free all intermediate tensors
-            if isinstance(self.info, dict):
-                for key, value in list(self.info.items()):
-                    if isinstance(value, torch.Tensor):
-                        del value
-                self.info.clear()
-
-            # Clear old_info references
-            if isinstance(old_info, dict):
-                for key, value in list(old_info.items()):
-                    if isinstance(value, torch.Tensor):
-                        del value
-                old_info.clear()
-
-            # Restore training state
-            if was_training:
-                self.train()
-
-            # Force garbage collection and CUDA cache clearing
-            gc.collect()
-            torch.cuda.empty_cache()
+        # Restore training state
+        if was_training:
+            self.train()
 
         camera.rescale_output_resolution(camera_scale_fac)  # type: ignore
         return coverage_score
+
+    @torch.no_grad()
+    def reset_coverage(self):
+        self.gauss_params["coverage_counts"].zero_()
+
+    @torch.no_grad()
+    def reset_fig(self):
+        self.gauss_params["fig"].zero_()
+        self.gauss_params["view_fig"].zero_()
 
 
 @dataclass
@@ -1310,6 +1375,109 @@ class FisherSplatModel(SplatfactoModel):
             "light_variance": light_variance_image,  # type: ignore
         }  # type: ignore
 
+    def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
+        """Computes and returns the losses dict.
+
+        Args:
+            outputs: the output to compute loss dict to
+            batch: ground truth batch corresponding to outputs
+            metrics_dict: dictionary of metrics, some of which we can use for loss
+        """
+        gt_img = self.composite_with_background(
+            self.get_gt_img(batch["image"]), outputs["background"]
+        )
+        pred_img = outputs["rgb"]
+
+        # Set masked part of both ground-truth and rendered image to black.
+        # This is a little bit sketchy for the SSIM loss.
+        if "mask" in batch:
+            # batch["mask"] : [H, W, 1]
+            mask = self._downscale_if_required(batch["mask"])
+            mask = mask.to(self.device)
+            assert mask.shape[:2] == gt_img.shape[:2] == pred_img.shape[:2]
+            gt_img = gt_img * mask
+            pred_img = pred_img * mask
+
+        Ll1 = torch.abs(gt_img - pred_img).mean()
+        simloss = 1 - self.ssim(
+            gt_img.permute(2, 0, 1)[None, ...], pred_img.permute(2, 0, 1)[None, ...]
+        )
+        if self.config.use_scale_regularization and self.step % 10 == 0:
+            scale_exp = torch.exp(self.scales)
+            scale_reg = (
+                torch.maximum(
+                    scale_exp.amax(dim=-1) / scale_exp.amin(dim=-1),
+                    torch.tensor(self.config.max_gauss_ratio),
+                )
+                - self.config.max_gauss_ratio
+            )
+            scale_reg = 0.1 * scale_reg.mean()
+        else:
+            scale_reg = torch.tensor(0.0).to(self.device)
+
+        loss_dict = {
+            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss,
+            "scale_reg": scale_reg,
+        }
+
+        # Losses for mcmc
+        if self.config.strategy == "mcmc":
+            if self.config.mcmc_opacity_reg > 0.0:
+                mcmc_opacity_reg = (
+                    self.config.mcmc_opacity_reg
+                    * torch.abs(torch.sigmoid(self.gauss_params["opacities"])).mean()
+                )
+                loss_dict["mcmc_opacity_reg"] = mcmc_opacity_reg
+            if self.config.mcmc_scale_reg > 0.0:
+                mcmc_scale_reg = (
+                    self.config.mcmc_scale_reg
+                    * torch.abs(torch.exp(self.gauss_params["scales"])).mean()
+                )
+                loss_dict["mcmc_scale_reg"] = mcmc_scale_reg
+
+        if self.training:
+            # Add loss from camera optimizer
+            self.camera_optimizer.get_loss_dict(loss_dict)
+            self.light_optimizer.get_loss_dict(loss_dict)
+            if self.config.use_bilateral_grid:
+                loss_dict["tv_loss"] = 10 * total_variation_loss(self.bil_grids.grids)
+
+        return loss_dict
+
+    def get_image_metrics_and_images(
+        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
+    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+        """Writes the test image outputs.
+
+        Args:
+            image_idx: Index of the image.
+            step: Current step.
+            batch: Batch of data.
+            outputs: Outputs of the model.
+
+        Returns:
+            A dictionary of metrics.
+        """
+        metrics_dict, images_dict = super().get_image_metrics_and_images(outputs, batch)
+        # shadow_rgb = outputs["shadow"].repeat(1, 1, 3)
+        # combined_rgb = torch.cat([images_dict["img"], shadow_rgb], dim=1)
+        # images_dict["img"] = combined_rgb
+
+        return metrics_dict, images_dict
+
+    def get_metrics_dict(self, outputs, batch) -> Dict[str, torch.Tensor]:
+        """Compute and returns metrics.
+
+        Args:
+            outputs: the output to compute loss dict to
+            batch: ground truth batch corresponding to outputs
+        """
+        metrics_dict = super().get_metrics_dict(outputs, batch)
+        metrics_dict["intensity"] = torch.exp(self.light_params["intensity"])
+        metrics_dict["ambient"] = torch.sigmoid(self.light_params["ambient"])
+        self.light_optimizer.get_metrics_dict(metrics_dict)
+        return metrics_dict
+
     @torch.no_grad()
     def prepare_rasterizer(
         self, camera: Cameras
@@ -1326,8 +1494,6 @@ class FisherSplatModel(SplatfactoModel):
         if not isinstance(camera, Cameras):
             print("Called get_outputs with not a camera")
             return {}  # type: ignore
-        # print(camera.shape)
-        # assert camera.shape[0] == 1, "Only one camera at a time"
 
         optimized_camera_to_world = camera.camera_to_worlds
 
@@ -1424,9 +1590,6 @@ class FisherSplatModel(SplatfactoModel):
         H: list of diag hessian on gaussians in the order of:
             means3D, shs, opacities, scales, rotations
         """
-        # pdb.set_trace()
-        # print(f"camera: {camera}")
-        # print(f"camera.shape: {camera.shape}")
         rasterizer, params = self.prepare_rasterizer(camera)
         means3D, shs, opacities, scales, rotations = params
 
@@ -1535,109 +1698,6 @@ class FisherSplatModel(SplatfactoModel):
 
         return uncern_maps
 
-    def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
-        """Computes and returns the losses dict.
-
-        Args:
-            outputs: the output to compute loss dict to
-            batch: ground truth batch corresponding to outputs
-            metrics_dict: dictionary of metrics, some of which we can use for loss
-        """
-        gt_img = self.composite_with_background(
-            self.get_gt_img(batch["image"]), outputs["background"]
-        )
-        pred_img = outputs["rgb"]
-
-        # Set masked part of both ground-truth and rendered image to black.
-        # This is a little bit sketchy for the SSIM loss.
-        if "mask" in batch:
-            # batch["mask"] : [H, W, 1]
-            mask = self._downscale_if_required(batch["mask"])
-            mask = mask.to(self.device)
-            assert mask.shape[:2] == gt_img.shape[:2] == pred_img.shape[:2]
-            gt_img = gt_img * mask
-            pred_img = pred_img * mask
-
-        Ll1 = torch.abs(gt_img - pred_img).mean()
-        simloss = 1 - self.ssim(
-            gt_img.permute(2, 0, 1)[None, ...], pred_img.permute(2, 0, 1)[None, ...]
-        )
-        if self.config.use_scale_regularization and self.step % 10 == 0:
-            scale_exp = torch.exp(self.scales)
-            scale_reg = (
-                torch.maximum(
-                    scale_exp.amax(dim=-1) / scale_exp.amin(dim=-1),
-                    torch.tensor(self.config.max_gauss_ratio),
-                )
-                - self.config.max_gauss_ratio
-            )
-            scale_reg = 0.1 * scale_reg.mean()
-        else:
-            scale_reg = torch.tensor(0.0).to(self.device)
-
-        loss_dict = {
-            "main_loss": (1 - self.config.ssim_lambda) * Ll1 + self.config.ssim_lambda * simloss,
-            "scale_reg": scale_reg,
-        }
-
-        # Losses for mcmc
-        if self.config.strategy == "mcmc":
-            if self.config.mcmc_opacity_reg > 0.0:
-                mcmc_opacity_reg = (
-                    self.config.mcmc_opacity_reg
-                    * torch.abs(torch.sigmoid(self.gauss_params["opacities"])).mean()
-                )
-                loss_dict["mcmc_opacity_reg"] = mcmc_opacity_reg
-            if self.config.mcmc_scale_reg > 0.0:
-                mcmc_scale_reg = (
-                    self.config.mcmc_scale_reg
-                    * torch.abs(torch.exp(self.gauss_params["scales"])).mean()
-                )
-                loss_dict["mcmc_scale_reg"] = mcmc_scale_reg
-
-        if self.training:
-            # Add loss from camera optimizer
-            self.camera_optimizer.get_loss_dict(loss_dict)
-            self.light_optimizer.get_loss_dict(loss_dict)
-            if self.config.use_bilateral_grid:
-                loss_dict["tv_loss"] = 10 * total_variation_loss(self.bil_grids.grids)
-
-        return loss_dict
-
-    def get_image_metrics_and_images(
-        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
-    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
-        """Writes the test image outputs.
-
-        Args:
-            image_idx: Index of the image.
-            step: Current step.
-            batch: Batch of data.
-            outputs: Outputs of the model.
-
-        Returns:
-            A dictionary of metrics.
-        """
-        metrics_dict, images_dict = super().get_image_metrics_and_images(outputs, batch)
-        # shadow_rgb = outputs["shadow"].repeat(1, 1, 3)
-        # combined_rgb = torch.cat([images_dict["img"], shadow_rgb], dim=1)
-        # images_dict["img"] = combined_rgb
-
-        return metrics_dict, images_dict
-
-    def get_metrics_dict(self, outputs, batch) -> Dict[str, torch.Tensor]:
-        """Compute and returns metrics.
-
-        Args:
-            outputs: the output to compute loss dict to
-            batch: ground truth batch corresponding to outputs
-        """
-        metrics_dict = super().get_metrics_dict(outputs, batch)
-        metrics_dict["intensity"] = torch.exp(self.light_params["intensity"])
-        metrics_dict["ambient"] = torch.sigmoid(self.light_params["ambient"])
-        self.light_optimizer.get_metrics_dict(metrics_dict)
-        return metrics_dict
-
     @torch.no_grad()
     def coverage_score_for_camera(
         self,
@@ -1666,62 +1726,23 @@ class FisherSplatModel(SplatfactoModel):
         # Set to eval mode for faster inference
         self.eval()
 
-        # Clear self.info before rendering to free memory from previous renders
-        # This is critical for preventing memory leaks during view selection
-        old_info = self.info
-        self.info = {}
+        # Render from camera - get_outputs will use render_mode="RGB+ED" which includes coverage
+        uncertainty = self.render_uncertainty_rgb_depth(
+            training_cameras,
+            test_camera,
+            rgb_weight=self.config.rgb_uncertainty_weight,
+            depth_weight=self.config.depth_uncertainty_weight,
+        )
 
-        # outputs = None
-        coverage_score = None
-        try:
-            # Render from camera - get_outputs will use render_mode="RGB+ED" which includes coverage
-            uncertainty = self.render_uncertainty_rgb_depth(
-                training_cameras,
-                test_camera,
-                rgb_weight=self.config.rgb_uncertainty_weight,
-                depth_weight=self.config.depth_uncertainty_weight,
-            )
-
-            # Sum all pixel values to get total coverage score
-            # Detach to avoid keeping references to the computation graph
-            coverage_score = []
-            for unc_map in uncertainty:
-                valid_mask = unc_map > 0
-                coverage_score.append(-(unc_map * valid_mask).sum() / valid_mask.sum())
-            # Delete uncertainty tensor after extracting score
-            del uncertainty
-
-        finally:
-            # Cleanup: explicitly delete intermediate outputs and clear self.info
-            # This is critical for preventing memory leaks during view selection
-            # if outputs is not None:
-            #     # Delete all tensors in outputs dict
-            #     for key, value in list(outputs.items()):
-            #         if isinstance(value, torch.Tensor):
-            #             del value
-            #     outputs.clear()
-            #     del outputs
-
-            # Clear self.info to free all intermediate tensors
-            if isinstance(self.info, dict):
-                for key, value in list(self.info.items()):
-                    if isinstance(value, torch.Tensor):
-                        del value
-                self.info.clear()
-
-            # Clear old_info references
-            if isinstance(old_info, dict):
-                for key, value in list(old_info.items()):
-                    if isinstance(value, torch.Tensor):
-                        del value
-                old_info.clear()
-
-            # Restore training state
-            if was_training:
-                self.train()
-
-            # Force garbage collection and CUDA cache clearing
-            gc.collect()
-            torch.cuda.empty_cache()
+        # Sum all pixel values to get total coverage score
+        # Detach to avoid keeping references to the computation graph
+        coverage_score = []
+        for unc_map in uncertainty:
+            valid_mask = unc_map > 0
+            coverage_score.append(-(unc_map * valid_mask).sum() / valid_mask.sum())
+       
+        # Restore training state
+        if was_training:
+            self.train()
 
         return coverage_score

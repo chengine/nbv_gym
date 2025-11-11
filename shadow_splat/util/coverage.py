@@ -161,6 +161,7 @@ def update_fig_for_frustum(
     far_plane: float = 1e10,
     radius_clip: float = 0.0,
     concentration: Optional[float] = 1.0,
+    update_attributes: bool = True,
 ) -> None:
     """Find gaussians in current camera frustum and increment the sphere-bin for the
     camera optical axis. Everything is done in-place on coverage_counts.
@@ -209,11 +210,26 @@ def update_fig_for_frustum(
     normal_weights = torch.exp(-(1.0 / (2.0 * variance[projected_pixel_ids])) * (depths - depth_image_flattened[projected_pixel_ids]) ** 2)
     normal_weights = normal_weights / torch.sqrt(2.0 * math.pi * variance[projected_pixel_ids])
 
-    # Update the accumulated transmittance
-    fig.index_put_((gaussian_ids,), normal_weights.unsqueeze(1)**2, accumulate=True)
-
     # Update the accumulated view transmittance
     combined_weight = sg_weights * normal_weights[:, None]  # [N, G]    
-    view_fig.index_put_((gaussian_ids,), combined_weight**2, accumulate=True)
-    
-    return True
+
+    if update_attributes:
+        # Update the accumulated transmittance
+        fig.index_put_((gaussian_ids,), normal_weights.unsqueeze(1)**2, accumulate=True)
+        view_fig.index_put_((gaussian_ids,), combined_weight**2, accumulate=True)
+
+        return None
+
+    else:
+        trans_sqr = torch.zeros_like(fig)
+        view_trans_sqr = torch.zeros_like(view_fig)
+
+        trans_sqr[gaussian_ids] = normal_weights**2
+        view_trans_sqr[gaussian_ids] = combined_weight**2
+
+        output = {
+            "transmittance_squared": trans_sqr,
+            "view_transmittance_squared": view_trans_sqr,
+        }
+
+        return output
