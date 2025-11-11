@@ -504,12 +504,12 @@ class ShadowSplatModel(SplatfactoModel):
 
         if not self.training:
             coverage = render[:, ..., 3:4].squeeze(0)
-            # lighted_dissimilarity = (1.0 - coverage) * (1.0 - shadow_img)
+            coverage_lit = (1.0 - coverage) * (1.0 - shadow_img)
             fig_img = render[:, ..., 4:5].squeeze(0)
             view_fig_img = render[:, ..., 5:6].squeeze(0)
         else:
             coverage = None
-            # lighted_dissimilarity = None
+            coverage_lit = None
             fig_img = None
             view_fig_img = None
 
@@ -592,7 +592,7 @@ class ShadowSplatModel(SplatfactoModel):
             "shadow": shadow_img,  # type: ignore
             "light_depth": light_depth_image,  # type: ignore
             "light_variance": light_variance_image,  # type: ignore
-            # "lighted_dissimilarity": lighted_dissimilarity,  # type: ignore
+            "coverage_lit": coverage_lit,  # type: ignore
         }  # type: ignore
 
     @torch.no_grad()
