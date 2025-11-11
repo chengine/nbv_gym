@@ -186,7 +186,11 @@ class OpticsViewSelector(ViewSelector):
 
             # Get all cameras from the dataset
             all_cameras = datamanager.train_dataset.cameras
-            light = datamanager.train_dataparser_outputs.lights[0]  # NOTE: assume static light
+
+            if self.coverage_metric in ["coverage_lit"]:
+                light = datamanager.train_dataparser_outputs.lights[0]  # NOTE: assume static light
+            else:
+                light = None
 
             # Extract camera origins for KD-tree filtering
             # We'll access cameras individually since Cameras doesn't support list indexing

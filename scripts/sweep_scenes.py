@@ -10,7 +10,7 @@ PROJECT_NAME = "next-best-view"
 # Datasets to sweep
 BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
 SCENES = [
-"caterpillar",
+# "caterpillar",
 "train",
 "ignatius",
 "shiny_statue_6pm",
@@ -23,9 +23,9 @@ DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
     # "coverage",
-    # "fig",
-    # "view_fig",
-    # "fisher_info",
+    "fig",
+    "view_fig",
+    "fisher_info",
     "random",
 ]
 

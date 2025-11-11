@@ -504,7 +504,10 @@ class ShadowSplatModel(SplatfactoModel):
 
         if not self.training:
             coverage = render[:, ..., 3:4].squeeze(0)
-            coverage_lit = (1.0 - coverage) * (1.0 - shadow_img)
+            if shadow_img is not None:
+                coverage_lit = (1.0 - coverage) * (1.0 - shadow_img)
+            else:
+                coverage_lit = None
             fig_img = render[:, ..., 4:5].squeeze(0)
             view_fig_img = render[:, ..., 5:6].squeeze(0)
         else:
