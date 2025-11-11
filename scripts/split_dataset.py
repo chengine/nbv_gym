@@ -14,7 +14,7 @@ EVAL_FRACTION = 0.1
 
 if __name__ == "__main__":
     data_path = Path(
-        os.path.expanduser("/home/shared/data_nerfstudio/ShadowSplat/blender/perseverance/")
+        os.path.expanduser("/home/shared/data_nerfstudio/ShadowSplat/captures/space_laces_4pm/")
     )
     transforms_path = data_path / "transforms.json"
     image_path = data_path / "images_split"
