@@ -182,19 +182,19 @@ bayes_rays = MethodSpecification(
         steps_per_eval_image=0,  # Disabled to avoid OOM on full image evals with ray-batched training
         steps_per_eval_batch=100,  # Use batch eval instead (faster and lower memory)
         steps_per_save=700,
-        steps_per_eval_all_images=0,  # Disabled for ray-batched training
+        steps_per_eval_all_images=1000,  # Disabled for ray-batched training
         max_num_iterations=30000,
         mixed_precision=False,
         pipeline=ViewSelectionPipelineConfig(
-            # Use ray-batched datamanager with view selection (proper nerfacto architecture)
+            # Use ray-batched datamanager with view selection (nerfacto)
             datamanager=BayesRaysParallelDataManagerConfig(
                 dataparser=NerfstudioDataParserConfig(),
                 train_num_rays_per_batch=4096,  # Standard nerfacto setting
                 eval_num_rays_per_batch=4096,
-                start_num_views=1,  # Start with 1 view, expand via BayesRays
+                start_num_views=10,  # Start with 1 view, expand via BayesRays
             ),
             model=NerfactoModelConfig(),  # Use standard nerfacto (no wrapper needed)
-            add_every_n_steps=1000,
+            add_every_n_steps=200,
             add_num_views=1,
             view_selector="bayes",
             bayes_reduce_mode="mean",

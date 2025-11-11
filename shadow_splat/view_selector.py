@@ -202,7 +202,8 @@ class BayesRaysViewSelector(ViewSelector):
 
         if model is None or datamanager is None or hessian is None:
             # Fall back to random if required context is missing
-            print("Warning: Missing context for BayesRays view selection, falling back to random.")
+            print("[DEBUG] Warning: Missing context for BayesRays view selection, falling back to random.")
+            # raise NotImplementedError("Missing context for BayesRays view selection.")
             k = min(max(1, num_to_select), len(remaining_indices))
             return random.sample(remaining_indices, k=k)
 
@@ -215,13 +216,18 @@ class BayesRaysViewSelector(ViewSelector):
         # Score each candidate camera using uncertainty
         scores = []
 
+        # Debug: Check model type and method availability
+        # print(f"[BayesRays] Model type: {type(model).__name__}, Module: {type(model).__module__}")
+        # print(f"[BayesRays] Model has uncertainty_score_for_camera: {hasattr(model, 'uncertainty_score_for_camera')}")
+
         # Check if model has uncertainty scoring capability
         has_uncertainty_method = hasattr(model, 'uncertainty_score_for_camera') and callable(getattr(model, 'uncertainty_score_for_camera'))
 
         if not has_uncertainty_method:
             # Model doesn't support uncertainty scoring (e.g., standard Nerfacto)
             # Fall back to random selection for candidates
-            print("Warning: Model does not support uncertainty scoring, falling back to random selection.")
+            print("[DEBUG] Warning: Model does not support uncertainty scoring, falling back to random selection.")
+            # raise NotImplementedError("Model does not support uncertainty scoring.")
             k = min(num_to_select, len(candidate_indices))
             return random.sample(candidate_indices, k=k)
 
@@ -241,6 +247,44 @@ class BayesRaysViewSelector(ViewSelector):
         scores.sort(key=lambda x: x[1], reverse=True)
         k = min(num_to_select, len(scores))
         selected_indices = [idx for idx, _ in scores[:k]]
+
+        # Render uncertainty map for the top selected camera
+        if selected_indices and k > 0:
+            top_selected_idx = selected_indices[0]
+            top_camera = all_cameras[top_selected_idx : top_selected_idx + 1].to(model.device)
+            try:
+                print(f"[BayesRays] Rendering uncertainty map for selected camera {top_selected_idx}...")
+                _, uncertainty_map = model.uncertainty_score_for_camera(
+                    top_camera,
+                    hessian=hessian,
+                    reduce_mode=self.reduce_mode,
+                    lod=self.lod,
+                    return_uncertainty_map=True
+                )
+
+                # Save uncertainty map as image
+                from pathlib import Path
+                import numpy as np
+                try:
+                    from PIL import Image
+
+                    # Convert to numpy and scale to 0-255
+                    unc_np = uncertainty_map.cpu().numpy()
+                    unc_np = (unc_np * 255).astype(np.uint8)
+
+                    # Create output directory if needed
+                    output_dir = Path("uncertainty_maps")
+                    output_dir.mkdir(exist_ok=True)
+
+                    # Save image
+                    img = Image.fromarray(unc_np, mode='L')
+                    output_path = output_dir / f"uncertainty_camera_{top_selected_idx}.png"
+                    img.save(output_path)
+                    print(f"[BayesRays] Saved uncertainty map to {output_path}")
+                except ImportError:
+                    print("[BayesRays] PIL not available, skipping uncertainty map visualization")
+            except Exception as e:
+                print(f"[BayesRays] Failed to render uncertainty map: {e}")
 
         return selected_indices
 

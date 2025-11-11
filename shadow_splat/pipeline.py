@@ -220,6 +220,7 @@ class ViewSelectionPipeline(VanillaPipeline):
                 try:
                     # Only recompute Hessian if we haven't already at this step
                     if self._hessian_computed_at_step != step:
+                        print(f"[DEBUG] Computing Hessian at step {step}")
                         hessian = self._hessian_computer.compute_hessian_from_datamanager(
                             model=self._model,
                             datamanager=self.datamanager,
@@ -227,12 +228,15 @@ class ViewSelectionPipeline(VanillaPipeline):
                         )
                         self._cached_hessian = hessian
                         self._hessian_computed_at_step = step
+                        # print(f"[DEBUG] Hessian computation complete. Hessian shape: {hessian.shape if hessian is not None else None}")
                     else:
                         hessian = self._cached_hessian
+                        # print(f"[DEBUG] Using cached Hessian from step {self._hessian_computed_at_step}")
                 except Exception as e:
                     print(f"Warning: Failed to compute Hessian for view selection: {e}")
                     hessian = None
 
+            # print(f"[DEBUG] About to call expand_active_set with hessian={hessian is not None}")
             try:
                 self.datamanager.expand_active_set(
                     k=self.config.add_num_views, step=step, model=self._model, pipeline=self, hessian=hessian

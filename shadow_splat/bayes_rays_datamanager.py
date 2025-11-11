@@ -1,7 +1,7 @@
 """
 Ray-batched datamanager for BayesRays view selection with nerfacto.
 
-This properly integrates view selection into nerfstudio's ray-batching architecture,
+This integrates view selection into nerfstudio's ray-batching architecture,
 which is how nerfacto is designed to work (not full-image rendering).
 """
 
@@ -25,7 +25,7 @@ class BayesRaysParallelDataManagerConfig(ParallelDataManagerConfig):
     """Configuration for BayesRays parallel datamanager with view selection.
 
     Uses ray-batched rendering (nerfacto's native approach) combined with
-    progressive view selection via BayesRays uncertainty estimation.
+    progressive view selection via BayesRays C estimation.
     """
 
     _target: Type = field(default_factory=lambda: BayesRaysParallelDataManager)
