@@ -12,12 +12,12 @@ PROJECT_NAME = "next-best-view"
 # BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
 BASE_DATA_DIR = pathlib.Path("data")
 SCENES = [
-    "tandt/caterpillar",
-    "tandt/train",
-    "tandt/ignatius",
-    "captures/shiny_statue_6pm",
-    "captures/space_laces_4pm",
-    "captures/chair_3pm",
+    # "caterpillar",
+    "train",
+    "ignatius",
+    "shiny_statue_6pm",
+    "space_laces_4pm",
+    "chair_3pm",
 ]
 DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 
@@ -25,9 +25,9 @@ DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
     # "coverage",
-    # "fig",
-    # "view_fig",
-    # "fisher_info",
+    "fig",
+    "view_fig",
+    "fisher_info",
     "random",
 ]
 
@@ -114,6 +114,7 @@ def main() -> None:
             cmd = build_cmd(ds, method)
             print("Running:", " ".join(shlex.quote(c) for c in cmd))
             subprocess.run(cmd, check=True)
+
 
 if __name__ == "__main__":
     main()
