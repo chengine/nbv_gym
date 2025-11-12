@@ -139,7 +139,14 @@ def build_cmd(dataset: str, method: str) -> list[str]:
         if method == "bayes-rays":
             cmd.extend(["--data", dataset])
         elif method == "nerf-random":
-            cmd.extend(["--data", dataset])
+            cmd.extend([
+                "--data", dataset,
+                "--trainer.steps_per_eval_batch", "100",
+                "--trainer.steps_per_eval_all_images", "1000",
+                "--trainer.max_num_iterations", "30000",
+                "--pipeline.datamanager.train_num_rays_per_batch", "4096",
+                "--pipeline.datamanager.start_num_views", "160",  # 30000 steps / 200 steps_per_view_add + 1
+            ])
         elif method == "nerfacto":
             cmd.extend(["--data", dataset])
         else:
