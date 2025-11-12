@@ -50,8 +50,9 @@ METHODS = [
     # "view_fig",
     # "fisher_info",
     # "random",
-    "nerf-random",  # NeRF with random view selection
-    # "bayes-rays"  # BayesRays with Nerfacto ray-batched training
+    # "nerf-random",  # NeRF with random view selection
+    # "nerfacto",  # Nerfacto
+    "bayes-rays"  # BayesRays with Nerfacto ray-batched training
 ]
 
 # Visualization backends. Example: "viewer+wandb" or just "wandb"
@@ -84,6 +85,11 @@ def build_cmd(dataset: str, method: str) -> list[str]:
 
     if method == "nerf-random":
         model = "bayes-rays"
+        view_selector = "random"
+        extra_metric_args = []
+        exp_suffix = f"{dataset_name}__{method}"
+    elif method == "nerfacto":
+        model = "nerfacto"
         view_selector = "random"
         extra_metric_args = []
         exp_suffix = f"{dataset_name}__{method}"
@@ -133,6 +139,8 @@ def build_cmd(dataset: str, method: str) -> list[str]:
         if method == "bayes-rays":
             cmd.extend(["--data", dataset])
         elif method == "nerf-random":
+            cmd.extend(["--data", dataset])
+        elif method == "nerfacto":
             cmd.extend(["--data", dataset])
         else:
             # Gaussian splat methods use shadow-splat-data parser

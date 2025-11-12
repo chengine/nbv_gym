@@ -6,9 +6,18 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from nerfstudio.models.nerfacto import NerfactoModel
+from nerfstudio.models.instant_ngp import NGPModel
+from nerfstudio.models.mipnerf import MipNerfModel
+from nerfstudio.field_components.field_heads import FieldHeadNames
+from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.field_components.encodings import HashEncoding
-from bayesrays.utils.utils import normalize_point_coords, find_grid_indices
-
+from nerfstudio.utils.math import Gaussians, conical_frustum_to_gaussian
+# from bayesrays.utils.utils import normalize_point_coords, find_grid_indices
+from nerfstudio.utils import colors
+from nerfstudio.model_components.losses import (
+    orientation_loss,
+    pred_normal_loss
+)
 
 class HessianComputer:
     """Computes Hessian for BayesRays uncertainty from training data."""
@@ -242,3 +251,162 @@ class HessianComputer:
             outputs["ray_samples_list"] = ray_samples_list
 
         return outputs, points, offsets
+
+
+def normalize_point_coords(points, aabb, distortion):
+    ''' coordinate normalization process according to density_feild.py in nerfstudio'''
+    if distortion is not None:
+        pos = distortion(points)
+        pos = (pos + 2.0) / 4.0
+    else:        
+        pos = SceneBox.get_normalized_positions(points, aabb)
+    selector = ((pos > 0.0) & (pos < 1.0)).all(dim=-1) #points outside aabb are filtered out
+    pos = pos * selector[..., None]
+    return pos, selector
+
+def find_grid_indices(points, aabb, distortion, lod, device, zero_out=True):
+    pos, selector = normalize_point_coords(points, aabb, distortion)
+    pos, selector = pos.view(-1, 3), selector[..., None].view(-1, 1)
+    uncertainty_lod = 2 ** lod
+    coords = (pos * uncertainty_lod).unsqueeze(0)
+    inds = torch.zeros((8, pos.shape[0]), dtype=torch.int32, device=device)
+    coefs = torch.zeros((8, pos.shape[0]), device=device)
+    corners = torch.tensor(
+        [[0, 0, 0, 0], [1, 0, 0, 1], [2, 0, 1, 0], [3, 0, 1, 1], [4, 1, 0, 0], [5, 1, 0, 1], [6, 1, 1, 0],
+         [7, 1, 1, 1]], device=device)
+    corners = corners.unsqueeze(1)
+    inds[corners[:, :, 0].squeeze(1)] = (
+            (torch.floor(coords[..., 0]) + corners[:, :, 1]) * uncertainty_lod * uncertainty_lod +
+            (torch.floor(coords[..., 1]) + corners[:, :, 2]) * uncertainty_lod +
+            (torch.floor(coords[..., 2]) + corners[:, :, 3])).int()
+    coefs[corners[:, :, 0].squeeze(1)] = torch.abs(
+        coords[..., 0] - (torch.floor(coords[..., 0]) + (1 - corners[:, :, 1]))) * torch.abs(
+        coords[..., 1] - (torch.floor(coords[..., 1]) + (1 - corners[:, :, 2]))) * torch.abs(
+        coords[..., 2] - (torch.floor(coords[..., 2]) + (1 - corners[:, :, 3])))
+    if zero_out:
+        coefs[corners[:, :, 0].squeeze(1)] *= selector[..., 0].unsqueeze(0)  # zero out the contribution of points outside aabb box
+
+    return inds, coefs
+
+def get_gaussian_blob_new(self) -> Gaussians: #for mipnerf
+    """Calculates guassian approximation of conical frustum.
+
+    Returns:
+        Conical frustums approximated by gaussian distribution.
+    """
+    # Cone radius is set such that the square pixel_area matches the cone area.
+    cone_radius = torch.sqrt(self.pixel_area) / 1.7724538509055159  # r = sqrt(pixel_area / pi)
+    
+    return conical_frustum_to_gaussian(
+        origins=self.origins + self.offsets, #deforms Gaussian mean
+        directions=self.directions,
+        starts=self.starts,
+        ends=self.ends,
+        radius=cone_radius,
+    )
+
+
+def get_uncertainty(self, points):
+    aabb = self.scene_box.aabb.to(points.device)
+    ## samples outside aabb will have 0 coeff and hence 0 uncertainty. To avoid problems with these samples we set zero_out=False
+    inds, coeffs = find_grid_indices(points, aabb, self.field.spatial_distortion ,self.lod, points.device, zero_out=False)
+    cfs_2 = (coeffs**2)/torch.sum((coeffs**2),dim=0, keepdim=True)
+    uns = self.un[inds.long()] #[8,N]
+    un_points = torch.sqrt(torch.sum((uns*cfs_2),dim=0)).unsqueeze(1)
+    
+    #for stability in volume rendering we use log uncertainty
+    un_points = torch.log10(un_points+1e-12)
+    un_points = un_points.view((points.shape[0], points.shape[1],1))
+    return un_points
+
+def get_output_nerfacto_new(self, ray_bundle):
+    ''' reimplementation of get_output function from models because of lack of proper interface to outputs dict'''
+#     original_outputs = self.__class__.get_outputs(self, ray_bundle)  # Call original get_outputs (this is slower than just copying the original method here)
+    
+    N = self.N
+    reg_lambda = 1e-4 /( (2**self.lod)**3)
+    H = self.hessian/N + reg_lambda
+    self.un = 1/H
+            
+    max_uncertainty = 6 #approximate upper bound of the function log10(1/(x+lambda)) when lambda=1e-4/(256^3) and x is the hessian
+    min_uncertainty = -3 #approximate lower bound of that function (cutting off at hessian = 1000)
+    density_fns_new = []
+    if self.filter_out:
+        for i in self.density_fns:
+            density_fns_new.append(lambda x, i=i: i(x) * (self.get_uncertainty(x)<= self.filter_thresh*max_uncertainty))
+    else:
+        density_fns_new = self.density_fns
+    
+    if pkg_resources.get_distribution("nerfstudio").version >= "0.3.1":
+        ray_samples, weights_list, ray_samples_list = self.proposal_sampler(ray_bundle, density_fns=density_fns_new)
+    else:
+        ray_samples,_, weights_list, ray_samples_list = self.proposal_sampler(ray_bundle, density_fns=density_fns_new)
+    field_outputs = self.field(ray_samples, compute_normals=self.config.predict_normals)
+    points = ray_samples.frustums.get_positions()
+    un_points = self.get_uncertainty(points)
+
+    #get weights
+    if self.filter_out:
+        density = field_outputs[FieldHeadNames.DENSITY] * (un_points <= self.filter_thresh*max_uncertainty)
+    else:
+        density = field_outputs[FieldHeadNames.DENSITY]
+    weights = ray_samples.get_weights(density)
+    
+    uncertainty = torch.sum(weights * un_points, dim=-2) 
+    uncertainty += (1-torch.sum(weights,dim=-2)) * min_uncertainty #alpha blending
+    
+    #normalize into acceptable range for rendering
+    uncertainty = torch.clip(uncertainty, min_uncertainty, max_uncertainty)
+    uncertainty = (uncertainty-min_uncertainty)/(max_uncertainty-min_uncertainty)
+    
+    if self.white_bg:
+        self.renderer_rgb.background_color=colors.WHITE 
+    elif self.black_bg:
+        self.renderer_rgb.background_color=colors.BLACK     
+    rgb = self.renderer_rgb(rgb=field_outputs[FieldHeadNames.RGB], weights=weights)
+    depth = self.renderer_depth(weights=weights, ray_samples=ray_samples)
+    accumulation = self.renderer_accumulation(weights=weights)
+
+    original_outputs = {
+        "rgb": rgb,
+        "accumulation": accumulation,
+        "depth": depth,
+    }
+                                    
+    original_outputs['uncertainty'] = uncertainty 
+    if self.training:
+        original_outputs["weights_list"] = weights_list
+        original_outputs["ray_samples_list"] = ray_samples_list
+    if self.config.predict_normals:
+        normals = self.renderer_normals(normals=field_outputs[FieldHeadNames.NORMALS], weights=weights)
+        pred_normals = self.renderer_normals(field_outputs[FieldHeadNames.PRED_NORMALS], weights=weights)
+        original_outputs["normals"] = self.normals_shader(normals)
+        original_outputs["pred_normals"] = self.normals_shader(pred_normals)    
+
+    if self.training and self.config.predict_normals:
+        original_outputs["rendered_orientation_loss"] = orientation_loss(
+            weights.detach(), field_outputs[FieldHeadNames.NORMALS], ray_bundle.directions
+        )
+
+        original_outputs["rendered_pred_normal_loss"] = pred_normal_loss(
+            weights.detach(),
+            field_outputs[FieldHeadNames.NORMALS].detach(),
+            field_outputs[FieldHeadNames.PRED_NORMALS],
+        )
+
+    for i in range(self.config.num_proposal_iterations):
+        original_outputs[f"prop_depth_{i}"] = self.renderer_depth(weights=weights_list[i], ray_samples=ray_samples_list[i])
+
+
+    return original_outputs
+
+def get_output_fn(model):
+
+    if isinstance(model, NerfactoModel):
+        return get_output_nerfacto_new
+    elif isinstance(model, NGPModel):
+        return get_output_ngp_new
+    elif isinstance(model, MipNerfModel):
+        return get_output_mipnerf_new
+    else:
+        raise Exception("Sorry, this model is not currently supported.")
