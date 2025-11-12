@@ -510,11 +510,15 @@ class ShadowSplatModel(SplatfactoModel):
                 coverage_lit = None
             fig_img = render[:, ..., 4:5].squeeze(0)
             view_fig_img = render[:, ..., 5:6].squeeze(0)
+            fig_diag_img = -render[:, ..., 6:7].squeeze(0)          # NOTE: We negate this because we want to maximize this quantity, but view selection minimizes
+            view_fig_diag_img = -render[:, ..., 7:8].squeeze(0)     # NOTE: We negate this because we want to maximize this quantity, but view selection minimizes
         else:
             coverage = None
             coverage_lit = None
             fig_img = None
             view_fig_img = None
+            fig_diag_img = None
+            view_fig_diag_img = None
 
         # apply bilateral grid
         if self.config.use_bilateral_grid and self.training:
@@ -592,6 +596,8 @@ class ShadowSplatModel(SplatfactoModel):
             "coverage": coverage,  # type: ignore
             "fig": fig_img,  # type: ignore
             "view_fig": view_fig_img,  # type: ignore
+            "fig_diag": fig_diag_img,  # type: ignore
+            "view_fig_diag": view_fig_diag_img,  # type: ignore
             "shadow": shadow_img,  # type: ignore
             "light_depth": light_depth_image,  # type: ignore
             "light_variance": light_variance_image,  # type: ignore
@@ -902,6 +908,8 @@ class ShadowSplatModel(SplatfactoModel):
         else:
             raise ValueError(f"Invalid coverage metric: {self.coverage_metric}")
 
+        raise NotImplementedError("Not implemented")
+
         # Update coverage metric for training cameras
 
         picks = min(num_rollouts, len(test_cameras))
@@ -926,26 +934,13 @@ class ShadowSplatModel(SplatfactoModel):
             candidate_indices.remove(best_idx)
 
             # Update internal state incrementally for ShadowSplatModel
-            if isinstance(model, ShadowSplatModel):
-                best_cam = all_cameras[best_idx:best_idx+1]
-                if self.coverage_metric == "coverage":
-                    model.update_coverage([best_cam])
-                else:  # "fig" or "view_fig"
-                    model.update_fig([best_cam])
+            best_cam = all_cameras[best_idx:best_idx+1]
+            if self.coverage_metric == "coverage":
+                model.update_coverage([best_cam])
+            else:  # "fig" or "view_fig"
+                model.update_fig([best_cam])
 
-                print("Updating hypothetical coverage/fig using camera", best_idx)
-
-            # Memory hygiene between iterations
-            if hasattr(model, "info"):
-                if isinstance(model.info, dict):
-                    for _, v in list(model.info.items()):
-                        if isinstance(v, torch.Tensor):
-                            del v
-                    model.info.clear()
-                model.info = {}
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            print("Updating hypothetical coverage/fig using camera", best_idx)
 
         camera_scale_fac = self._get_downscale_factor()
         camera.rescale_output_resolution(1 / camera_scale_fac)

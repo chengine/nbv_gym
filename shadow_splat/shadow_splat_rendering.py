@@ -2954,6 +2954,8 @@ def rasterization_with_coverage(
         # Concatenate coverage_metric with colors
         colors = torch.cat((colors, coverage_metric[None, ..., None]), dim=-1)
 
+    ### NOTE: We should test if the sqrt on the fig and view_fig is better than just using the fig and view_fig (which are squared quantities)
+
     if fig is not None:
         colors = torch.cat((colors, fig[None]), dim=-1)
 
@@ -2961,6 +2963,13 @@ def rasterization_with_coverage(
         sg_weights = spherical_gaussian_weights(input_view_dirs=dirs.squeeze(0), bin_dirs=bin_dirs, beta=concentration)       # [N, G]
         view_fig_metric = torch.sum(view_fig * sg_weights, dim=-1, keepdim=True)       # [N, 1]
         colors = torch.cat((colors, view_fig_metric[None]), dim=-1)
+
+    if fig is not None:
+        colors = torch.cat((colors, 1./torch.sqrt(fig[None] + 1e-10)), dim=-1)
+
+    if view_fig is not None:
+        view_fig_diag_metric = torch.sum(1./torch.sqrt(view_fig + 1e-10) * sg_weights, dim=-1, keepdim=True)       # [N, 1]
+        colors = torch.cat((colors, view_fig_diag_metric[None]), dim=-1)
 
     ### END ###
 
