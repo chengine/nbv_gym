@@ -87,15 +87,23 @@ class BayesRaysParallelDataManager(ParallelDataManager):
             step: Current training step (for logging)
             **kwargs: Additional args passed to view selector (e.g., hessian, model)
         """
+        print(f"[DEBUG expand_active_set] Called with k={k}, step={step}, view_selector={self.view_selector is not None}")
+
         if not self.all_train_indices:
+            print(f"[DEBUG expand_active_set] No train indices available, returning")
             return
 
         remaining = list(set(self.all_train_indices) - set(self.active_train_indices))
         if not remaining:
+            print(f"[DEBUG expand_active_set] No remaining indices, all views are active, returning")
             return
+
+        print(f"[DEBUG expand_active_set] Active: {len(self.active_train_indices)}, Remaining: {len(remaining)}")
 
         # Use view selector if available, otherwise fall back to random
         if self.view_selector is not None:
+            print(f"[DEBUG expand_active_set] Using view selector: {type(self.view_selector).__name__}")
+            print(f"[DEBUG expand_active_set] kwargs keys: {list(kwargs.keys())}")
             add = self.view_selector.select_views(
                 active_indices=self.active_train_indices,
                 remaining_indices=remaining,
@@ -106,6 +114,7 @@ class BayesRaysParallelDataManager(ParallelDataManager):
             )
         else:
             # Fallback to random selection
+            print(f"[DEBUG expand_active_set] No view selector set, falling back to random selection")
             add = random.sample(remaining, k=min(max(1, k), len(remaining)))
 
         self.active_train_indices.extend(add)

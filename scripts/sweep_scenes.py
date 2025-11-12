@@ -8,7 +8,7 @@ from datetime import datetime
 USE_WANDB = True
 
 # WandB configuration
-WANDB_ENTITY = None  # Set to your WandB username if needed, otherwise uses default
+WANDB_ENTITY = "chengine-stanford-university"  # Set to your WandB username if needed, otherwise uses default
 WANDB_PROJECT_PREFIX = "next-best-view"
 
 # If WandB is enabled, try to initialize it
@@ -34,11 +34,11 @@ BASE_DATA_DIR = pathlib.Path("/home/admin/StanfordMSL/shadow_splat/data")
 SCENES = [
 # "caterpillar",
 # "train",
-# "ignatius",
+"ignatius",
 # "shiny_statue_6pm",
 # "space_laces_4pm",
 # "chair_3pm",
-"master_chief_cycles"
+# "master_chief_cycles"
 ]
 DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 
@@ -50,12 +50,12 @@ METHODS = [
     # "view_fig",
     # "fisher_info",
     # "random",
-    # "bayes",  # BayesRays with Gaussian splatting
-    "bayes-rays"  # BayesRays with Nerfacto ray-batched training
+    "nerf-random",  # NeRF with random view selection
+    # "bayes-rays"  # BayesRays with Nerfacto ray-batched training
 ]
 
 # Visualization backends. Example: "viewer+wandb" or just "wandb"
-VIS = "viewer+wandb"
+VIS = "wandb"
 
 # Quit the viewer on train completion to avoid hangs in sweeps
 QUIT_VIEWER_ON_DONE = True
@@ -82,8 +82,8 @@ def build_cmd(dataset: str, method: str) -> list[str]:
     dataset_name = pathlib.Path(dataset.rstrip("/\\")).name
     ts = datetime.now().strftime("%Y%m%d-%H%M")
 
-    if method == "random":
-        model = "shadow-splat"
+    if method == "nerf-random":
+        model = "bayes-rays"
         view_selector = "random"
         extra_metric_args = []
         exp_suffix = f"{dataset_name}__{method}"
@@ -126,14 +126,13 @@ def build_cmd(dataset: str, method: str) -> list[str]:
             "--experiment-name", exp_name,
         ]
 
-        # Add run name for WandB tracking
-        if USE_WANDB:
-            cmd.extend(["--run-name", run_name])
 
         cmd.extend(["--viewer.quit-on-train-completion", str(QUIT_VIEWER_ON_DONE)])
 
         # BayesRays uses standard nerfstudio data format, others use shadow-splat
         if method == "bayes-rays":
+            cmd.extend(["--data", dataset])
+        elif method == "nerf-random":
             cmd.extend(["--data", dataset])
         else:
             # Gaussian splat methods use shadow-splat-data parser

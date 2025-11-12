@@ -254,37 +254,108 @@ class BayesRaysViewSelector(ViewSelector):
             top_camera = all_cameras[top_selected_idx : top_selected_idx + 1].to(model.device)
             try:
                 print(f"[BayesRays] Rendering uncertainty map for selected camera {top_selected_idx}...")
-                _, uncertainty_map = model.uncertainty_score_for_camera(
+                result = model.uncertainty_score_for_camera(
                     top_camera,
                     hessian=hessian,
                     reduce_mode=self.reduce_mode,
                     lod=self.lod,
-                    return_uncertainty_map=True
+                    return_uncertainty_map=True,
+                    downscale_factor=4.0  # Use 4x downsampling for faster visualization
                 )
 
-                # Save uncertainty map as image
-                from pathlib import Path
-                import numpy as np
-                try:
-                    from PIL import Image
+                # Unpack result - should be tuple (score, map) when return_uncertainty_map=True
+                # print(f"[BayesRays] uncertainty_score_for_camera returned type: {type(result)}")
+                if isinstance(result, tuple):
+                    score, uncertainty_map = result
+                    # print(f"[BayesRays] Unpacked tuple: score={score.item() if hasattr(score, 'item') else score}, map shape={uncertainty_map.shape}")
+                else:
+                    # print(f"[BayesRays] ERROR: Expected tuple, got {type(result)}")
+                    uncertainty_map = None
 
-                    # Convert to numpy and scale to 0-255
-                    unc_np = uncertainty_map.cpu().numpy()
-                    unc_np = (unc_np * 255).astype(np.uint8)
+                # Save uncertainty map with colormap (BayesRays style)
+                if uncertainty_map is not None:
+                    from pathlib import Path
+                    import numpy as np
+                    import os
+                    try:
+                        from nerfstudio.utils import colormaps
+                        from PIL import Image
 
-                    # Create output directory if needed
-                    output_dir = Path("uncertainty_maps")
-                    output_dir.mkdir(exist_ok=True)
+                        # print(f"[BayesRays] Creating uncertainty visualization...")
+                        # print(f"[BayesRays] uncertainty_map type: {type(uncertainty_map)}, shape: {uncertainty_map.shape}, dtype: {uncertainty_map.dtype}")
 
-                    # Save image
-                    img = Image.fromarray(unc_np, mode='L')
-                    output_path = output_dir / f"uncertainty_camera_{top_selected_idx}.png"
-                    img.save(output_path)
-                    print(f"[BayesRays] Saved uncertainty map to {output_path}")
-                except ImportError:
-                    print("[BayesRays] PIL not available, skipping uncertainty map visualization")
+                        # Ensure uncertainty_map is a tensor on CPU
+                        if hasattr(uncertainty_map, 'cpu'):
+                            uncertainty_map = uncertainty_map.cpu()
+
+                        # Ensure it's in the right format for colormap: should be [H, W] or [H, W, 1]
+                        if uncertainty_map.dim() == 2:
+                            # Add channel dimension if needed
+                            uncertainty_map_for_colormap = uncertainty_map.unsqueeze(-1)  # [H, W] -> [H, W, 1]
+                        else:
+                            uncertainty_map_for_colormap = uncertainty_map
+
+                        # print(f"[BayesRays] uncertainty_map_for_colormap shape: {uncertainty_map_for_colormap.shape}")
+
+                        # Apply inferno colormap like BayesRays render_uncertainty.py does
+                        uncertainty_map_colored = colormaps.apply_colormap(
+                            image=uncertainty_map_for_colormap,
+                            colormap_options=colormaps.ColormapOptions(colormap='inferno')
+                        )
+                        # print(f"[BayesRays] Colormap applied. Shape: {uncertainty_map_colored.shape}, dtype: {uncertainty_map_colored.dtype}")
+
+                        # Convert to numpy and scale to 0-255
+                        unc_colored_np = uncertainty_map_colored.cpu().numpy()
+                        # print(f"[BayesRays] Converted to numpy. Shape: {unc_colored_np.shape}, dtype: {unc_colored_np.dtype}, value range: [{unc_colored_np.min():.3f}, {unc_colored_np.max():.3f}]")
+
+                        # Colormap output is typically [0, 1] float, scale to 0-255
+                        if unc_colored_np.dtype in [np.float32, np.float64]:
+                            unc_colored_np = (unc_colored_np * 255).astype(np.uint8)
+                        elif unc_colored_np.max() <= 1.0:
+                            unc_colored_np = (unc_colored_np * 255).astype(np.uint8)
+
+                        # print(f"[BayesRays] Scaled to 0-255. Shape: {unc_colored_np.shape}, dtype: {unc_colored_np.dtype}, value range: [{unc_colored_np.min()}, {unc_colored_np.max()}]")
+
+                        # Create output directory if needed
+                        output_dir = Path("uncertainty_maps")
+                        output_dir.mkdir(exist_ok=True, parents=True)
+
+                        cwd = os.getcwd()
+                        full_path = output_dir.resolve()
+                        # print(f"[BayesRays] Current working directory: {cwd}")
+                        # print(f"[BayesRays] Output directory: {output_dir} (absolute: {full_path})")
+
+                        # Determine image mode based on shape
+                        if unc_colored_np.ndim == 3 and unc_colored_np.shape[2] == 3:
+                            mode = 'RGB'
+                        elif unc_colored_np.ndim == 3 and unc_colored_np.shape[2] == 1:
+                            mode = 'L'
+                            unc_colored_np = unc_colored_np.squeeze(2)
+                        elif unc_colored_np.ndim == 2:
+                            mode = 'L'
+                        else:
+                            # print(f"[BayesRays] ERROR: Unexpected image shape {unc_colored_np.shape}")
+                            mode = None
+
+                        if mode is not None:
+                            # Save colored uncertainty image
+                            img = Image.fromarray(unc_colored_np, mode=mode)
+                            output_path = output_dir / f"uncertainty_camera_{top_selected_idx}.png"
+                            img.save(output_path)
+                            # print(f"[BayesRays] Saved uncertainty map to {output_path} (4x downsampled, inferno colormap, mode={mode})")
+                            # print(f"[BayesRays] File exists at {output_path}: {output_path.exists()}")
+                    except ImportError as e:
+                        print(f"[BayesRays] Import error: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    except Exception as e:
+                        import traceback
+                        print(f"[BayesRays] Failed to save visualization: {e}")
+                        traceback.print_exc()
             except Exception as e:
+                import traceback
                 print(f"[BayesRays] Failed to render uncertainty map: {e}")
+                traceback.print_exc()
 
         return selected_indices
 
