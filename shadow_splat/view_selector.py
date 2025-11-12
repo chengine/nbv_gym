@@ -1,7 +1,6 @@
 """View selector for progressive view selection in Shadow Splat"""
 
 import random
-import gc
 from typing import List, Optional
 from abc import ABC, abstractmethod
 import numpy as np
@@ -222,9 +221,7 @@ class OpticsViewSelector(ViewSelector):
                     model.reset_coverage()
 
                     if len(active_indices) > 0:
-                        training_cameras = [
-                            all_cameras[idx : idx + 1] for idx in active_indices
-                        ]
+                        training_cameras = [all_cameras[idx : idx + 1] for idx in active_indices]
                         model.update_coverage(training_cameras)
                     else:
                         # If there are no active views, we don't need to do anything
@@ -234,9 +231,7 @@ class OpticsViewSelector(ViewSelector):
                     model.reset_fig()
 
                     if len(active_indices) > 0:
-                        training_cameras = [
-                            all_cameras[idx : idx + 1] for idx in active_indices
-                        ]
+                        training_cameras = [all_cameras[idx : idx + 1] for idx in active_indices]
                         model.update_fig(training_cameras)
                     else:
                         # If there are no active views, we don't need to do anything
@@ -254,7 +249,7 @@ class OpticsViewSelector(ViewSelector):
                         metric=self.coverage_metric,
                     )
                     scores.append((cam_idx, score.item()))
-    
+
             else:
                 raise ValueError(f"Invalid coverage metric: {self.coverage_metric}")
 
@@ -263,9 +258,7 @@ class OpticsViewSelector(ViewSelector):
             candidate_cameras = [all_cameras[idx : idx + 1] for idx in candidate_indices]
             scores = model.coverage_score_for_camera(training_cameras, candidate_cameras)
 
-            scores = [
-                (candidate_indices[idx], score.item()) for idx, score in enumerate(scores)
-            ]
+            scores = [(candidate_indices[idx], score.item()) for idx, score in enumerate(scores)]
         else:
             raise ValueError(f"Invalid model type: {type(model)}")
 

@@ -2,13 +2,15 @@ import subprocess
 import pathlib
 import shlex
 from datetime import datetime
+
 # -----------------------------
 # Batch experiment configuration
 # -----------------------------
 PROJECT_NAME = "next-best-view"
 
 # Datasets to sweep
-BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
+# BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
+BASE_DATA_DIR = pathlib.Path("data")
 SCENES = [
 "caterpillar",
 "train",
@@ -37,12 +39,15 @@ VIS = "viewer+wandb"
 # Quit the viewer on train completion to avoid hangs in sweeps
 QUIT_VIEWER_ON_DONE = True
 
-# Use filename-based eval mode for reproducibility across datasets
-EVAL_MODE = "filename"
+# Biased dataset
+BIASED = False
+
+MAX_ITERATIONS = 30000
 
 # -----------------------------
 # Internal helpers
 # -----------------------------
+
 
 def build_cmd(dataset: str, method: str) -> list[str]:
     """Construct an ns-train command for a (dataset, method) pair.
@@ -83,15 +88,24 @@ def build_cmd(dataset: str, method: str) -> list[str]:
             "ns-train",
             model,
             f"--vis={VIS}",
-            "--project-name", project_for_dataset,
-            "--experiment-name", exp_name,
-            "--pipeline.view-selector", view_selector,
-            "--pipeline.optics-coverage-metric", method,
-            "--viewer.quit-on-train-completion", str(QUIT_VIEWER_ON_DONE),
+            "--project-name",
+            project_for_dataset,
+            "--experiment-name",
+            exp_name,
+            "--max-num-iterations",
+            str(MAX_ITERATIONS),
+            "--pipeline.view-selector",
+            view_selector,
+            "--pipeline.optics-coverage-metric",
+            method,
+            "--pipeline.datamanager.bias-views",
+            str(BIASED),
+            "--viewer.quit-on-train-completion",
+            str(QUIT_VIEWER_ON_DONE),
             # Data spec (keep consistent with existing scripts)
             "shadow-splat-data",
-            "--data", dataset,
-            # "--eval-mode", EVAL_MODE,
+            "--data",
+            dataset,
         ]
     except Exception as e:
         print(f"Error building command for {dataset} with {method}: {e}")
@@ -99,12 +113,14 @@ def build_cmd(dataset: str, method: str) -> list[str]:
     # cmd += extra_metric_args
     return cmd
 
+
 def main() -> None:
     for ds in DATASETS:
         for method in METHODS:
             cmd = build_cmd(ds, method)
             print("Running:", " ".join(shlex.quote(c) for c in cmd))
             subprocess.run(cmd, check=True)
+
 
 if __name__ == "__main__":
     main()
