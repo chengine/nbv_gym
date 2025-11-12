@@ -79,6 +79,11 @@ class BayesRaysParallelDataManager(ParallelDataManager):
 
         self.view_selector = None  # Will be set by pipeline
 
+        # Cache the active set as a tensor for vectorized filtering
+        self._cached_active_set_tensor = torch.tensor(
+            self.active_train_indices, dtype=torch.long, device=device
+        )
+
     def expand_active_set(self, k: int = 1, step: Optional[int] = None, **kwargs) -> None:
         """Expand the active set by adding k more views using the view selector.
 
@@ -87,23 +92,15 @@ class BayesRaysParallelDataManager(ParallelDataManager):
             step: Current training step (for logging)
             **kwargs: Additional args passed to view selector (e.g., hessian, model)
         """
-        print(f"[DEBUG expand_active_set] Called with k={k}, step={step}, view_selector={self.view_selector is not None}")
-
         if not self.all_train_indices:
-            print(f"[DEBUG expand_active_set] No train indices available, returning")
             return
 
         remaining = list(set(self.all_train_indices) - set(self.active_train_indices))
         if not remaining:
-            print(f"[DEBUG expand_active_set] No remaining indices, all views are active, returning")
             return
-
-        print(f"[DEBUG expand_active_set] Active: {len(self.active_train_indices)}, Remaining: {len(remaining)}")
 
         # Use view selector if available, otherwise fall back to random
         if self.view_selector is not None:
-            print(f"[DEBUG expand_active_set] Using view selector: {type(self.view_selector).__name__}")
-            print(f"[DEBUG expand_active_set] kwargs keys: {list(kwargs.keys())}")
             add = self.view_selector.select_views(
                 active_indices=self.active_train_indices,
                 remaining_indices=remaining,
@@ -114,10 +111,14 @@ class BayesRaysParallelDataManager(ParallelDataManager):
             )
         else:
             # Fallback to random selection
-            print(f"[DEBUG expand_active_set] No view selector set, falling back to random selection")
             add = random.sample(remaining, k=min(max(1, k), len(remaining)))
 
         self.active_train_indices.extend(add)
+
+        # Rebuild cached active set tensor for vectorized filtering in next_train()
+        self._cached_active_set_tensor = torch.tensor(
+            self.active_train_indices, dtype=torch.long, device=self.device
+        )
 
         # Log to wandb/tensorboard if step is provided
         if step is not None:
@@ -183,13 +184,9 @@ class BayesRaysParallelDataManager(ParallelDataManager):
             if cam_indices.dim() > 1:
                 cam_indices = cam_indices.squeeze(-1)
 
-            # Create mask for active cameras
-            active_set = set(self.active_train_indices)
-            mask = torch.tensor(
-                [idx.item() in active_set for idx in cam_indices],
-                dtype=torch.bool,
-                device=self.device,
-            )
+            # Use vectorized torch operation to create mask (much faster than list comprehension)
+            # torch.isin checks which elements of cam_indices are in the active set
+            mask = torch.isin(cam_indices, self._cached_active_set_tensor)
 
             # Filter ray bundle and batch to only active views
             num_active_rays = mask.sum().item()
