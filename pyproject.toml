@@ -9,8 +9,7 @@ include = ["shadow_splat*"]
 # register the entry point of your new method here:
 [project.entry-points.'nerfstudio.method_configs']
 shadow-splat = 'shadow_splat.config:shadow_splat'
-shadow-splat-2dgs = 'shadow_splat.config:shadow_splat_2dgs'
-shadow-splat-lumen = 'shadow_splat.config:lumen'
+fisher-splat = 'shadow_splat.config:fisher_splat'
 
 [project.entry-points.'nerfstudio.dataparser_configs']
 shadow-splat-data = 'shadow_splat.dataparser_config:shadow_splat_dataparser'
