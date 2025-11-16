@@ -33,18 +33,17 @@ DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 # Methods / information gain metrics to compare.
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
-    "fig",
-    "view_fig",
-    "fig_diag",
-    "view_fig_diag",
+    # "fig",
+    # "view_fig",
+    # "fig_diag",
+    # "view_fig_diag",
     "coverage",
     "fisher_info",
     "random",
-    "all"
 ]
 
 # Visualization backends. Example: "viewer+wandb" or just "wandb"
-VIS = "viewer+wandb"
+VIS = "wandb"
 
 # Quit the viewer on train completion to avoid hangs in sweeps
 QUIT_VIEWER_ON_DONE = True
@@ -53,6 +52,8 @@ QUIT_VIEWER_ON_DONE = True
 BIASED = False
 
 MAX_ITERATIONS = 30000
+
+SEED = 0
 
 # -----------------------------
 # Internal helpers
@@ -107,25 +108,26 @@ def build_cmd(dataset: str, method: str) -> list[str]:
             project_for_dataset,
             "--experiment-name",
             exp_name,
+            "--machine.seed",
+            str(SEED),
             "--max-num-iterations",
             str(MAX_ITERATIONS),
             "--pipeline.view-selector",
             view_selector,
-            "--pipeline.optics-coverage-metric",
-            method,
             "--pipeline.datamanager.bias-views",
             str(BIASED),
+            "--pipeline.initial-view-seed",
+            str(0),
             "--viewer.quit-on-train-completion",
             str(QUIT_VIEWER_ON_DONE),
-            # Data spec (keep consistent with existing scripts)
-            "shadow-splat-data",
+            # "shadow-splat-data",
             "--data",
             dataset,
         ]
+        cmd += extra_metric_args
     except Exception as e:
         print(f"Error building command for {dataset} with {method}: {e}")
 
-    # cmd += extra_metric_args
     return cmd
 
 
