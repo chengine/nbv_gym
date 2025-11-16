@@ -62,16 +62,13 @@ class ShadowSplatViewer(Viewer):
                 initial_intensity=initial_intensity,
             )
 
-        # Color settings for active vs inactive training views
-        self._highlight_active = True
+        # Settings for hiding/showing candidate views
+        self._hide_candidates = True
         self._last_active_indices = set()
-        self._active_camera_color = (0.0, 1.0, 0.0)  # Green for active cameras
-        self._inactive_camera_color = (0.5, 0.5, 0.5)  # Gray for inactive cameras
-        self._default_camera_color = (1.0, 1.0, 1.0)  # White for default/unhighlighted cameras
-        self.only_active_checkbox = self.viser_server.gui.add_checkbox(
-            label="Highlight active train views", disabled=False, initial_value=True
+        self.hide_candidates_checkbox = self.viser_server.gui.add_checkbox(
+            label="Hide candidate views", disabled=False, initial_value=True
         )
-        self.only_active_checkbox.on_update(lambda _: self._on_only_active_toggle())
+        self.hide_candidates_checkbox.on_update(lambda _: self._on_hide_candidates_toggle())
 
     def _convert_model(self, pipeline):
         """Convert the model to a ShadowSplatModel"""
@@ -220,8 +217,8 @@ class ShadowSplatViewer(Viewer):
                 self.update_training_light_source_frustum()
                 self.update_step(step)
 
-    def _on_only_active_toggle(self):
-        self._highlight_active = bool(self.only_active_checkbox.value)
+    def _on_hide_candidates_toggle(self):
+        self._hide_candidates = bool(self.hide_candidates_checkbox.value)
         self._update_train_camera_visibility(force=True)
 
     def init_scene(
@@ -230,12 +227,12 @@ class ShadowSplatViewer(Viewer):
         train_state: Literal["training", "paused", "completed"],
         eval_dataset: Optional[InputDataset] = None,
     ) -> None:
-        """Override init_scene to set camera colors immediately after creation."""
+        """Override init_scene to set camera visibility immediately after creation."""
         # Call parent's init_scene to create the cameras
         super().init_scene(train_dataset, train_state, eval_dataset)
 
-        # Immediately set camera colors based on active/inactive status
-        # This ensures colors are set right away, not waiting for update_scene()
+        # Immediately set camera visibility based on active/inactive status
+        # This ensures visibility is set right away, not waiting for update_scene()
         self._update_train_camera_visibility(force=True)
 
     def _get_active_indices(self) -> set:
@@ -254,44 +251,50 @@ class ShadowSplatViewer(Viewer):
             return set()
 
     def _update_train_camera_visibility(self, force: bool = False) -> None:
-        """Color active training cameras differently from inactive ones.
+        """Highlight active cameras in green and hide/show candidate (inactive) cameras based on checkbox.
 
-        All cameras are always visible. Active cameras are colored green,
-        inactive cameras are colored gray (when highlighting is enabled).
+        Active cameras are always highlighted in green.
+        When "Hide candidate views" is checked, inactive cameras are hidden.
+        When unchecked, all cameras are visible.
 
         Operates only on already-created frustums (Viewer limits number displayed).
         """
-        print("update_train_camera_visibility")
         if not hasattr(self, "camera_handles") or self.camera_handles is None:
             return
         active = self._get_active_indices()
-        # Only skip update if indices haven't changed, highlighting is off, and not forcing update
-        # But if highlighting was just toggled, we need to update colors
+        # Only skip update if indices haven't changed, hiding is off, and not forcing update
         if not force and active == self._last_active_indices:
-            # If highlighting is off and indices haven't changed, we can skip
-            # (colors will already be set to default)
-            if not self._highlight_active:
+            # If indices haven't changed and hiding is off, we can skip
+            # (active cameras are already green, inactive ones already visible)
+            if not self._hide_candidates:
                 return
         self._last_active_indices = active
 
-        # Apply color differentiation: all cameras are visible, but colored differently
-        for idx, handle in self.camera_handles.items():
+        # Process each camera: highlight active ones in green, hide/show inactive ones based on checkbox
+        for idx, handle in list(self.camera_handles.items()):
             if idx in active:
-                # Remove and re-add the handle to apply the color
-                # Setting the color with handle.color doesn't work
-                handle.remove()
-                camera_handle = self.viser_server.scene.add_camera_frustum(
-                    name=handle.name,
-                    fov=handle.fov,
-                    aspect=handle.aspect,
-                    scale=handle.scale,
-                    image=handle.image,
-                    wxyz=handle.wxyz,
-                    position=handle.position,
-                    color=(0.0, 1.0, 0.0),
-                    line_width=3.0,
-                )
-                # camera_handle.on_click(self.create_on_click_callback(idx))
+                if handle.color != (0.0, 1.0, 0.0):
+                    # Remove and re-add the handle to apply the green color
+                    # Setting the color with handle.color doesn't work
+                    handle.remove()
+                    camera_handle = self.viser_server.scene.add_camera_frustum(
+                        name=handle.name,
+                        fov=handle.fov,
+                        aspect=handle.aspect,
+                        # scale=handle.scale,
+                        scale=0.3,
+                        image=handle.image,
+                        wxyz=handle.wxyz,
+                        position=handle.position,
+                        color=(0.0, 1.0, 0.0),
+                        line_width=3.0,
+                    )
+                    # Update the handle in the dictionary to point to the new handle
+                    self.camera_handles[idx] = camera_handle
+                    # camera_handle.on_click(self.create_on_click_callback(idx))
+            else:
+                # For inactive cameras, hide/show based on checkbox
+                handle.visible = not self._hide_candidates
 
     def update_training_light_source_frustum(self):
         if self.pipeline.datamanager.current_light is None:

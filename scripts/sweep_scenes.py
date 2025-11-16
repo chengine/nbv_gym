@@ -12,12 +12,34 @@ PROJECT_NAME = "next-best-view"
 # BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
 BASE_DATA_DIR = pathlib.Path("data")
 SCENES = [
-    # "caterpillar",
-    "train",
-    "ignatius",
-    "shiny_statue_6pm",
-    "space_laces_4pm",
-    "chair_3pm",
+    "tandt/caterpillar",
+    "tandt/train",
+    "tandt/ignatius",
+    "captures/shiny_statue_6pm",
+    "captures/space_laces_4pm",
+    "captures/chair_3pm",
+    "nerfstudio-data/plane",
+    "nerfstudio-data/stump-ns",
+    "nerfstudio-data/dozer",
+    "mipnerf360/bicycle",
+    "mipnerf360/bonsai",
+    "mipnerf360/counter",
+    "mipnerf360/flowers",
+    "mipnerf360/garden",
+    "mipnerf360/kitchen",
+    "mipnerf360/room",
+    "mipnerf360/stump",
+    "mipnerf360/treehill",
+    # "nerfstudio-data/aspen",  # fisheye
+    # "nerfstudio-data/dozer",
+    # "nerfstudio-data/Egypt",
+    # "nerfstudio-data/floating-tree",  # fisheye
+    # "nerfstudio-data/Giannini-Hall",  # fisheye
+    # "nerfstudio-data/kitchen-ns",
+    # "nerfstudio-data/person",
+    # "nerfstudio-data/plane",
+    # "nerfstudio-data/sculpture",
+    "nerfstudio-data/stump-ns",
 ]
 DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 
@@ -32,7 +54,7 @@ METHODS = [
 ]
 
 # Visualization backends. Example: "viewer+wandb" or just "wandb"
-VIS = "viewer+wandb"
+VIS = "wandb"
 
 # Quit the viewer on train completion to avoid hangs in sweeps
 QUIT_VIEWER_ON_DONE = True
@@ -41,6 +63,8 @@ QUIT_VIEWER_ON_DONE = True
 BIASED = False
 
 MAX_ITERATIONS = 30000
+
+SEED = 0
 
 # -----------------------------
 # Internal helpers
@@ -90,6 +114,8 @@ def build_cmd(dataset: str, method: str) -> list[str]:
             project_for_dataset,
             "--experiment-name",
             exp_name,
+            "--machine.seed",
+            str(SEED),
             "--max-num-iterations",
             str(MAX_ITERATIONS),
             "--pipeline.view-selector",
@@ -98,6 +124,8 @@ def build_cmd(dataset: str, method: str) -> list[str]:
             method,
             "--pipeline.datamanager.bias-views",
             str(BIASED),
+            "--pipeline.initial-view-seed",
+            str(0),
             "--viewer.quit-on-train-completion",
             str(QUIT_VIEWER_ON_DONE),
             # Data spec (keep consistent with existing scripts)
