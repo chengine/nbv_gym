@@ -8,6 +8,17 @@ pyrightconfig.json
 *.zip
 *.mp4
 *.avi
+*.csv
+*.json
+*.txt
+*.parquet
+*.pkl
+*.pt
+*.pth
+*.pkl.gz
+*.pkl.bz2
+*.pkl.zip
+*.pkl.tar
 todo.md
 
 # Byte-compiled / optimized / DLL files

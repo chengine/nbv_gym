@@ -46,11 +46,13 @@ DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 # Methods / information gain metrics to compare.
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
+    # "fig",
+    # "view_fig",
+    "fig_diag",
+    "view_fig_diag",
     "coverage",
-    "fig",
-    "view_fig",
-    "fisher_info",
-    "random",
+    # "fisher_info",
+    # "random",
 ]
 
 # Visualization backends. Example: "viewer+wandb" or just "wandb"
@@ -89,7 +91,7 @@ def build_cmd(dataset: str, method: str) -> list[str]:
         view_selector = "random"
         extra_metric_args = []
         exp_suffix = f"{dataset_name}__{method}"
-    elif method in {"coverage", "fig", "view_fig"}:
+    elif method in {"coverage", "fig", "view_fig", "fig_diag", "view_fig_diag"}:
         model = "shadow-splat"
         view_selector = "optics"
         extra_metric_args = ["--pipeline.optics-coverage-metric", method]
