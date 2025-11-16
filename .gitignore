@@ -19,6 +19,8 @@ pyrightconfig.json
 *.pkl.bz2
 *.pkl.zip
 *.pkl.tar
+*.pdf
+*.html
 todo.md
 
 # Byte-compiled / optimized / DLL files

@@ -9,8 +9,8 @@ from datetime import datetime
 PROJECT_NAME = "next-best-view"
 
 # Datasets to sweep
-# BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
-BASE_DATA_DIR = pathlib.Path("data")
+BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
+# BASE_DATA_DIR = pathlib.Path("data")
 SCENES = [
 "caterpillar",
 "train",
@@ -18,19 +18,29 @@ SCENES = [
 "shiny_statue_6pm",
 "space_laces_4pm",
 "chair_3pm",
+"mipnerf360/bicycle",
+"mipnerf360/bonsai",
+"mipnerf360/counter",
+"mipnerf360/flowers",
+"mipnerf360/garden",
+"mipnerf360/kitchen",
+"mipnerf360/room",
+"mipnerf360/stump",
+"mipnerf360/treehill",
 ]
 DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 
 # Methods / information gain metrics to compare.
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
-    # "fig",
-    # "view_fig",
+    "fig",
+    "view_fig",
     "fig_diag",
     "view_fig_diag",
     "coverage",
-    # "fisher_info",
-    # "random",
+    "fisher_info",
+    "random",
+    "all"
 ]
 
 # Visualization backends. Example: "viewer+wandb" or just "wandb"
@@ -77,6 +87,11 @@ def build_cmd(dataset: str, method: str) -> list[str]:
         view_selector = "optics"
         extra_metric_args = ["--pipeline.optics-coverage-metric", method]
         exp_suffix = f"{dataset_name}__{method}__optics"
+    elif method == "all":
+        model = "shadow-splat"
+        view_selector = "all"
+        extra_metric_args = []
+        exp_suffix = f"{dataset_name}__{method}__all"
     else:
         raise ValueError(f"Unknown method: {method}")
 
