@@ -39,7 +39,7 @@ SCENES = [
     # "nerfstudio-data/person",
     # "nerfstudio-data/plane",
     # "nerfstudio-data/sculpture",
-    "nerfstudio-data/stump-ns",
+    # "nerfstudio-data/stump-ns",
 ]
 DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 
@@ -48,11 +48,11 @@ DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 METHODS = [
     # "fig",
     # "view_fig",
-    "fig_diag",
-    "view_fig_diag",
+    # "fig_diag",
+    # "view_fig_diag",
     "coverage",
-    # "fisher_info",
-    # "random",
+    "fisher_info",
+    "random",
 ]
 
 # Visualization backends. Example: "viewer+wandb" or just "wandb"
@@ -122,23 +122,20 @@ def build_cmd(dataset: str, method: str) -> list[str]:
             str(MAX_ITERATIONS),
             "--pipeline.view-selector",
             view_selector,
-            "--pipeline.optics-coverage-metric",
-            method,
             "--pipeline.datamanager.bias-views",
             str(BIASED),
             "--pipeline.initial-view-seed",
             str(0),
             "--viewer.quit-on-train-completion",
             str(QUIT_VIEWER_ON_DONE),
-            # Data spec (keep consistent with existing scripts)
-            "shadow-splat-data",
+            # "shadow-splat-data",
             "--data",
             dataset,
         ]
+        cmd += extra_metric_args
     except Exception as e:
         print(f"Error building command for {dataset} with {method}: {e}")
 
-    # cmd += extra_metric_args
     return cmd
 
 
