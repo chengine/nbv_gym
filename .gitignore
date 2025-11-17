@@ -7,6 +7,16 @@ outputs
 *.zip
 *.mp4
 *.avi
+*.pdf
+*.csv
+*.txt
+*.log
+*.json
+*.yaml
+*.yml
+*.html
+*.jsonl
+*.jsonl.gz
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
