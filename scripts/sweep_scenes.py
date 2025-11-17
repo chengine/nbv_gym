@@ -3,6 +3,12 @@ import pathlib
 import shlex
 import os
 from datetime import datetime
+import random
+import numpy as np
+
+seed = 0
+random.seed(seed)
+np.random.seed(seed)
 
 # Optional WandB support - set to True to enable logging
 USE_WANDB = True
@@ -32,13 +38,22 @@ PROJECT_NAME = "next-best-view"
 # Datasets to sweep
 BASE_DATA_DIR = pathlib.Path("/home/admin/StanfordMSL/shadow_splat/data")
 SCENES = [
-# "caterpillar",
-# "train",
+"caterpillar",
+"train",
 "ignatius",
-# "shiny_statue_6pm",
-# "space_laces_4pm",
-# "chair_3pm",
+"shiny_statue_6pm",
+"space_laces_4pm",
+"chair_3pm",
 # "master_chief_cycles"
+"bicycle",
+"counter",
+"flowers",
+"garden",
+"stump",
+"treehill",
+# "kitchen",
+# "bonsai",
+# "room",
 ]
 DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 
@@ -90,7 +105,7 @@ def build_cmd(dataset: str, method: str) -> list[str]:
         exp_suffix = f"{dataset_name}__{method}"
     elif method == "nerfacto":
         model = "nerfacto"
-        view_selector = "random"
+        view_selector = "all"
         extra_metric_args = []
         exp_suffix = f"{dataset_name}__{method}"
     elif method in {"coverage", "fig", "view_fig"}:
@@ -137,18 +152,15 @@ def build_cmd(dataset: str, method: str) -> list[str]:
 
         # BayesRays uses standard nerfstudio data format, others use shadow-splat
         if method == "bayes-rays":
-            cmd.extend(["--data", dataset])
+            cmd.extend(["--data", dataset,
+                        "--machine.seed" , str(seed)])
         elif method == "nerf-random":
+            cmd.extend(["--data", dataset])
+        elif method == "nerfacto":
             cmd.extend([
                 "--data", dataset,
-                "--trainer.steps_per_eval_batch", "100",
-                "--trainer.steps_per_eval_all_images", "1000",
-                "--trainer.max_num_iterations", "30000",
-                "--pipeline.datamanager.train_num_rays_per_batch", "4096",
-                "--pipeline.datamanager.start_num_views", "160",  # 30000 steps / 200 steps_per_view_add + 1
+                "--steps_per_eval_all_images", "1000",
             ])
-        elif method == "nerfacto":
-            cmd.extend(["--data", dataset])
         else:
             # Gaussian splat methods use shadow-splat-data parser
             cmd.extend([

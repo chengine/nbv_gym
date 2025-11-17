@@ -92,6 +92,9 @@ class BayesRaysParallelDataManager(ParallelDataManager):
             step: Current training step (for logging)
             **kwargs: Additional args passed to view selector (e.g., hessian, model)
         """
+        import time
+
+        print(f"[DEBUG expand_active_set] Called at step {step}")
         if not self.all_train_indices:
             return
 
@@ -101,6 +104,8 @@ class BayesRaysParallelDataManager(ParallelDataManager):
 
         # Use view selector if available, otherwise fall back to random
         if self.view_selector is not None:
+            t_start = time.time()
+            print(f"[DEBUG expand_active_set] Starting view_selector.select_views at step {step}")
             add = self.view_selector.select_views(
                 active_indices=self.active_train_indices,
                 remaining_indices=remaining,
@@ -109,6 +114,8 @@ class BayesRaysParallelDataManager(ParallelDataManager):
                 datamanager=self,
                 **kwargs,
             )
+            t_elapsed = time.time() - t_start
+            print(f"[DEBUG expand_active_set] view_selector.select_views took {t_elapsed:.3f}s at step {step}")
         else:
             # Fallback to random selection
             add = random.sample(remaining, k=min(max(1, k), len(remaining)))

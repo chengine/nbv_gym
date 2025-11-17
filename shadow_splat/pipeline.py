@@ -208,12 +208,17 @@ class ViewSelectionPipeline(VanillaPipeline):
     def get_train_loss_dict(self, step: int):
         """Get training loss dict and conditionally expand the active view set."""
         # Expand active set on schedule
-        if (
+        expansion_triggered = (
             getattr(self.config, "add_every_n_steps", 0) > 0
             and step > 0
             and step % self.config.add_every_n_steps == 0
             and hasattr(self.datamanager, "expand_active_set")
-        ):
+        )
+
+        if step % 1000 == 0:
+            print(f"[DEBUG pipeline] step={step}, add_every_n_steps={getattr(self.config, 'add_every_n_steps', 0)}, expansion_triggered={expansion_triggered}")
+
+        if expansion_triggered:
             # Compute Hessian if using BayesRays selector
             hessian = None
             if self._hessian_computer is not None:
