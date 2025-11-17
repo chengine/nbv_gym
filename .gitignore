@@ -1,22 +1,27 @@
 data
 outputs
 .vscode/
+pyrightconfig.json
 *.png
 *.jpg
 *.gif
 *.zip
 *.mp4
 *.avi
-*.pdf
 *.csv
-*.txt
-*.log
 *.json
-*.yaml
-*.yml
+*.txt
+*.parquet
+*.pkl
+*.pt
+*.pth
+*.pkl.gz
+*.pkl.bz2
+*.pkl.zip
+*.pkl.tar
+*.pdf
 *.html
-*.jsonl
-*.jsonl.gz
+todo.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -1,6 +1,5 @@
 import torch
 
-
 def resize_image(image: torch.Tensor, d: int):
     """
     Downscale images using the same 'area' method in opencv
