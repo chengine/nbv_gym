@@ -183,7 +183,8 @@ def main() -> None:
     if USE_WANDB:
         sweep_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         os.environ["WANDB_RUN_GROUP"] = sweep_id
-        print(f"🎯 Starting sweep with group ID: {sweep_id}")
+        print(f"🎯 Dry run sweep with group ID: {sweep_id}")
+        print()
 
     total_runs = len(DATASETS) * len(METHODS)
     current_run = 0
@@ -192,20 +193,39 @@ def main() -> None:
         for method in METHODS:
             current_run += 1
             print(f"\n📊 Run {current_run}/{total_runs}: {pathlib.Path(ds).name} with {method}")
+            print("=" * 80)
 
             cmd = build_cmd(ds, method)
-            print("Command:", " ".join(shlex.quote(c) for c in cmd))
-
+            
+            print("\n📋 Full command (ready to execute):")
+            print(" ".join(shlex.quote(c) for c in cmd))
+            
+            print("\n📝 Command breakdown:")
+            for i, arg in enumerate(cmd):
+                print(f"  [{i:2d}]: {repr(arg)}")
+            
+            print("\n🔍 Checking command validity...")
+            # Check if ns-train is available
             try:
-                subprocess.run(cmd, check=True)
-                print(f"✓ Completed: {pathlib.Path(ds).name} with {method}")
-            except subprocess.CalledProcessError as e:
-                print(f"✗ Failed: {pathlib.Path(ds).name} with {method}")
-                print(f"  Error: {e}")
-                # Continue with next run instead of stopping
-                continue
+                result = subprocess.run(["which", "ns-train"], capture_output=True, text=True, cwd="/tmp")
+                if result.returncode == 0:
+                    print(f"  ✓ ns-train found at: {result.stdout.strip()}")
+                else:
+                    print(f"  ✗ ns-train not found in PATH")
+            except Exception as e:
+                print(f"  ✗ Error checking ns-train: {e}")
+            
+            # Check if dataset exists
+            if pathlib.Path(ds).exists():
+                print(f"  ✓ Dataset exists: {ds}")
+            else:
+                print(f"  ✗ Dataset NOT found: {ds}")
+            
+            print("\n✅ Command is ready for execution (NOT running in dry-run mode)")
 
-    print(f"\n✅ Sweep complete! {total_runs} runs attempted.")
+    print(f"\n" + "=" * 80)
+    print(f"✅ Dry run complete! {total_runs} command(s) prepared.")
+    print("\nTo execute the sweep, run: python sweep_scenes.py")
 
 
 if __name__ == "__main__":
