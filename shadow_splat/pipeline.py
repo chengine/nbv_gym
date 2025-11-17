@@ -246,12 +246,10 @@ class ViewSelectionPipeline(VanillaPipeline):
 
             self._model.training = False
 
-            tnow = time.time()
             self.datamanager.expand_active_set(
                 k=self.config.add_num_views, step=step, model=self._model, pipeline=self
             )
-            print(f"Time taken for view expansion: {time.time() - tnow:.2f} seconds")
-            raise
+
             # finally:
             #     # Aggressive cleanup after view expansion
             #     # Clear model.info again to ensure all tensors from view selection are freed
