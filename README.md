@@ -18,7 +18,7 @@
 ### Now, you can run `shadow_splat` like other models in Nerfstudio using the `ns-train shadow_splat` command.
 ### For example:
 ```python 
-ns-train shadow_splat --data <path to the data> \
+ns-train shadow-splat --data <path to the data> \
     --output-dir <path to the output directory> \
     --pipeline.view-selector optics \
     --pipeline.optics-coverage-metric coverage
@@ -31,7 +31,7 @@ ns-train shadow_splat --data <path to the data> \
 `pip install -e . --no-build-isolation` at the following repo:
 `https://github.com/JiangWenPL/modified-diff-gaussian-rasterization-w-depth` (use `git clone --recursive` and gcc/g++ 11). Afterwards, you can run a similar command:
 ```python 
-ns-train fisher_splat --data <path to the data> \
+ns-train fisher-splat --data <path to the data> \
     --output-dir <path to the output directory> \
     --pipeline.view-selector optics \
     --pipeline.optics-coverage-metric fisher_info
