@@ -76,6 +76,7 @@ def update_view_coverage_for_frustum(
     bin_idx = dir_to_bin(bin_dirs, dirs)
 
     # Increment that bin for all visible gaussians
+    # NOTE: DO WE HAVE TO WORRY ABOUT OVERFLOW HERE?
     coverage_counts.index_put_((gaussian_ids, bin_idx), torch.ones_like(gaussian_ids, dtype=coverage_counts.dtype), accumulate=True)
 
     return True
@@ -107,7 +108,8 @@ def compute_coverage_per_gaussian(
     med = coverage_counts.median(dim=1).values               # [N]
 
     # Mask of "well-covered" bins per gaussian: count >= median and >0
-    invalid = (coverage_counts < med[:, None]) | (coverage_counts == 0)  # [N,G]
+    # invalid = (coverage_counts < med[:, None]) | (coverage_counts == 0)  # [N,G]
+    invalid = (coverage_counts == 0)
 
     # For each gaussian, want max cosine over allowed bins -> min angle
     # Fill disallowed with -inf
@@ -183,6 +185,10 @@ def update_fig_for_frustum(
     if gaussian_ids.numel() == 0:
         return False
 
+    eps = 1e-12
+    denom = conics[:, 0] * conics[:, 2] - conics[:, 1]**2
+    det_cov2d = 1.0 / torch.clamp(denom, min=eps)
+
     # One optical axis for this camera batch (we render one training cam at a time)
     camtoworlds = torch.inverse(viewmats)  # [C, 4, 4]
     # These two lines assume packed = True
@@ -209,14 +215,15 @@ def update_fig_for_frustum(
     # Compute Gaussian distribution 
     normal_weights = torch.exp(-(1.0 / (2.0 * variance[projected_pixel_ids])) * (depths - depth_image_flattened[projected_pixel_ids]) ** 2)
     normal_weights = normal_weights / torch.sqrt(2.0 * math.pi * variance[projected_pixel_ids])
+    normal_weights = (normal_weights **2) * (det_cov2d)**(1/2)
 
     # Update the accumulated view transmittance
-    combined_weight = sg_weights * normal_weights[:, None]  # [N, G]    
+    combined_weight = (sg_weights**2) * normal_weights[:, None]  # [N, G]    
 
     if update_attributes:
         # Update the accumulated transmittance
-        fig.index_put_((gaussian_ids,), normal_weights.unsqueeze(1)**2, accumulate=True)
-        view_fig.index_put_((gaussian_ids,), combined_weight**2, accumulate=True)
+        fig.index_put_((gaussian_ids,), normal_weights.unsqueeze(1), accumulate=True)
+        view_fig.index_put_((gaussian_ids,), combined_weight, accumulate=True)
 
         return None
 
@@ -224,8 +231,8 @@ def update_fig_for_frustum(
         trans_sqr = torch.zeros_like(fig)
         view_trans_sqr = torch.zeros_like(view_fig)
 
-        trans_sqr[gaussian_ids] = normal_weights**2
-        view_trans_sqr[gaussian_ids] = combined_weight**2
+        trans_sqr[gaussian_ids] = normal_weights
+        view_trans_sqr[gaussian_ids] = combined_weight
 
         output = {
             "transmittance_squared": trans_sqr,

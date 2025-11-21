@@ -542,50 +542,6 @@ class ShadowSplatModel(SplatfactoModel):
         if background.shape[0] == 3 and not self.training:
             background = background.expand(H, W, 3)
 
-        # if self.training:
-        #     cam_idx = camera.metadata["cam_idx"]
-        #     if cam_idx not in self.seen_cam_idx:
-        #         ### UPDATE COVERAGE METRICS ###
-        #         is_updated_coverage = update_view_coverage_for_frustum(
-        #             means=means_crop,
-        #             quats=quats_crop,
-        #             scales=torch.exp(scales_crop),
-        #             viewmats=viewmat,
-        #             Ks=K,
-        #             width=W,
-        #             height=H,
-        #             coverage_counts=self.coverage_counts,
-        #             bin_dirs=self.bin_dirs,
-        #             camera_model=camera_model,
-        #             near_plane=0.01,
-        #             far_plane=1e10,
-        #         )
-
-        #         # is_updated_fig = update_fig_for_frustum(
-        #         #     means=means_crop,
-        #         #     quats=quats_crop,
-        #         #     scales=torch.exp(scales_crop),
-        #         #     viewmats=viewmat,
-        #         #     Ks=K,
-        #         #     width=W,
-        #         #     height=H,
-        #         #     depth_image=depth_im,
-        #         #     variance_image=variance_img,
-        #         #     bin_dirs=self.bin_dirs,
-        #         #     fig=self.fig,
-        #         #     view_fig=self.view_fig,
-        #         #     camera_model=camera_model,
-        #         #     near_plane=0.01,
-        #         #     far_plane=1e10,
-        #         #     concentration=self.config.concentration,
-        #         # )
-
-        #         ### END ###
-        #         self.seen_cam_idx.append(cam_idx)
-
-        #         # Put this in fancy text
-        #         print(f"Updated coverage counts from camera {cam_idx}!")
-
         return {
             "rgb": rgb.squeeze(0),  # type: ignore
             "depth": depth_im,  # type: ignore

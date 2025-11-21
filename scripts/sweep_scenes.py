@@ -9,8 +9,7 @@ from datetime import datetime
 PROJECT_NAME = "next-best-view"
 
 # Datasets to sweep
-BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
-# BASE_DATA_DIR = pathlib.Path("data")
+BASE_DATA_DIR = pathlib.Path("data")
 SCENES = [
 "caterpillar",
 "train",
@@ -33,13 +32,13 @@ DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 # Methods / information gain metrics to compare.
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
-    # "fig",
-    # "view_fig",
-    # "fig_diag",
-    # "view_fig_diag",
-    "coverage",
-    "fisher_info",
-    "random",
+    "fig",
+    "view_fig",
+    "fig_diag",
+    "view_fig_diag",
+    # "coverage",
+    # "fisher_info",
+    # "random",
 ]
 
 # Visualization backends. Example: "viewer+wandb" or just "wandb"
