@@ -3,6 +3,7 @@ from typing import Optional
 import torch
 from torch import Tensor
 import math
+from typing import List
 
 from gsplat.cuda._wrapper import (
     fully_fused_projection,
@@ -163,7 +164,6 @@ def update_fig_for_frustum(
     far_plane: float = 1e10,
     radius_clip: float = 0.0,
     concentration: Optional[float] = 1.0,
-    update_attributes: bool = True,
 ) -> None:
     """Find gaussians in current camera frustum and increment the sphere-bin for the
     camera optical axis. Everything is done in-place on coverage_counts.
@@ -215,28 +215,196 @@ def update_fig_for_frustum(
     # Compute Gaussian distribution 
     normal_weights = torch.exp(-(1.0 / (2.0 * variance[projected_pixel_ids])) * (depths - depth_image_flattened[projected_pixel_ids]) ** 2)
     normal_weights = normal_weights / torch.sqrt(2.0 * math.pi * variance[projected_pixel_ids])
-    normal_weights = (normal_weights **2) * (det_cov2d)**(1/2)
+    normal_weights = (normal_weights **2) * torch.sqrt(det_cov2d)
 
     # Update the accumulated view transmittance
     combined_weight = (sg_weights**2) * normal_weights[:, None]  # [N, G]    
 
-    if update_attributes:
-        # Update the accumulated transmittance
-        fig.index_put_((gaussian_ids,), normal_weights.unsqueeze(1), accumulate=True)
-        view_fig.index_put_((gaussian_ids,), combined_weight, accumulate=True)
+    # Update the accumulated transmittance
+    fig.index_put_((gaussian_ids,), normal_weights.unsqueeze(1), accumulate=True)
+    view_fig.index_put_((gaussian_ids,), combined_weight, accumulate=True)
 
-        return None
+    return None
 
-    else:
-        trans_sqr = torch.zeros_like(fig)
-        view_trans_sqr = torch.zeros_like(view_fig)
+@torch.no_grad()
+def update_visibility_for_frustum(
+    means: Tensor, quats: Tensor, scales: Tensor,
+    viewmats: Tensor, Ks: Tensor, width: int, height: int, camera_id: int,
+    depth_image: Tensor, variance_image: Tensor,
+    visibility: Tensor, num_hits: Tensor,
+    gaussian_ids: List[Tensor], camera_ids: List[Tensor],
+    camera_model: str = "pinhole",
+    eps2d: float = 0.3,
+    near_plane: float = 1e-2,
+    far_plane: float = 1e10,
+    radius_clip: float = 0.0,
+) -> None:
+    """Find gaussians in current camera frustum and increment the sphere-bin for the
+    camera optical axis. Everything is done in-place on coverage_counts.
+    """
+    device = means.device
+    # Project gaussians to figure out which are in the frustum.
+    proj = fully_fused_projection(
+        means, None, quats, scales,
+        viewmats, Ks, width, height,
+        eps2d=eps2d, packed=True,
+        near_plane=near_plane, far_plane=far_plane,
+        radius_clip=radius_clip,
+        sparse_grad=False,
+        calc_compensations=False,
+        camera_model=camera_model,
+    )
+    # packed-mode tuple layout in gsplat>=1.0: (batch_ids, camera_ids, gaussian_ids, radii, means2d, depths, conics, compensations)
+    batch_ids, _, gs_ids, radii, means2d, depths, conics, compensations = proj
+    if gs_ids.numel() == 0:
+        return False
 
-        trans_sqr[gaussian_ids] = normal_weights
-        view_trans_sqr[gaussian_ids] = combined_weight
+    eps = 1e-12
+    denom = conics[:, 0] * conics[:, 2] - conics[:, 1]**2
+    det_cov2d = 1.0 / torch.clamp(denom, min=eps)
 
-        output = {
-            "transmittance_squared": trans_sqr,
-            "view_transmittance_squared": view_trans_sqr,
-        }
+    # Compute the transmittance using the depth, variance, and Gaussian depths
+    pixel_x = means2d[:, 0].long().clamp(0, width - 1)
+    pixel_y = means2d[:, 1].long().clamp(0, height - 1)
+    projected_pixel_ids = pixel_y * width + pixel_x  # shape [nnz]
 
-        return output
+    depth_image_flattened = depth_image.reshape(-1)
+    variance_image_flattened = variance_image.reshape(-1)
+
+    # Add minimum variance threshold to prevent division by very small numbers
+    variance = torch.clamp(variance_image_flattened, min=1e-8)
+
+    # Compute Gaussian distribution 
+    normal_weights = torch.exp(-(1.0 / (2.0 * variance[projected_pixel_ids])) * (depths - depth_image_flattened[projected_pixel_ids]) ** 2)
+    normal_weights = normal_weights / torch.sqrt(2.0 * math.pi * variance[projected_pixel_ids])
+    normal_weights = (normal_weights **2) * torch.sqrt(det_cov2d)
+
+    # Update the accumulated transmittance
+    visibility.index_put_((camera_id.repeat(gs_ids.shape[0]), gs_ids), normal_weights, accumulate=False)    # [C, N]
+    num_hits.index_put_((camera_id.repeat(gs_ids.shape[0]), gs_ids), torch.sqrt(det_cov2d), accumulate=False)    # [C, N]
+
+    # Store camera ids and gaussian ids into list of tensors
+    gaussian_ids.append(gs_ids)
+    camera_ids.append(camera_id.repeat(gs_ids.shape[0]))
+
+    return None
+
+@torch.no_grad()
+def compute_color_field_visibility_for_frustum(
+    view_directions_train: Tensor, # [M, 3]
+    view_directions_test: Tensor, # [N, 3]  # NOTE: The view directions of the candidate camera with respect to all Gaussians. Therefore, view_directions that are 0 are not in the frustum.
+    gaussian_ids_train: Tensor, # [M]
+    camera_ids_train: Tensor, # [M]
+    visibility: Tensor, # [C, N]
+    attribute: Tensor, # [N]        # This is W_tilde_beta_norm_sqr
+    kappa: float = 1.0,
+) -> None:
+    """
+    Compute the visibility of the color field for a given camera.
+    """
+
+    # TODO: Put in camera ids and gaussian ids into list of tensors
+
+    dot_product, mask = dot_product_spherical_gaussians(
+                        view_directions_train, # [M, 3]
+                        view_directions_test, # [N, 3]  # NOTE: The view directions of the candidate camera with respect to all Gaussians. Therefore, view_directions that are 0 are not in the frustum.
+                        gaussian_ids_train, # [M]
+                        kappa = kappa)  # [M]
+
+    gaussian_ids_valid = gaussian_ids_train[mask]
+    camera_ids_valid = camera_ids_train[mask]
+
+    visibility_expanded = visibility[camera_ids_valid, gaussian_ids_valid]      # M
+
+    w_tilde_beta = (dot_product**2) * visibility_expanded
+
+    # Use scatter_add to sum over all the cameras
+    attribute.scatter_add_(0, gaussian_ids_valid, w_tilde_beta)     # N
+
+    return None
+
+@torch.no_grad()
+def dot_product_spherical_gaussians(
+    view_directions_train: Tensor, # [M, 3]
+    view_directions_test: Tensor, # [N, 3]  # NOTE: The view directions of the candidate camera with respect to all Gaussians. Therefore, view_directions that are 0 are not in the frustum.
+    gaussian_ids_train: Tensor, # [M]
+    kappa: float = 1.0,
+) -> Tensor:
+    """
+    Dot product between two spherical gaussians in continuous space. Note, we do NOT normalize the directions in this function. Make sure the directions
+    are normalized before calling this function.
+    """
+
+    # Format the view_directions so that view_directions_test is the same size as view_directions_train
+    view_directions_test_expanded = view_directions_test[gaussian_ids_train]
+
+    # If the norm is 0, then remove the calculation
+    view_directions_test_norm = torch.norm(view_directions_test_expanded, dim=-1, keepdim=True)
+
+    mask = (view_directions_test_norm > 0)
+
+    view_directions_train_valid = view_directions_train[mask]   
+    view_directions_test_valid = view_directions_test_expanded[mask]
+
+    # Compute the dot product
+    dot_product = inner_ptilde(view_directions_train_valid, view_directions_test_valid, kappa)
+
+    return dot_product, mask
+
+@torch.no_grad()
+def sinhc(z, eps=1e-4):
+    """
+    Safe sinh(z)/z with a Taylor expansion near z = 0.
+    """
+    abs_z = z.abs()
+    out = torch.empty_like(z)
+
+    small = abs_z < eps
+    big = ~small
+
+    # Taylor: sinh(z)/z ≈ 1 + z^2/6 + z^4/120
+    z_small = z[small]
+    out[small] = 1 + (z_small**2) / 6 + (z_small**4) / 120
+
+    z_big = z[big]
+    out[big] = torch.sinh(z_big) / z_big
+
+    return out
+
+@torch.no_grad()
+def inner_ptilde(mu1, mu2, kappa, eps=1e-4):
+    """
+    <p_tilde(mu1), p_tilde(mu2)> for L2-normalized spherical Gaussians on S^2.
+    mu1, mu2: (..., 3) unit vectors
+    kappa: scalar tensor or broadcastable to mu1[...,0]
+    """
+
+    assert kappa > 0, "kappa must be positive"
+
+    # s = ||mu1 + mu2||
+    s = torch.linalg.norm(mu1 + mu2, dim=-1)
+
+    # z = kappa * s
+    z = kappa * s
+
+    # sinhc(z) = sinh(z)/z, handled stably
+    h = sinhc(z)
+
+    # prefactor 2kappa / sinh(2kappa), also safe near kappa = 0
+    two_kappa = 2 * kappa
+    # small-kappa branch: sinh(2kappa) ≈ 2kappa + (2kappa)^3/6
+    small_k = two_kappa.abs() < eps
+    pref = torch.empty_like(two_kappa)
+
+    if small_k.any():
+        tk = two_kappa[small_k]
+        sinh_2k_approx = tk + (tk**3) / 6
+        pref[small_k] = two_kappa[small_k] / sinh_2k_approx
+
+    if (~small_k).any():
+        tk = two_kappa[~small_k]
+        pref[~small_k] = tk / torch.sinh(tk)
+
+    # final inner product
+    # broadcasting: pref and h should be broadcastable to s's shape
+    return pref * h

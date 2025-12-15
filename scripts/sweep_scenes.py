@@ -32,10 +32,10 @@ DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 # Methods / information gain metrics to compare.
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
-    "fig",
-    "view_fig",
-    "fig_diag",
-    "view_fig_diag",
+    # "fig",
+    # "view_fig",
+    # "fig_diag",
+    # "view_fig_diag",
     # "coverage",
     # "fisher_info",
     # "random",

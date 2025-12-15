@@ -213,7 +213,7 @@ class OpticsViewSelector(ViewSelector):
             candidate_origins = np.array(candidate_origins_list)
 
         if isinstance(model, ShadowSplatModel):
-            if self.coverage_metric in ["coverage", "fig", "view_fig", "fig_diag", "view_fig_diag", "coverage_lit"]:
+            if self.coverage_metric in ["coverage", "fig", "view_fig", "fig_diag", "view_fig_diag", "coverage_lit", "fig_color_field"]:
                 # Feed the "training cameras" to the model to update coverage metrics.
                 # Fisher-RF has its own way to use "training cameras".
                 # TODO: Need to add a flag to choose a subset of the training cameras to use, or maybe just a sliding window.
@@ -233,6 +233,14 @@ class OpticsViewSelector(ViewSelector):
                     if len(active_indices) > 0:
                         training_cameras = [all_cameras[idx : idx + 1] for idx in active_indices]
                         model.update_fig(training_cameras)
+                    else:
+                        # If there are no active views, we don't need to do anything
+                        pass
+
+                elif self.coverage_metric in ["fig_color_field"]:
+                    if len(active_indices) > 0:
+                        training_cameras = [all_cameras[idx : idx + 1] for idx in active_indices]
+                        model.update_visibility(training_cameras)
                     else:
                         # If there are no active views, we don't need to do anything
                         pass
