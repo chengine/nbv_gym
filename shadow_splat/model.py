@@ -556,7 +556,6 @@ class ShadowSplatModel(SplatfactoModel):
             "shadow": shadow_img,  # type: ignore
             "light_depth": light_depth_image,  # type: ignore
             "light_variance": light_variance_image,  # type: ignore
-            "coverage_lit": coverage_lit,  # type: ignore
         }  # type: ignore
 
     def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
