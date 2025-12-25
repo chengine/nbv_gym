@@ -21,7 +21,6 @@ pyrightconfig.json
 *.pkl.tar
 *.pdf
 *.html
-todo.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

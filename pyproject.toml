@@ -1,15 +1,11 @@
 [project]
-name = "shadow-splat"
-description = "Shadow Gaussian Splatting"
+name = "nbv-gym"
+description = "Next Best View Selection Techniques for Radiance Fields"
 version = "0.1.0"
 
 [tool.setuptools.packages.find]
-include = ["shadow_splat*"]
+include = ["nbv_gym*"]
 
 # register the entry point of your new method here:
 [project.entry-points.'nerfstudio.method_configs']
-shadow-splat = 'shadow_splat.config:shadow_splat'
-fisher-splat = 'shadow_splat.config:fisher_splat'
-
-[project.entry-points.'nerfstudio.dataparser_configs']
-shadow-splat-data = 'shadow_splat.dataparser_config:shadow_splat_dataparser'
+nbv-splat = 'nbv_gym.config:nbv_splat'

@@ -32,9 +32,6 @@ from nerfstudio.data.datamanagers.full_images_datamanager import (
     FullImageDatamanagerConfig,
 )
 from nerfstudio.utils import writer
-
-from shadow_splat.view_selector import AllViewSelector
-
 try:
     import wandb
 
@@ -43,111 +40,6 @@ except ImportError:
     WANDB_AVAILABLE = False
 
 CONSOLE = Console(width=120)
-
-
-@dataclass
-class ShadowSplatDataManagerConfig(FullImageDatamanagerConfig):
-    _target: Type = field(default_factory=lambda: ShadowSplatDataManager)
-
-
-class ShadowSplatDataManager(FullImageDatamanager):  # pylint: disable=abstract-method
-    """Basic stored data manager implementation.
-
-    This is pretty much a port over from our old dataloading utilities, and is a little jank
-    under the hood. We may clean this up a little bit under the hood with more standard dataloading
-    components that can be strung together, but it can be just used as a black box for now since
-    only the constructor is likely to change in the future, or maybe passing in step number to the
-    next_train and next_eval functions.
-
-    Args:
-        config: the DataManagerConfig used to instantiate class
-    """
-
-    config: ShadowSplatDataManagerConfig
-
-    def __init__(
-        self,
-        config: ShadowSplatDataManagerConfig,
-        device: Union[torch.device, str] = "cuda:0",
-        test_mode: Literal["test", "val", "inference"] = "val",
-        world_size: int = 1,
-        local_rank: int = 0,
-        **kwargs,  # pylint: disable=unused-argument
-    ):
-        super().__init__(
-            config=config,
-            device=device,
-            test_mode=test_mode,
-            world_size=world_size,
-            local_rank=local_rank,
-            **kwargs,
-        )
-        self.current_light = None
-
-    def next_train(self, step: int) -> Tuple[Cameras, Dict, Cameras]:
-        """Returns the next training batch
-
-        Returns a Camera instead of raybundle"""
-        image_idx = self.train_unseen_cameras.pop(
-            random.randint(0, len(self.train_unseen_cameras) - 1)
-        )
-        # Make sure to re-populate the unseen cameras list if we have exhausted it
-        if len(self.train_unseen_cameras) == 0:
-            self.train_unseen_cameras = [i for i in range(len(self.train_dataset))]
-
-        # NOTE: changed for RGBA images
-        data = deepcopy(self.cached_train[image_idx])
-        data["image"] = data["image"].to(self.device)
-
-        assert len(self.train_dataset.cameras.shape) == 1, "Assumes single batch dimension"
-        cameras = self.train_dataset.cameras[image_idx : image_idx + 1].to(self.device)
-        if cameras.metadata is None:
-            cameras.metadata = {}
-        cameras.metadata["cam_idx"] = image_idx
-
-        # NOTE: Added
-        # if self.train_dataparser_outputs.lights is not None:
-        if (
-            hasattr(self.train_dataparser_outputs, "lights")
-            and self.train_dataparser_outputs.lights is not None
-        ):
-            light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
-            self.current_light = light
-        else:
-            light = None
-
-        return cameras, data, light
-
-    def next_eval_image(self, step: int) -> Tuple[Cameras, Dict]:
-        """Returns the next evaluation batch
-        Returns a Camera instead of raybundle
-        TODO: Make sure this logic is consistent with the vanilladatamanager"""
-        if self.config.cache_images == "disk":
-            camera, data = next(self.iter_eval_image_dataloader)[0]
-            return camera, data
-        image_idx = self.eval_unseen_cameras.pop(
-            random.randint(0, len(self.eval_unseen_cameras) - 1)
-        )
-        # Make sure to re-populate the unseen cameras list if we have exhausted it
-        if len(self.eval_unseen_cameras) == 0:
-            self.eval_unseen_cameras = [i for i in range(len(self.eval_dataset))]
-        data = self.cached_eval[image_idx]
-        data = data.copy()
-        data["image"] = data["image"].to(self.device)
-        assert len(self.eval_dataset.cameras.shape) == 1, "Assumes single batch dimension"
-        camera = self.eval_dataset.cameras[image_idx : image_idx + 1].to(self.device)
-
-        if (
-            hasattr(self.train_dataparser_outputs, "lights")
-            and self.train_dataparser_outputs.lights is not None
-        ):
-            light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
-            self.current_light = light
-        else:
-            light = None
-
-        return camera, data, light
-
 
 @dataclass
 class ViewSelectionDataManagerConfig(FullImageDatamanagerConfig):
@@ -161,7 +53,6 @@ class ViewSelectionDataManagerConfig(FullImageDatamanagerConfig):
     """Random seed for initial view selection. If None, uses a random seed. Set to a value to get reproducible initial views per scene."""
     bias_views: bool = False
     """Whether to restrict available views to subset of indices."""
-
 
 class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstract-method
     """DataManager that progressively grows an active subset of training views.
@@ -191,7 +82,6 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
             **kwargs,
         )
 
-        self.current_light = None
         self.view_selector = view_selector
 
         # Initialize active set
@@ -214,6 +104,7 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
 
         self.log_added_views = []
 
+        # NOTE: Used to bias the training viewset. Typically not used.
         if self.config.bias_views:
             self.available_indices = self.all_train_indices[
                 : int(0.2 * len(self.all_train_indices))
@@ -277,11 +168,11 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
             f"Expanded active set to {len(self.active_train_indices)} views (added {len(add)} views)"
         )
 
-    def next_train(self, step: int) -> Tuple[Cameras, Dict, Cameras]:
+    def next_train(self, step: int) -> Tuple[Cameras, Dict]:
         """Return the next training batch restricted to the active view subset.
 
         Returns a `Cameras` object instead of a ray bundle to match the existing
-        ShadowSplat pipeline/model interface.
+        Coverage Splatting pipeline/model interface.
         """
         # print(f"Active train cameras: {len(self.active_train_indices)}")
         if not self.active_unseen_cameras:
@@ -305,20 +196,10 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
             cameras.metadata = {}
         cameras.metadata["cam_idx"] = image_idx
 
-        if (
-            hasattr(self.train_dataparser_outputs, "lights")
-            and self.train_dataparser_outputs.lights is not None
-        ):
-            light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
-            self.current_light = light
-        else:
-            light = None
-
-        return cameras, data, light
+        return cameras, data
 
     def next_eval_image(self, step: int) -> Tuple[Cameras, Dict]:
         """Returns the next evaluation batch.
-        Mirrors the ShadowSplatDataManager behavior to return a Camera.
         """
         if self.config.cache_images == "disk":
             camera, data = next(self.iter_eval_image_dataloader)[0]
@@ -336,13 +217,4 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         assert len(self.eval_dataset.cameras.shape) == 1, "Assumes single batch dimension"
         camera = self.eval_dataset.cameras[image_idx : image_idx + 1].to(self.device)
 
-        if (
-            hasattr(self.train_dataparser_outputs, "lights")
-            and self.train_dataparser_outputs.lights is not None
-        ):
-            light = self.train_dataparser_outputs.lights[image_idx : image_idx + 1].to(self.device)
-            self.current_light = light
-        else:
-            light = None
-
-        return camera, data, light
+        return camera, data

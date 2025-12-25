@@ -5,6 +5,8 @@ from torch import Tensor
 import math
 from typing import List
 
+from nerfstudio.cameras.cameras import Cameras, CameraType
+
 from gsplat.cuda._wrapper import (
     fully_fused_projection,
 )
@@ -30,6 +32,81 @@ def dir_to_bin(bin_dirs: Tensor, view_dirs: Tensor) -> Tensor:
     """bin_dirs [G,3], view_dirs [N, 3] -> argmax."""
     dots = view_dirs @ bin_dirs.transpose(-2, -1) # [N, G]  
     return torch.argmax(dots, dim=-1) # [N]
+
+@torch.no_grad()
+def compute_coverage_metric(
+    view_attributes: Tensor,
+    bin_dirs: Tensor,
+    masks: Tensor,
+    inference_dirs: Tensor,
+) -> Tensor:
+    """Compute the coverage metric for a given set of gaussians."""
+    coverage_metric = compute_coverage_per_gaussian(
+        coverage_counts=view_attributes,
+        bin_dirs=bin_dirs,
+        masks=masks.squeeze(0),
+        inference_dirs=inference_dirs.squeeze(0),
+    )
+
+    return coverage_metric.squeeze()
+
+@torch.no_grad()
+def compute_fig_metric(
+    view_attributes: Tensor,
+    bin_dirs: Tensor,
+    masks: Tensor,
+    inference_dirs: Tensor,
+) -> Tensor:
+    """Compute the fig metric for a given set of gaussians."""
+    return view_attributes.squeeze()
+
+@torch.no_grad()
+def compute_fig_diag_metric(
+    view_attributes: Tensor,
+    bin_dirs: Tensor,
+    masks: Tensor,
+    inference_dirs: Tensor,
+) -> Tensor:
+    """Compute the fig metric for a given set of gaussians."""
+    return 1./torch.sqrt(view_attributes.squeeze() + 1e-10)
+
+@torch.no_grad()
+def compute_view_fig_metric(
+    view_attributes: Tensor,
+    bin_dirs: Tensor,
+    masks: Tensor,
+    inference_dirs: Tensor,
+    concentration: Optional[float] = 1.0,
+) -> Tensor:
+    """Compute the view fig metric for a given set of gaussians."""
+    sg_weights = spherical_gaussian_weights(input_view_dirs=inference_dirs.squeeze(0), bin_dirs=bin_dirs, beta=concentration)       # [N, G]
+    view_fig_metric = torch.sum(view_attributes * sg_weights, dim=-1, keepdim=True)       # [N, 1]
+
+    return view_fig_metric.squeeze()
+
+@torch.no_grad()
+def compute_view_fig_diag_metric(
+    view_attributes: Tensor,
+    bin_dirs: Tensor,
+    masks: Tensor,
+    inference_dirs: Tensor,
+    concentration: Optional[float] = 1.0,
+) -> Tensor:
+    """Compute the view fig diag metric for a given set of gaussians."""
+    sg_weights = spherical_gaussian_weights(input_view_dirs=inference_dirs.squeeze(0), bin_dirs=bin_dirs, beta=concentration)       # [N, G]
+    view_fig_diag_metric = torch.sum(1./torch.sqrt(view_attributes + 1e-10) * sg_weights, dim=-1, keepdim=True)       # [N, 1]
+
+    return view_fig_diag_metric.squeeze()
+
+@torch.no_grad()
+def compute_fig_color_field_metric(
+    view_attributes: Tensor,
+    bin_dirs: Tensor,
+    masks: Tensor,
+    inference_dirs: Tensor,
+) -> Tensor:
+    """Compute the fig color field metric for a given set of gaussians."""
+    raise NotImplementedError("Not implemented yet")
 
 @torch.no_grad()
 ### NOTE: THIS FUNCTION CAN BE INTEGRATED INTO THE RASTERIZATION CALL TO AVOID CALLING FULLY FUSED PROJECTION MULTIPLE TIMES
@@ -64,7 +141,7 @@ def update_view_coverage_for_frustum(
     # packed-mode tuple layout in gsplat>=1.0: (batch_ids, camera_ids, gaussian_ids, radii, means2d, depths, conics, compensations)
     batch_ids, camera_ids, gaussian_ids, *_ = proj
     if gaussian_ids.numel() == 0:
-        return False
+        return
 
     # One optical axis for this camera batch (we render one training cam at a time)
     camtoworlds = torch.inverse(viewmats)  # [C, 4, 4]
@@ -79,8 +156,6 @@ def update_view_coverage_for_frustum(
     # Increment that bin for all visible gaussians
     # NOTE: DO WE HAVE TO WORRY ABOUT OVERFLOW HERE?
     coverage_counts.index_put_((gaussian_ids, bin_idx), torch.ones_like(gaussian_ids, dtype=coverage_counts.dtype), accumulate=True)
-
-    return True
 
 @torch.no_grad()
 # Call this function right after computing the spherical harmonics within rasterization!
@@ -156,8 +231,62 @@ def spherical_gaussian_weights(
 def update_fig_for_frustum(
     means: Tensor, quats: Tensor, scales: Tensor,
     viewmats: Tensor, Ks: Tensor, width: int, height: int,
+    depth_image: Tensor, variance_image: Tensor,
+    fig: Tensor,
+    camera_model: str = "pinhole",
+    eps2d: float = 0.3,
+    near_plane: float = 1e-2,
+    far_plane: float = 1e10,
+    radius_clip: float = 0.0,
+) -> None:
+    """
+    """
+    device = means.device
+    # Project gaussians to figure out which are in the frustum.
+    proj = fully_fused_projection(
+        means, None, quats, scales,
+        viewmats, Ks, width, height,
+        eps2d=eps2d, packed=True,
+        near_plane=near_plane, far_plane=far_plane,
+        radius_clip=radius_clip,
+        sparse_grad=False,
+        calc_compensations=False,
+        camera_model=camera_model,
+    )
+    # packed-mode tuple layout in gsplat>=1.0: (batch_ids, camera_ids, gaussian_ids, radii, means2d, depths, conics, compensations)
+    batch_ids, camera_ids, gaussian_ids, radii, means2d, depths, conics, compensations = proj
+    if gaussian_ids.numel() == 0:
+        return False
+
+    eps = 1e-12
+    denom = conics[:, 0] * conics[:, 2] - conics[:, 1]**2
+    det_cov2d = 1.0 / torch.clamp(denom, min=eps)
+
+    # Compute the transmittance using the depth, variance, and Gaussian depths
+    pixel_x = means2d[:, 0].long().clamp(0, width - 1)
+    pixel_y = means2d[:, 1].long().clamp(0, height - 1)
+    projected_pixel_ids = pixel_y * width + pixel_x  # shape [nnz]
+
+    depth_image_flattened = depth_image.reshape(-1)
+    variance_image_flattened = variance_image.reshape(-1)
+
+    # Add minimum variance threshold to prevent division by very small numbers
+    variance = torch.clamp(variance_image_flattened, min=1e-8)
+
+    # Compute Gaussian distribution 
+    normal_weights = torch.exp(-(1.0 / (2.0 * variance[projected_pixel_ids])) * (depths - depth_image_flattened[projected_pixel_ids]) ** 2)
+    normal_weights = normal_weights / torch.sqrt(2.0 * math.pi * variance[projected_pixel_ids])
+    normal_weights = (normal_weights **2) * torch.sqrt(det_cov2d)
+
+    # Update the accumulated transmittance
+    fig.index_put_((gaussian_ids,), normal_weights.unsqueeze(1), accumulate=True)
+
+@torch.no_grad()
+def update_view_fig_for_frustum(
+    means: Tensor, quats: Tensor, scales: Tensor,
+    viewmats: Tensor, Ks: Tensor, width: int, height: int,
     depth_image: Tensor, variance_image: Tensor, bin_dirs: Tensor,
-    fig: Tensor, view_fig: Tensor,
+    view_fig: Tensor,
     camera_model: str = "pinhole",
     eps2d: float = 0.3,
     near_plane: float = 1e-2,
@@ -165,8 +294,7 @@ def update_fig_for_frustum(
     radius_clip: float = 0.0,
     concentration: Optional[float] = 1.0,
 ) -> None:
-    """Find gaussians in current camera frustum and increment the sphere-bin for the
-    camera optical axis. Everything is done in-place on coverage_counts.
+    """
     """
     device = means.device
     # Project gaussians to figure out which are in the frustum.
@@ -221,26 +349,24 @@ def update_fig_for_frustum(
     combined_weight = (sg_weights**2) * normal_weights[:, None]  # [N, G]    
 
     # Update the accumulated transmittance
-    fig.index_put_((gaussian_ids,), normal_weights.unsqueeze(1), accumulate=True)
     view_fig.index_put_((gaussian_ids,), combined_weight, accumulate=True)
 
-    return None
-
 @torch.no_grad()
-def update_visibility_for_frustum(
+def update_color_field_attributes_for_frustum(
     means: Tensor, quats: Tensor, scales: Tensor,
-    viewmats: Tensor, Ks: Tensor, width: int, height: int, camera_id: int,
+    viewmats: Tensor, Ks: Tensor, width: int, height: int,
     depth_image: Tensor, variance_image: Tensor,
-    visibility: Tensor, num_hits: Tensor,
-    gaussian_ids: List[Tensor], camera_ids: List[Tensor],
+    visibility: List[Tensor],
+    gaussian_ids: List[Tensor], 
+    pointer_length: Tensor,
+    train_cam_pos_list: List[Tensor],
     camera_model: str = "pinhole",
     eps2d: float = 0.3,
     near_plane: float = 1e-2,
     far_plane: float = 1e10,
     radius_clip: float = 0.0,
 ) -> None:
-    """Find gaussians in current camera frustum and increment the sphere-bin for the
-    camera optical axis. Everything is done in-place on coverage_counts.
+    """
     """
     device = means.device
     # Project gaussians to figure out which are in the frustum.
@@ -280,23 +406,25 @@ def update_visibility_for_frustum(
     normal_weights = (normal_weights **2) * torch.sqrt(det_cov2d)
 
     # Update the accumulated transmittance
-    visibility.index_put_((camera_id.repeat(gs_ids.shape[0]), gs_ids), normal_weights, accumulate=False)    # [C, N]
-    num_hits.index_put_((camera_id.repeat(gs_ids.shape[0]), gs_ids), torch.sqrt(det_cov2d), accumulate=False)    # [C, N]
+    visibility.append(normal_weights)    # [C, N]
+    # num_hits.index_put_((camera_id.repeat(gs_ids.shape[0]), gs_ids), torch.sqrt(det_cov2d), accumulate=False)    # [C, N]
 
     # Store camera ids and gaussian ids into list of tensors
     gaussian_ids.append(gs_ids)
-    camera_ids.append(camera_id.repeat(gs_ids.shape[0]))
 
-    return None
+    pointer_length.scatter_add_(0, gs_ids, torch.ones_like(gs_ids, dtype=torch.int64))
+
+    cam_pos = torch.inverse(viewmats)[..., :3, 3].squeeze()
+    train_cam_pos_list.append(cam_pos)
 
 @torch.no_grad()
 def compute_color_field_visibility_for_frustum(
     view_directions_train: Tensor, # [M, 3]
-    view_directions_test: Tensor, # [N, 3]  # NOTE: The view directions of the candidate camera with respect to all Gaussians. Therefore, view_directions that are 0 are not in the frustum.
+    view_directions_test: Tensor, # [G, 3]  # NOTE: The view directions of the candidate camera with respect to all Gaussians. Therefore, view_directions that are 0 are not in the frustum.
     gaussian_ids_train: Tensor, # [M]
     camera_ids_train: Tensor, # [M]
-    visibility: Tensor, # [C, N]
-    attribute: Tensor, # [N]        # This is W_tilde_beta_norm_sqr
+    visibility: Tensor, # [M]
+    attribute: Tensor, # [G]        # This is W_tilde_beta_norm_sqr
     kappa: float = 1.0,
 ) -> None:
     """
@@ -320,8 +448,6 @@ def compute_color_field_visibility_for_frustum(
 
     # Use scatter_add to sum over all the cameras
     attribute.scatter_add_(0, gaussian_ids_valid, w_tilde_beta)     # N
-
-    return None
 
 @torch.no_grad()
 def dot_product_spherical_gaussians(

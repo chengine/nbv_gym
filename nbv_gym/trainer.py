@@ -1,5 +1,5 @@
 """
-Custom trainer for Shadow Splat which uses the custom viewer.
+Custom trainer for NBV-Gym which uses the custom viewer.
 """
 
 import dataclasses
@@ -17,11 +17,17 @@ from nerfstudio.utils.misc import step_check
 from nerfstudio.utils.writer import EventName, TimeWriter
 from nerfstudio.utils.decorators import check_eval_enabled
 
-from shadow_splat.viewer import ShadowSplatViewer
+from nbv_gym.viewer import NBVViewer
 
+@dataclass
+class NBVTrainerConfig(TrainerConfig):
+    """Configuration for NBV training regimen"""
 
-class ShadowSplatTrainer(Trainer):
-    """Custom trainer that uses the ShadowSplat custom viewer."""
+    _target: Type = field(default_factory=lambda: NBVTrainer)
+    """target class to instantiate"""
+
+class NBVTrainer(Trainer):
+    """Custom trainer that uses the NBV custom viewer."""
 
     def setup(self, test_mode: Literal["test", "val", "inference"] = "val") -> None:
         """Setup the Trainer by calling other setup functions."""
@@ -56,7 +62,7 @@ class ShadowSplatTrainer(Trainer):
             if datapath is None:
                 datapath = self.base_dir
             # Use our custom viewer instead of the standard one
-            self.viewer_state = ShadowSplatViewer(
+            self.viewer_state = NBVViewer(
                 self.config.viewer,
                 log_filename=viewer_log_path,
                 datapath=datapath,
@@ -152,11 +158,3 @@ class ShadowSplatTrainer(Trainer):
             writer.put_dict(
                 name="Eval Images Metrics Dict (all images)", scalar_dict=metrics_dict, step=step
             )
-
-
-@dataclass
-class ShadowSplatTrainerConfig(TrainerConfig):
-    """Configuration for ShadowSplat training regimen"""
-
-    _target: Type = field(default_factory=lambda: ShadowSplatTrainer)
-    """target class to instantiate"""
