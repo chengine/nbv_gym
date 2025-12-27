@@ -6,10 +6,10 @@ from datetime import datetime
 # -----------------------------
 # Batch experiment configuration
 # -----------------------------
-PROJECT_NAME = "next-best-view"
+PROJECT_NAME = "next-best-view-updated"
 
 # Datasets to sweep
-BASE_DATA_DIR = pathlib.Path("data")
+BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
 SCENES = [
 "caterpillar",
 "train",
@@ -32,13 +32,15 @@ DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 # Methods / information gain metrics to compare.
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
-    # "fig",
-    # "view_fig",
-    # "fig_diag",
-    # "view_fig_diag",
-    # "coverage",
+    "fig",
+    "view_fig",
+    "fig_diag",
+    "view_fig_diag",
+    "coverage",
     # "fisher_info",
-    # "random",
+    # "fig_color_field",
+    "random",
+    "all"
 ]
 
 # Visualization backends. Example: "viewer+wandb" or just "wandb"
@@ -73,25 +75,20 @@ def build_cmd(dataset: str, method: str) -> list[str]:
     ts = datetime.now().strftime("%Y%m%d-%H%M")
 
     if method == "random":
-        model = "shadow-splat"
+        model = "nbv-splat"
         view_selector = "random"
         extra_metric_args = []
         exp_suffix = f"{dataset_name}__{method}"
-    elif method in {"coverage", "fig", "view_fig", "fig_diag", "view_fig_diag"}:
-        model = "shadow-splat"
-        view_selector = "optics"
-        extra_metric_args = ["--pipeline.optics-coverage-metric", method]
-        exp_suffix = f"{dataset_name}__{method}__optics"
-    elif method == "fisher_info":
-        model = "fisher-splat"
-        view_selector = "optics"
-        extra_metric_args = ["--pipeline.optics-coverage-metric", method]
-        exp_suffix = f"{dataset_name}__{method}__optics"
+    elif method in {"coverage", "fig", "view_fig", "fig_diag", "view_fig_diag", "fig_color_field"}:
+        model = "nbv-splat"
+        view_selector = "basic"
+        extra_metric_args = ["--pipeline.view-metric", method]
+        exp_suffix = f"{dataset_name}__{method}"
     elif method == "all":
-        model = "shadow-splat"
+        model = "nbv-splat"
         view_selector = "all"
         extra_metric_args = []
-        exp_suffix = f"{dataset_name}__{method}__all"
+        exp_suffix = f"{dataset_name}__{method}"
     else:
         raise ValueError(f"Unknown method: {method}")
 
@@ -136,7 +133,6 @@ def main() -> None:
             cmd = build_cmd(ds, method)
             print("Running:", " ".join(shlex.quote(c) for c in cmd))
             subprocess.run(cmd, check=True)
-
 
 if __name__ == "__main__":
     main()

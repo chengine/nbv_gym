@@ -76,7 +76,7 @@ from nbv_gym.util.coverage import (
     update_view_coverage_for_frustum,
     update_fig_for_frustum,
     update_view_fig_for_frustum,
-    update_color_field_attributes_for_frustum,
+    update_fig_color_field_for_frustum,
 )
 
 @dataclass
@@ -162,7 +162,7 @@ class NBVSplatModel(SplatfactoModel):
             self.view_attributes_fn = partial(compute_view_fig_diag_metric, bin_dirs=self.bin_dirs, concentration=self.config.concentration)
 
         elif view_metric == "fig_color_field":
-            self.view_attributes_fn = partial(compute_fig_color_field_metric, bin_dirs=self.bin_dirs)
+            self.view_attributes_fn = None
 
     @torch.no_grad()
     # Initialize the update_view_attributes function
@@ -281,7 +281,7 @@ class NBVSplatModel(SplatfactoModel):
                         concentration=self.config.concentration,
                     )
                 elif self.view_metric == "fig_color_field":
-                    update_color_field_attributes_for_frustum(
+                    update_fig_color_field_for_frustum(
                         means=self.means,
                         quats=self.quats,
                         scales=torch.exp(self.scales),
@@ -304,16 +304,16 @@ class NBVSplatModel(SplatfactoModel):
 
         # Only do this for fig_color_field
         if self.view_metric == "fig_color_field":
-            self.view_attributes[1:, 0] = self.view_attributes[:, 1].to(torch.int64).cumsum(0)[:-1]
+            self.view_attributes[1:, 0] = self.view_attributes[:, 1].cumsum(0)[:-1]
 
             train_cam_pos = torch.stack(train_cam_pos_list, dim=0)
 
             # Allocate pooled storage (K = total #pairs)
             M = int(self.view_attributes[:, 1].sum().item())
-            cam_pool = torch.empty(M, dtype=torch.uint16, device=self.device)   # C<500 fits
+            cam_pool = torch.empty(M, dtype=torch.int64, device=self.device)   # C<500 fits
             w_pool   = torch.empty(M, dtype=self.view_attributes.dtype, device=self.device)  # optional
 
-            cursor = self.view_attributes[:, 0].to(torch.long).clone()
+            cursor = self.view_attributes[:, 0].to(torch.int64).clone()
 
             for camera_id, gs_ids in enumerate(gaussian_ids_list):
                 pos = cursor[gs_ids]            # where to write this camera's entries
@@ -326,6 +326,12 @@ class NBVSplatModel(SplatfactoModel):
             self.cam_pool = cam_pool
             self.w_pool = w_pool
             self.train_cam_pos = train_cam_pos
+
+            self.view_attributes_fn = partial(compute_fig_color_field_metric, 
+            training_cameras_positions=train_cam_pos,
+            training_camera_ids=cam_pool,
+            training_visibilities=w_pool,
+            kappa=self.config.concentration)
 
     @property
     def features_dc(self):
@@ -521,10 +527,13 @@ class NBVSplatModel(SplatfactoModel):
             features_crop = torch.sigmoid(features_crop).squeeze(1)  # [N, 1, 3] -> [N, 3]
             sh_degree_to_use = None
 
-        if self.view_metric is not None:
+        if self.view_metric is not None and self.view_attributes_fn is not None:
             render_view_attributes_fn = partial(self.view_attributes_fn, view_attributes=self.view_attributes.detach())
         else:
             render_view_attributes_fn = None
+
+        if self.view_metric == "fig_color_field" and render_view_attributes_fn is not None:
+            render_view_attributes_fn = partial(render_view_attributes_fn, means=means_crop)
 
         render, alpha, self.info = rasterization_with_view_attributes(
             means=means_crop,
@@ -563,7 +572,7 @@ class NBVSplatModel(SplatfactoModel):
         if not self.training and self.view_metric is not None:
             view_metric = render[:, ..., 3:4]
         else:
-            view_metric = torch.zeros_like(rgb)
+            view_metric = torch.zeros((H, W, 1), device=self.device)
 
         # apply bilateral grid
         if self.config.use_bilateral_grid and self.training:

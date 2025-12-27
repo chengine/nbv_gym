@@ -987,8 +987,14 @@ def rasterization_with_view_attributes(
 
     # Compute the view attributes
     if render_view_attributes_fn is not None:
-        view_attributes = render_view_attributes_fn(masks=masks, inference_dirs=dirs)
-        colors = torch.cat((colors, view_attributes[None,..., None]), dim=-1)
+        try:
+            view_attributes = render_view_attributes_fn(masks=masks, inference_dirs=dirs)
+            colors = torch.cat((colors, view_attributes[None,..., None]), dim=-1)
+        except Exception as e:
+            print(f"Error computing view attributes: {e}")
+            colors = torch.cat((colors, torch.zeros((*batch_dims, C, N, 1), device=colors.device)), dim=-1)
+    else:
+        colors = torch.cat((colors, torch.zeros((*batch_dims, C, N, 1), device=colors.device)), dim=-1)
 
     # If in distributed mode, we need to scatter the GSs to the destination ranks, based
     # on which cameras they are visible to, which we already figured out in the projection
@@ -1080,10 +1086,7 @@ def rasterization_with_view_attributes(
     if render_mode in ["RGB+D", "RGB+ED"]:
         safe_depths = torch.nan_to_num(depths, nan=0.0, posinf=far_plane, neginf=near_plane).detach()
 
-        # if fig is not None or view_fig is not None:
-        colors = torch.cat((colors, (safe_depths**2)[..., None], safe_depths[..., None]), dim=-1)
-        # else:
-        #     colors = torch.cat((colors, safe_depths[..., None]), dim=-1)
+        colors = torch.cat((colors, safe_depths[..., None]), dim=-1)
 
         if backgrounds is not None:
             backgrounds = torch.cat(

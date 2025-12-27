@@ -99,16 +99,6 @@ def compute_view_fig_diag_metric(
     return view_fig_diag_metric.squeeze()
 
 @torch.no_grad()
-def compute_fig_color_field_metric(
-    view_attributes: Tensor,
-    bin_dirs: Tensor,
-    masks: Tensor,
-    inference_dirs: Tensor,
-) -> Tensor:
-    """Compute the fig color field metric for a given set of gaussians."""
-    raise NotImplementedError("Not implemented yet")
-
-@torch.no_grad()
 ### NOTE: THIS FUNCTION CAN BE INTEGRATED INTO THE RASTERIZATION CALL TO AVOID CALLING FULLY FUSED PROJECTION MULTIPLE TIMES
 # HOWEVER, FOR READABILITY AND AVOIDING HAVING TO PASS IN THE TRAINING FLAG TO RASTERIZATION, WE KEEP IT SEPARATE
 def update_view_coverage_for_frustum(
@@ -352,7 +342,7 @@ def update_view_fig_for_frustum(
     view_fig.index_put_((gaussian_ids,), combined_weight, accumulate=True)
 
 @torch.no_grad()
-def update_color_field_attributes_for_frustum(
+def update_fig_color_field_for_frustum(
     means: Tensor, quats: Tensor, scales: Tensor,
     viewmats: Tensor, Ks: Tensor, width: int, height: int,
     depth_image: Tensor, variance_image: Tensor,
@@ -412,70 +402,129 @@ def update_color_field_attributes_for_frustum(
     # Store camera ids and gaussian ids into list of tensors
     gaussian_ids.append(gs_ids)
 
-    pointer_length.scatter_add_(0, gs_ids, torch.ones_like(gs_ids, dtype=torch.int64))
+    pointer_length.scatter_add_(0, gs_ids, torch.ones_like(gs_ids, dtype=pointer_length.dtype))
 
     cam_pos = torch.inverse(viewmats)[..., :3, 3].squeeze()
     train_cam_pos_list.append(cam_pos)
 
 @torch.no_grad()
-def compute_color_field_visibility_for_frustum(
-    view_directions_train: Tensor, # [M, 3]
-    view_directions_test: Tensor, # [G, 3]  # NOTE: The view directions of the candidate camera with respect to all Gaussians. Therefore, view_directions that are 0 are not in the frustum.
-    gaussian_ids_train: Tensor, # [M]
-    camera_ids_train: Tensor, # [M]
-    visibility: Tensor, # [M]
-    attribute: Tensor, # [G]        # This is W_tilde_beta_norm_sqr
+def compute_fig_color_field_metric(
+    training_cameras_positions: Tensor, # [C, 3]
+    training_camera_ids: Tensor, # [M]
+    training_visibilities: Tensor, # [M]
+    view_attributes: Tensor, # [G, 2]
+    means: Tensor, # [G, 3]
+    inference_dirs: Tensor, # [G, 3]  # Only for Gaussians in the frustum (N <= G)
+    masks: Tensor, # [G]
     kappa: float = 1.0,
 ) -> None:
     """
-    Compute the visibility of the color field for a given camera.
     """
+    masks_squeezed = masks.squeeze()
+    inference_dirs_squeezed = inference_dirs.squeeze()
 
-    # TODO: Put in camera ids and gaussian ids into list of tensors
+    camera_ids_pointer_start = view_attributes[:, 0].to(torch.int64)
+    camera_ids_pointer_length = view_attributes[:, 1].to(torch.int64)
 
-    dot_product, mask = dot_product_spherical_gaussians(
-                        view_directions_train, # [M, 3]
-                        view_directions_test, # [N, 3]  # NOTE: The view directions of the candidate camera with respect to all Gaussians. Therefore, view_directions that are 0 are not in the frustum.
-                        gaussian_ids_train, # [M]
-                        kappa = kappa)  # [M]
+    gaussian_ids = gaussian_ids_from_csr(camera_ids_pointer_start, camera_ids_pointer_length) # [M]
 
-    gaussian_ids_valid = gaussian_ids_train[mask]
-    camera_ids_valid = camera_ids_train[mask]
+    # Only keep the indices of Gaussians that are in the frustum
+    mask_expanded = masks_squeezed[gaussian_ids] # [M]
+    gaussian_ids_valid = gaussian_ids[mask_expanded] # [K]
+    training_camera_ids_valid = training_camera_ids[mask_expanded] # [K]
 
-    visibility_expanded = visibility[camera_ids_valid, gaussian_ids_valid]      # M
+    training_cameras_positions_expanded_valid = training_cameras_positions[training_camera_ids_valid]
+    training_gaussian_positions_expanded_valid = means[gaussian_ids_valid] # [K, 3]
 
-    w_tilde_beta = (dot_product**2) * visibility_expanded
+    training_view_directions = training_gaussian_positions_expanded_valid - training_cameras_positions_expanded_valid
+    training_view_directions = training_view_directions / (torch.norm(training_view_directions, dim=-1, keepdim=True) + 1e-10) # [K, 3]
+
+    test_view_directions = inference_dirs_squeezed[gaussian_ids_valid] # [K, 3]
+
+    dot_product = dot_product_spherical_gaussians(
+                        training_view_directions, # [K, 3]
+                        test_view_directions, # [K, 3]  
+                        kappa = kappa)  # -> [K]
+
+    visibilities_valid = training_visibilities[mask_expanded]      # [K]
+
+    w_tilde_beta = (dot_product**2) * visibilities_valid # [K]
 
     # Use scatter_add to sum over all the cameras
-    attribute.scatter_add_(0, gaussian_ids_valid, w_tilde_beta)     # N
+    outgoing_view_attributes = torch.zeros((means.shape[0]), device=means.device)
+    outgoing_view_attributes.scatter_add_(0, gaussian_ids_valid, w_tilde_beta)     # [G, 1]
+
+    return outgoing_view_attributes.squeeze()
+
+def gaussian_ids_from_csr(pointer_start: torch.Tensor, pointer_length: torch.Tensor) -> torch.Tensor:
+    """
+    Reconstruct gaussian_ids (length K) corresponding to entries in cam_pool,
+    given CSR-style per-gaussian metadata.
+
+    Args:
+        obs_start: [G] int64 (not actually needed for this reconstruction)
+        obs_len:   [G] int32/int64
+
+    Returns:
+        gaussian_ids: [K] int64, where K = obs_len.sum()
+                     This aligns with cam_pool (and any parallel pools like w_pool).
+    """
+    G = pointer_length.numel()
+    device = pointer_length.device
+    lengths = pointer_length.to(torch.int64)
+
+    gaussian_ids = torch.repeat_interleave(
+        torch.arange(G, device=device, dtype=torch.int64),
+        lengths
+    )
+    return gaussian_ids
+
+# @torch.no_grad()
+# def compute_color_field_visibility_for_frustum(
+#     view_directions_train: Tensor, # [M, 3]
+#     view_directions_test: Tensor, # [G, 3]  # NOTE: The view directions of the candidate camera with respect to all Gaussians. Therefore, view_directions that are 0 are not in the frustum.
+#     gaussian_ids_train: Tensor, # [M]
+#     camera_ids_train: Tensor, # [M]
+#     visibility: Tensor, # [M]
+#     attribute: Tensor, # [G]        # This is W_tilde_beta_norm_sqr
+#     kappa: float = 1.0,
+# ) -> None:
+#     """
+#     Compute the visibility of the color field for a given camera.
+#     """
+
+#     # TODO: Put in camera ids and gaussian ids into list of tensors
+
+#     dot_product, mask = dot_product_spherical_gaussians(
+#                         view_directions_train, # [M, 3]
+#                         view_directions_test, # [N, 3]  # NOTE: The view directions of the candidate camera with respect to all Gaussians. Therefore, view_directions that are 0 are not in the frustum.
+#                         gaussian_ids_train, # [M]
+#                         kappa = kappa)  # [M]
+
+#     gaussian_ids_valid = gaussian_ids_train[mask]
+#     camera_ids_valid = camera_ids_train[mask]
+
+#     visibility_expanded = visibility[camera_ids_valid, gaussian_ids_valid]      # M
+
+#     w_tilde_beta = (dot_product**2) * visibility_expanded
+
+#     # Use scatter_add to sum over all the cameras
+#     attribute.scatter_add_(0, gaussian_ids_valid, w_tilde_beta)     # N
 
 @torch.no_grad()
 def dot_product_spherical_gaussians(
     view_directions_train: Tensor, # [M, 3]
-    view_directions_test: Tensor, # [N, 3]  # NOTE: The view directions of the candidate camera with respect to all Gaussians. Therefore, view_directions that are 0 are not in the frustum.
-    gaussian_ids_train: Tensor, # [M]
+    view_directions_test: Tensor, # [M, 3]  # NOTE: The view directions of the candidate camera with respect to all Gaussians. Therefore, view_directions that are 0 are not in the frustum.
     kappa: float = 1.0,
 ) -> Tensor:
     """
     Dot product between two spherical gaussians in continuous space. Note, we do NOT normalize the directions in this function. Make sure the directions
     are normalized before calling this function.
     """
-
-    # Format the view_directions so that view_directions_test is the same size as view_directions_train
-    view_directions_test_expanded = view_directions_test[gaussian_ids_train]
-
-    # If the norm is 0, then remove the calculation
-    view_directions_test_norm = torch.norm(view_directions_test_expanded, dim=-1, keepdim=True)
-
-    mask = (view_directions_test_norm > 0)
-
-    view_directions_train_valid = view_directions_train[mask]   
-    view_directions_test_valid = view_directions_test_expanded[mask]
-
     # Compute the dot product
-    dot_product = inner_ptilde(view_directions_train_valid, view_directions_test_valid, kappa)
+    dot_product = inner_ptilde(view_directions_train, view_directions_test, kappa)
 
-    return dot_product, mask
+    return dot_product
 
 @torch.no_grad()
 def sinhc(z, eps=1e-4):
@@ -519,17 +568,15 @@ def inner_ptilde(mu1, mu2, kappa, eps=1e-4):
     # prefactor 2kappa / sinh(2kappa), also safe near kappa = 0
     two_kappa = 2 * kappa
     # small-kappa branch: sinh(2kappa) ≈ 2kappa + (2kappa)^3/6
-    small_k = two_kappa.abs() < eps
-    pref = torch.empty_like(two_kappa)
+    small_k = two_kappa < eps
 
-    if small_k.any():
-        tk = two_kappa[small_k]
+    if small_k:
+        tk = torch.tensor(two_kappa, device=mu1.device)
         sinh_2k_approx = tk + (tk**3) / 6
-        pref[small_k] = two_kappa[small_k] / sinh_2k_approx
-
-    if (~small_k).any():
-        tk = two_kappa[~small_k]
-        pref[~small_k] = tk / torch.sinh(tk)
+        pref = two_kappa / sinh_2k_approx
+    else:
+        tk = torch.tensor(two_kappa, device=mu1.device)
+        pref = tk / torch.sinh(tk)
 
     # final inner product
     # broadcasting: pref and h should be broadcastable to s's shape

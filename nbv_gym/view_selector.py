@@ -242,6 +242,7 @@ class VanillaViewSelector(BaseViewSelector):
         k = min(num_to_select, len(scores))
         selected_indices = [idx for idx, _ in scores[:k]]
 
+        print("Successfully selected views")
         return selected_indices
 
 def create_view_selector(
