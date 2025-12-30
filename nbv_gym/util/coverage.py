@@ -217,6 +217,22 @@ def spherical_gaussian_weights(
 
     return weights
 
+def segment_softmax(logits: torch.Tensor, group_id: torch.LongTensor, num_groups: int, eps: float = 1e-12):
+    # logits: [N]
+    # group_id: [N] in [0, num_groups)
+    device = logits.device
+    neg_inf = torch.tensor(-float("inf"), device=device, dtype=logits.dtype)
+
+    max_per = torch.full((num_groups,), neg_inf, device=device, dtype=logits.dtype)
+    max_per.scatter_reduce_(0, group_id, logits, reduce="amax", include_self=True)
+
+    exp_logits = torch.exp(logits - max_per[group_id])
+    sumexp = torch.zeros((num_groups,), device=device, dtype=logits.dtype)
+    sumexp.scatter_add_(0, group_id, exp_logits)
+
+    return exp_logits / (sumexp[group_id] + eps)  # [N], sums to 1 per group
+
+
 # @torch.no_grad()
 # def update_fig_for_frustum(
 #     means: Tensor, quats: Tensor, scales: Tensor,
@@ -272,6 +288,92 @@ def spherical_gaussian_weights(
 #     fig.index_put_((gaussian_ids,), normal_weights.unsqueeze(1), accumulate=True)
 
 # TODO: Still need to put back the sum over the 2D ellipse.
+# @torch.no_grad()
+# def update_fig_for_frustum(
+#     means: Tensor, quats: Tensor, scales: Tensor,
+#     viewmats: Tensor, Ks: Tensor, width: int, height: int,
+#     depth_image: Tensor, variance_image: Tensor,
+#     fig: Tensor,
+#     camera_model: str = "pinhole",
+#     eps2d: float = 0.3,
+#     near_plane: float = 1e-2,
+#     far_plane: float = 1e10,
+#     radius_clip: float = 0.0,
+#     # Optional: if you have per-pixel accumulated alpha from moment_rasterization / rasterization
+#     alpha_image: Optional[Tensor] = None,
+#     reduce: Literal["amax", "sum", "mean"] = "sum",
+# ) -> None:
+#     device = means.device
+
+#     proj = fully_fused_projection(
+#         means, None, quats, scales,
+#         viewmats, Ks, width, height,
+#         eps2d=eps2d, packed=True,
+#         near_plane=near_plane, far_plane=far_plane,
+#         radius_clip=radius_clip,
+#         sparse_grad=False,
+#         calc_compensations=False,
+#         camera_model=camera_model,
+#     )
+
+#     batch_ids, camera_ids, gaussian_ids, radii, means2d, depths, conics, compensations = proj
+#     if gaussian_ids.numel() == 0:
+#         return
+
+#     eps = 1e-12
+#     denom = conics[:, 0] * conics[:, 2] - conics[:, 1]**2
+#     det_cov2d = 1.0 / torch.clamp(denom, min=eps)  # = 1/det(conic)
+
+#     # Pixel ids
+#     pixel_x = means2d[:, 0].long().clamp(0, width - 1)
+#     pixel_y = means2d[:, 1].long().clamp(0, height - 1)
+#     pix = pixel_y * width + pixel_x  # [nnz] in [0, H*W)
+
+#     # If you have multiple cameras in this call, avoid mixing pixels across cameras:
+#     HW = width * height
+#     group_id = camera_ids.long() * HW + pix  # [nnz] unique per (camera, pixel)
+#     num_groups = int(group_id.max().item()) + 1  # safe upper bound for scatter buffers
+
+#     # Flatten depth/var (assume depth_image/variance_image are [C,H,W] or [H,W] compatible)
+#     depth_flat = depth_image.reshape(-1)       # must align with per-camera layout if C>1
+#     var_flat   = variance_image.reshape(-1)
+
+#     # If depth_image includes cameras, you likely want per-camera indexing too:
+#     # depth_flat should be shaped [C*H*W]. If depth_image is [C,H,W], this works.
+#     depth_mu = depth_flat[camera_ids.long() * HW + pix]
+#     var = torch.clamp(var_flat[camera_ids.long() * HW + pix], min=1e-8)
+
+#     # ---- Softmax logits (log of your old "pdf^2 * sqrt(det_cov2d)" up to constants) ----
+#     # old weight was: exp(-(d-mu)^2/var) / (2*pi*var) * sqrt(det_cov2d)
+#     # logit = -(d-mu)^2/var - log(var) + 0.5*log(det_cov2d)  (dropping constant -log(2*pi))
+#     diff = depths - depth_mu
+#     logits = -(diff * diff) / var
+#     logits = logits - torch.log(var) + 0.5 * torch.log(torch.clamp(det_cov2d, min=eps))
+
+#     # ---- Segment softmax over group_id ----
+#     neg_inf = torch.tensor(-float("inf"), device=device, dtype=logits.dtype)
+#     max_per = torch.full((num_groups,), neg_inf, device=device, dtype=logits.dtype)
+#     max_per.scatter_reduce_(0, group_id, logits, reduce="amax", include_self=True)
+
+#     exp_logits = torch.exp(logits - max_per[group_id])
+#     sumexp = torch.zeros((num_groups,), device=device, dtype=logits.dtype)
+#     sumexp.scatter_add_(0, group_id, exp_logits)
+
+#     probs = exp_logits / (sumexp[group_id] + 1e-12)  # in [0,1], sums to 1 per (camera,pixel)
+
+#     # Optional: scale so sums match per-pixel opacity if you have it
+#     if alpha_image is not None:
+#         alpha_flat = alpha_image.reshape(-1)
+#         alpha = alpha_flat[camera_ids.long() * HW + pix].clamp(0.0, 1.0)
+#         weights = alpha * probs
+#     else:
+#         weights = probs
+
+#     weights = weights**2 # * torch.sqrt(det_cov2d)
+
+#     # Accumulate into fig per Gaussian
+#     fig.scatter_reduce_(0, gaussian_ids, weights, reduce=reduce, include_self=True)
+
 @torch.no_grad()
 def update_fig_for_frustum(
     means: Tensor, quats: Tensor, scales: Tensor,
@@ -283,9 +385,9 @@ def update_fig_for_frustum(
     near_plane: float = 1e-2,
     far_plane: float = 1e10,
     radius_clip: float = 0.0,
-    # Optional: if you have per-pixel accumulated alpha from moment_rasterization / rasterization
-    alpha_image: Optional[Tensor] = None,
-    reduce: Literal["amax", "sum", "mean"] = "sum",
+    # new knobs
+    reduce: Literal["amax", "sum", "mean"] = "sum",          # "sum" or "amax"
+    alpha_image: Optional[Tensor] = None,  # if provided, primitive weights sum to alpha per pixel
 ) -> None:
     device = means.device
 
@@ -299,64 +401,141 @@ def update_fig_for_frustum(
         calc_compensations=False,
         camera_model=camera_model,
     )
-
     batch_ids, camera_ids, gaussian_ids, radii, means2d, depths, conics, compensations = proj
     if gaussian_ids.numel() == 0:
         return
 
     eps = 1e-12
     denom = conics[:, 0] * conics[:, 2] - conics[:, 1]**2
-    det_cov2d = 1.0 / torch.clamp(denom, min=eps)  # = 1/det(conic)
+    det_cov2d = 1.0 / torch.clamp(denom, min=eps)                 # ~ det(Sigma_2D)
+    footprint = torch.sqrt(torch.clamp(det_cov2d, min=eps))       # sqrt(det(Sigma_2D))
 
-    # Pixel ids
+    # pixels
     pixel_x = means2d[:, 0].long().clamp(0, width - 1)
     pixel_y = means2d[:, 1].long().clamp(0, height - 1)
-    pix = pixel_y * width + pixel_x  # [nnz] in [0, H*W)
-
-    # If you have multiple cameras in this call, avoid mixing pixels across cameras:
+    pix = pixel_y * width + pixel_x
     HW = width * height
-    group_id = camera_ids.long() * HW + pix  # [nnz] unique per (camera, pixel)
-    num_groups = int(group_id.max().item()) + 1  # safe upper bound for scatter buffers
 
-    # Flatten depth/var (assume depth_image/variance_image are [C,H,W] or [H,W] compatible)
-    depth_flat = depth_image.reshape(-1)       # must align with per-camera layout if C>1
+    # group by (camera, pixel)
+    cam_ids = camera_ids.long()
+    num_cams = int(cam_ids.max().item()) + 1
+    group_id = cam_ids * HW + pix
+    num_groups = num_cams * HW
+
+    # index into per-camera images if available; otherwise treat as single camera [HW]
+    depth_flat = depth_image.reshape(-1)
     var_flat   = variance_image.reshape(-1)
 
-    # If depth_image includes cameras, you likely want per-camera indexing too:
-    # depth_flat should be shaped [C*H*W]. If depth_image is [C,H,W], this works.
-    depth_mu = depth_flat[camera_ids.long() * HW + pix]
-    var = torch.clamp(var_flat[camera_ids.long() * HW + pix], min=1e-8)
+    if depth_flat.numel() == HW:
+        idx_pix = pix
+    else:
+        idx_pix = cam_ids * HW + pix
 
-    # ---- Softmax logits (log of your old "pdf^2 * sqrt(det_cov2d)" up to constants) ----
-    # old weight was: exp(-(d-mu)^2/var) / (2*pi*var) * sqrt(det_cov2d)
-    # logit = -(d-mu)^2/var - log(var) + 0.5*log(det_cov2d)  (dropping constant -log(2*pi))
-    diff = depths - depth_mu
+    mu_depth = depth_flat[idx_pix]
+    var = torch.clamp(var_flat[idx_pix], min=1e-8)
+
+    # ---- primitive weights w in [0,1] via softmax (NO footprint here) ----
+    diff = depths - mu_depth
     logits = -(diff * diff) / var
-    logits = logits - torch.log(var) + 0.5 * torch.log(torch.clamp(det_cov2d, min=eps))
+    # logits = logits - torch.log(var)  # optional, matches your old 1/var factor
 
-    # ---- Segment softmax over group_id ----
-    neg_inf = torch.tensor(-float("inf"), device=device, dtype=logits.dtype)
-    max_per = torch.full((num_groups,), neg_inf, device=device, dtype=logits.dtype)
-    max_per.scatter_reduce_(0, group_id, logits, reduce="amax", include_self=True)
+    w_prim = segment_softmax(logits, group_id, num_groups)  # sums to 1 per (cam,pix)
 
-    exp_logits = torch.exp(logits - max_per[group_id])
-    sumexp = torch.zeros((num_groups,), device=device, dtype=logits.dtype)
-    sumexp.scatter_add_(0, group_id, exp_logits)
-
-    probs = exp_logits / (sumexp[group_id] + 1e-12)  # in [0,1], sums to 1 per (camera,pixel)
-
-    # Optional: scale so sums match per-pixel opacity if you have it
+    # optional: scale so per-pixel sum is alpha (still each w in [0,1])
     if alpha_image is not None:
         alpha_flat = alpha_image.reshape(-1)
-        alpha = alpha_flat[camera_ids.long() * HW + pix].clamp(0.0, 1.0)
-        weights = alpha * probs
+        alpha = alpha_flat[idx_pix].clamp(0.0, 1.0)
+        w_prim = w_prim * alpha
+
+    # ---- what you actually want to accumulate/store ----
+    contrib = (w_prim * w_prim) # * footprint  # may exceed 1 (OK per your description)
+
+    fig.scatter_reduce_(0, gaussian_ids, contrib, reduce=reduce, include_self=True)
+
+def update_view_fig_for_frustum(
+    means: Tensor, quats: Tensor, scales: Tensor,
+    viewmats: Tensor, Ks: Tensor, width: int, height: int,
+    depth_image: Tensor, variance_image: Tensor, bin_dirs: Tensor,
+    view_fig: Tensor,
+    camera_model: str = "pinhole",
+    eps2d: float = 0.3,
+    near_plane: float = 1e-2,
+    far_plane: float = 1e10,
+    radius_clip: float = 0.0,
+    concentration: Optional[float] = 1.0,
+    # new knobs
+    reduce: Literal["amax", "sum", "mean"] = "sum",          # "sum" or "amax"
+    alpha_image: Optional[Tensor] = None,  # if provided, primitive weights sum to alpha per pixel
+) -> None:
+    device = means.device
+
+    proj = fully_fused_projection(
+        means, None, quats, scales,
+        viewmats, Ks, width, height,
+        eps2d=eps2d, packed=True,
+        near_plane=near_plane, far_plane=far_plane,
+        radius_clip=radius_clip,
+        sparse_grad=False,
+        calc_compensations=False,
+        camera_model=camera_model,
+    )
+    batch_ids, camera_ids, gaussian_ids, radii, means2d, depths, conics, compensations = proj
+    if gaussian_ids.numel() == 0:
+        return
+
+    eps = 1e-12
+    denom = conics[:, 0] * conics[:, 2] - conics[:, 1]**2
+    det_cov2d = 1.0 / torch.clamp(denom, min=eps)
+    footprint = torch.sqrt(torch.clamp(det_cov2d, min=eps))
+
+    # directions for spherical gaussian weights
+    camtoworlds = torch.inverse(viewmats)  # [C,4,4]
+    dirs = means[gaussian_ids, :] - camtoworlds[camera_ids, :3, 3]  # [N,3]
+    dirs = dirs / (torch.norm(dirs, dim=-1, keepdim=True) + 1e-10)
+
+    bin_dirs = bin_dirs / (torch.norm(bin_dirs, dim=-1, keepdim=True) + 1e-10)
+    sg_weights = spherical_gaussian_weights(dirs, bin_dirs, concentration)  # [N,G]
+
+    # pixels
+    pixel_x = means2d[:, 0].long().clamp(0, width - 1)
+    pixel_y = means2d[:, 1].long().clamp(0, height - 1)
+    pix = pixel_y * width + pixel_x
+    HW = width * height
+
+    cam_ids = camera_ids.long()
+    num_cams = int(cam_ids.max().item()) + 1
+    group_id = cam_ids * HW + pix
+    num_groups = num_cams * HW
+
+    depth_flat = depth_image.reshape(-1)
+    var_flat   = variance_image.reshape(-1)
+
+    if depth_flat.numel() == HW:
+        idx_pix = pix
     else:
-        weights = probs
+        idx_pix = cam_ids * HW + pix
 
-    weights = weights**2 # * torch.sqrt(det_cov2d)
+    mu_depth = depth_flat[idx_pix]
+    var = torch.clamp(var_flat[idx_pix], min=1e-8)
 
-    # Accumulate into fig per Gaussian
-    fig.scatter_reduce_(0, gaussian_ids, weights, reduce=reduce, include_self=True)
+    # primitive weights (NO footprint here)
+    diff = depths - mu_depth
+    logits = -(diff * diff) / var
+    # logits = logits - torch.log(var)
+
+    w_prim = segment_softmax(logits, group_id, num_groups)
+
+    if alpha_image is not None:
+        alpha_flat = alpha_image.reshape(-1)
+        alpha = alpha_flat[idx_pix].clamp(0.0, 1.0)
+        w_prim = w_prim * alpha
+
+    contrib = (w_prim * w_prim) # * footprint              # [N]
+    combined = (sg_weights * sg_weights) * contrib[:, None]  # [N,G]
+
+    # scatter_reduce into view_fig by gaussian_id
+    idx = gaussian_ids[:, None].expand(-1, combined.shape[1])
+    view_fig.scatter_reduce_(0, idx, combined, reduce=reduce, include_self=True)
 
 # @torch.no_grad()
 # def update_view_fig_for_frustum(
@@ -428,111 +607,111 @@ def update_fig_for_frustum(
 #     # Update the accumulated transmittance
 #     view_fig.index_put_((gaussian_ids,), combined_weight, accumulate=True)
 
-@torch.no_grad()
-def update_view_fig_for_frustum(
-    means: Tensor, quats: Tensor, scales: Tensor,
-    viewmats: Tensor, Ks: Tensor, width: int, height: int,
-    depth_image: Tensor, variance_image: Tensor, bin_dirs: Tensor,
-    view_fig: Tensor,
-    camera_model: str = "pinhole",
-    eps2d: float = 0.3,
-    near_plane: float = 1e-2,
-    far_plane: float = 1e10,
-    radius_clip: float = 0.0,
-    concentration: Optional[float] = 1.0,
-    # new: how to reduce when multiple updates hit same gaussian_id
-    reduce: Literal["amax", "sum", "mean"] = "sum",
-    alpha_image: Optional[Tensor] = None,  # optional per-pixel alpha if you want sum-to-alpha
-) -> None:
-    device = means.device
+# @torch.no_grad()
+# def update_view_fig_for_frustum(
+#     means: Tensor, quats: Tensor, scales: Tensor,
+#     viewmats: Tensor, Ks: Tensor, width: int, height: int,
+#     depth_image: Tensor, variance_image: Tensor, bin_dirs: Tensor,
+#     view_fig: Tensor,
+#     camera_model: str = "pinhole",
+#     eps2d: float = 0.3,
+#     near_plane: float = 1e-2,
+#     far_plane: float = 1e10,
+#     radius_clip: float = 0.0,
+#     concentration: Optional[float] = 1.0,
+#     # new: how to reduce when multiple updates hit same gaussian_id
+#     reduce: Literal["amax", "sum", "mean"] = "sum",
+#     alpha_image: Optional[Tensor] = None,  # optional per-pixel alpha if you want sum-to-alpha
+# ) -> None:
+#     device = means.device
 
-    proj = fully_fused_projection(
-        means, None, quats, scales,
-        viewmats, Ks, width, height,
-        eps2d=eps2d, packed=True,
-        near_plane=near_plane, far_plane=far_plane,
-        radius_clip=radius_clip,
-        sparse_grad=False,
-        calc_compensations=False,
-        camera_model=camera_model,
-    )
+#     proj = fully_fused_projection(
+#         means, None, quats, scales,
+#         viewmats, Ks, width, height,
+#         eps2d=eps2d, packed=True,
+#         near_plane=near_plane, far_plane=far_plane,
+#         radius_clip=radius_clip,
+#         sparse_grad=False,
+#         calc_compensations=False,
+#         camera_model=camera_model,
+#     )
 
-    batch_ids, camera_ids, gaussian_ids, radii, means2d, depths, conics, compensations = proj
-    if gaussian_ids.numel() == 0:
-        return
+#     batch_ids, camera_ids, gaussian_ids, radii, means2d, depths, conics, compensations = proj
+#     if gaussian_ids.numel() == 0:
+#         return
 
-    eps = 1e-12
-    denom = conics[:, 0] * conics[:, 2] - conics[:, 1] ** 2
-    det_cov2d = 1.0 / torch.clamp(denom, min=eps)  # scalar per nnz
+#     eps = 1e-12
+#     denom = conics[:, 0] * conics[:, 2] - conics[:, 1] ** 2
+#     det_cov2d = 1.0 / torch.clamp(denom, min=eps)  # scalar per nnz
 
-    # ---- directions + spherical gaussian kernel ----
-    camtoworlds = torch.inverse(viewmats)  # [C,4,4]
-    dirs = means[gaussian_ids, :] - camtoworlds[camera_ids, :3, 3]  # [nnz,3]
-    dirs = dirs / (torch.norm(dirs, dim=-1, keepdim=True) + 1e-10)
+#     # ---- directions + spherical gaussian kernel ----
+#     camtoworlds = torch.inverse(viewmats)  # [C,4,4]
+#     dirs = means[gaussian_ids, :] - camtoworlds[camera_ids, :3, 3]  # [nnz,3]
+#     dirs = dirs / (torch.norm(dirs, dim=-1, keepdim=True) + 1e-10)
 
-    bin_dirs = bin_dirs / (torch.norm(bin_dirs, dim=-1, keepdim=True) + 1e-10)
+#     bin_dirs = bin_dirs / (torch.norm(bin_dirs, dim=-1, keepdim=True) + 1e-10)
 
-    sg_weights = spherical_gaussian_weights(dirs, bin_dirs, concentration)  # [nnz, G]
+#     sg_weights = spherical_gaussian_weights(dirs, bin_dirs, concentration)  # [nnz, G]
 
-    # ---- pixel grouping ids ----
-    pixel_x = means2d[:, 0].long().clamp(0, width - 1)
-    pixel_y = means2d[:, 1].long().clamp(0, height - 1)
-    pix = pixel_y * width + pixel_x  # [nnz] in [0,HW)
-    HW = width * height
+#     # ---- pixel grouping ids ----
+#     pixel_x = means2d[:, 0].long().clamp(0, width - 1)
+#     pixel_y = means2d[:, 1].long().clamp(0, height - 1)
+#     pix = pixel_y * width + pixel_x  # [nnz] in [0,HW)
+#     HW = width * height
 
-    # group by (camera, pixel) so different cameras don't mix
-    group_id = camera_ids.long() * HW + pix  # [nnz]
-    num_groups = int(group_id.max().item()) + 1
+#     # group by (camera, pixel) so different cameras don't mix
+#     group_id = camera_ids.long() * HW + pix  # [nnz]
+#     num_groups = int(group_id.max().item()) + 1
 
-    # ---- gather per-(camera,pixel) depth mean/var (if provided) ----
-    depth_flat = depth_image.reshape(-1)
-    var_flat   = variance_image.reshape(-1)
+#     # ---- gather per-(camera,pixel) depth mean/var (if provided) ----
+#     depth_flat = depth_image.reshape(-1)
+#     var_flat   = variance_image.reshape(-1)
 
-    # IMPORTANT: assumes depth/var are laid out as [C*H*W] if multiple cameras
-    idx_pix = camera_ids.long() * HW + pix
-    mu_depth = depth_flat[idx_pix]
-    var = torch.clamp(var_flat[idx_pix], min=1e-8)
+#     # IMPORTANT: assumes depth/var are laid out as [C*H*W] if multiple cameras
+#     idx_pix = camera_ids.long() * HW + pix
+#     mu_depth = depth_flat[idx_pix]
+#     var = torch.clamp(var_flat[idx_pix], min=1e-8)
 
-    # ---- softmax approximation for depth/footprint weights ----
-    # Use logits = log(old_weight) up to constants:
-    # old: exp(-(d-mu)^2/var) / (2*pi*var) * sqrt(det_cov2d)
-    # logit: -(d-mu)^2/var - log(var) + 0.5*log(det_cov2d) (+ const)
-    diff = depths - mu_depth
-    logits = -(diff * diff) / var
-    logits = logits - torch.log(var) + 0.5 * torch.log(torch.clamp(det_cov2d, min=eps))
+#     # ---- softmax approximation for depth/footprint weights ----
+#     # Use logits = log(old_weight) up to constants:
+#     # old: exp(-(d-mu)^2/var) / (2*pi*var) * sqrt(det_cov2d)
+#     # logit: -(d-mu)^2/var - log(var) + 0.5*log(det_cov2d) (+ const)
+#     diff = depths - mu_depth
+#     logits = -(diff * diff) / var
+#     logits = logits - torch.log(var) + 0.5 * torch.log(torch.clamp(det_cov2d, min=eps))
 
-    # segment log-sum-exp for stability
-    neg_inf = torch.tensor(-float("inf"), device=device, dtype=logits.dtype)
-    max_per = torch.full((num_groups,), neg_inf, device=device, dtype=logits.dtype)
-    max_per.scatter_reduce_(0, group_id, logits, reduce="amax", include_self=True)
+#     # segment log-sum-exp for stability
+#     neg_inf = torch.tensor(-float("inf"), device=device, dtype=logits.dtype)
+#     max_per = torch.full((num_groups,), neg_inf, device=device, dtype=logits.dtype)
+#     max_per.scatter_reduce_(0, group_id, logits, reduce="amax", include_self=True)
 
-    exp_logits = torch.exp(logits - max_per[group_id])
-    sumexp = torch.zeros((num_groups,), device=device, dtype=logits.dtype)
-    sumexp.scatter_add_(0, group_id, exp_logits)
+#     exp_logits = torch.exp(logits - max_per[group_id])
+#     sumexp = torch.zeros((num_groups,), device=device, dtype=logits.dtype)
+#     sumexp.scatter_add_(0, group_id, exp_logits)
 
-    depth_probs = exp_logits / (sumexp[group_id] + 1e-12)  # [nnz], sums to 1 per (cam,pix)
+#     depth_probs = exp_logits / (sumexp[group_id] + 1e-12)  # [nnz], sums to 1 per (cam,pix)
 
-    # optional: scale to per-pixel alpha if you have it
-    if alpha_image is not None:
-        alpha_flat = alpha_image.reshape(-1)
-        alpha = alpha_flat[idx_pix].clamp(0.0, 1.0)
-        depth_weights = alpha * depth_probs
-    else:
-        depth_weights = depth_probs
+#     # optional: scale to per-pixel alpha if you have it
+#     if alpha_image is not None:
+#         alpha_flat = alpha_image.reshape(-1)
+#         alpha = alpha_flat[idx_pix].clamp(0.0, 1.0)
+#         depth_weights = alpha * depth_probs
+#     else:
+#         depth_weights = depth_probs
 
-    depth_weights = depth_weights**2 # * torch.sqrt(det_cov2d)
+#     depth_weights = depth_weights**2 # * torch.sqrt(det_cov2d)
 
-    # ---- combine with spherical weights as before ----
-    combined_weight = (sg_weights ** 2) * depth_weights[:, None]  # [nnz, G]
+#     # ---- combine with spherical weights as before ----
+#     combined_weight = (sg_weights ** 2) * depth_weights[:, None]  # [nnz, G]
 
-    # ---- scatter_reduce_ into view_fig by gaussian_id ----
-    # view_fig expected shape [num_gaussians, G]
-    # gaussian_ids shape [nnz]
-    # combined_weight shape [nnz, G]
+#     # ---- scatter_reduce_ into view_fig by gaussian_id ----
+#     # view_fig expected shape [num_gaussians, G]
+#     # gaussian_ids shape [nnz]
+#     # combined_weight shape [nnz, G]
 
-    # scatter_reduce along dim=0 using expanded indices
-    idx = gaussian_ids[:, None].expand(-1, combined_weight.shape[1])
-    view_fig.scatter_reduce_(0, idx, combined_weight, reduce=reduce, include_self=True)
+#     # scatter_reduce along dim=0 using expanded indices
+#     idx = gaussian_ids[:, None].expand(-1, combined_weight.shape[1])
+#     view_fig.scatter_reduce_(0, idx, combined_weight, reduce=reduce, include_self=True)
 
 # @torch.no_grad()
 # def update_fig_color_field_for_frustum(
@@ -603,13 +782,111 @@ def update_view_fig_for_frustum(
 
 #     print(f"torch.sqrt(det_cov2d): {torch.sqrt(det_cov2d).max()}")
 
+# @torch.no_grad()
+# def update_fig_color_field_for_frustum(
+#     means: Tensor, quats: Tensor, scales: Tensor,
+#     viewmats: Tensor, Ks: Tensor, width: int, height: int,
+#     depth_image: Tensor, variance_image: Tensor,
+#     visibility_list: List[Tensor],
+#     gaussian_ids_list: List[Tensor], 
+#     pointer_length: Tensor,
+#     train_cam_pos_list: List[Tensor],
+#     camera_model: str = "pinhole",
+#     eps2d: float = 0.3,
+#     near_plane: float = 1e-2,
+#     far_plane: float = 1e10,
+#     radius_clip: float = 0.0,
+#     alpha_image: Optional[Tensor] = None,
+# ) -> None:
+#     """
+#     """
+#     device = means.device
+
+#     proj = fully_fused_projection(
+#         means, None, quats, scales,
+#         viewmats, Ks, width, height,
+#         eps2d=eps2d, packed=True,
+#         near_plane=near_plane, far_plane=far_plane,
+#         radius_clip=radius_clip,
+#         sparse_grad=False,
+#         calc_compensations=False,
+#         camera_model=camera_model,
+#     )
+
+#     batch_ids, camera_ids, gaussian_ids, radii, means2d, depths, conics, compensations = proj
+#     if gaussian_ids.numel() == 0:
+#         return
+
+#     eps = 1e-12
+#     denom = conics[:, 0] * conics[:, 2] - conics[:, 1]**2
+#     det_cov2d = 1.0 / torch.clamp(denom, min=eps)  # = 1/det(conic)
+
+#     # Pixel ids
+#     pixel_x = means2d[:, 0].long().clamp(0, width - 1)
+#     pixel_y = means2d[:, 1].long().clamp(0, height - 1)
+#     pix = pixel_y * width + pixel_x  # [nnz] in [0, H*W)
+
+#     # If you have multiple cameras in this call, avoid mixing pixels across cameras:
+#     HW = width * height
+#     group_id = camera_ids.long() * HW + pix  # [nnz] unique per (camera, pixel)
+#     num_groups = int(group_id.max().item()) + 1  # safe upper bound for scatter buffers
+
+#     # Flatten depth/var (assume depth_image/variance_image are [C,H,W] or [H,W] compatible)
+#     depth_flat = depth_image.reshape(-1)       # must align with per-camera layout if C>1
+#     var_flat   = variance_image.reshape(-1)
+
+#     # If depth_image includes cameras, you likely want per-camera indexing too:
+#     # depth_flat should be shaped [C*H*W]. If depth_image is [C,H,W], this works.
+#     depth_mu = depth_flat[camera_ids.long() * HW + pix]
+#     var = torch.clamp(var_flat[camera_ids.long() * HW + pix], min=1e-8)
+
+#     # ---- Softmax logits (log of your old "pdf^2 * sqrt(det_cov2d)" up to constants) ----
+#     # old weight was: exp(-(d-mu)^2/var) / (2*pi*var) * sqrt(det_cov2d)
+#     # logit = -(d-mu)^2/var - log(var) + 0.5*log(det_cov2d)  (dropping constant -log(2*pi))
+#     diff = depths - depth_mu
+#     logits = -(diff * diff) / var
+#     logits = logits - torch.log(var) + 0.5 * torch.log(torch.clamp(det_cov2d, min=eps))
+
+#     # ---- Segment softmax over group_id ----
+#     neg_inf = torch.tensor(-float("inf"), device=device, dtype=logits.dtype)
+#     max_per = torch.full((num_groups,), neg_inf, device=device, dtype=logits.dtype)
+#     max_per.scatter_reduce_(0, group_id, logits, reduce="amax", include_self=True)
+
+#     exp_logits = torch.exp(logits - max_per[group_id])
+#     sumexp = torch.zeros((num_groups,), device=device, dtype=logits.dtype)
+#     sumexp.scatter_add_(0, group_id, exp_logits)
+
+#     probs = exp_logits / (sumexp[group_id] + 1e-12)  # in [0,1], sums to 1 per (camera,pixel)
+
+#     # Optional: scale so sums match per-pixel opacity if you have it
+#     if alpha_image is not None:
+#         alpha_flat = alpha_image.reshape(-1)
+#         alpha = alpha_flat[camera_ids.long() * HW + pix].clamp(0.0, 1.0)
+#         weights = alpha * probs
+#     else:
+#         weights = probs
+
+#     weights = weights**2 # * torch.sqrt(det_cov2d)
+
+#     # Update the accumulated transmittance
+#     visibility_list.append(weights)    # [C, N]
+#     # num_hits.index_put_((camera_id.repeat(gs_ids.shape[0]), gs_ids), torch.sqrt(det_cov2d), accumulate=False)    # [C, N]
+
+#     # Store camera ids and gaussian ids into list of tensors
+#     gaussian_ids_list.append(gaussian_ids)
+
+#     pointer_length.scatter_add_(0, gaussian_ids, torch.ones_like(gaussian_ids, dtype=pointer_length.dtype))
+
+#     cam_pos = torch.inverse(viewmats)[..., :3, 3].squeeze()
+#     train_cam_pos_list.append(cam_pos)
+
 @torch.no_grad()
 def update_fig_color_field_for_frustum(
     means: Tensor, quats: Tensor, scales: Tensor,
     viewmats: Tensor, Ks: Tensor, width: int, height: int,
     depth_image: Tensor, variance_image: Tensor,
-    visibility_list: List[Tensor],
-    gaussian_ids_list: List[Tensor], 
+    visibility: List[Tensor],
+    gaussian_ids: List[Tensor],
     pointer_length: Tensor,
     train_cam_pos_list: List[Tensor],
     camera_model: str = "pinhole",
@@ -619,8 +896,6 @@ def update_fig_color_field_for_frustum(
     radius_clip: float = 0.0,
     alpha_image: Optional[Tensor] = None,
 ) -> None:
-    """
-    """
     device = means.device
 
     proj = fully_fused_projection(
@@ -633,70 +908,57 @@ def update_fig_color_field_for_frustum(
         calc_compensations=False,
         camera_model=camera_model,
     )
-
-    batch_ids, camera_ids, gaussian_ids, radii, means2d, depths, conics, compensations = proj
-    if gaussian_ids.numel() == 0:
-        return
+    # (batch_ids, camera_ids, gaussian_ids, radii, means2d, depths, conics, compensations)
+    batch_ids, camera_ids, gs_ids, radii, means2d, depths, conics, compensations = proj
+    if gs_ids.numel() == 0:
+        return False
 
     eps = 1e-12
-    denom = conics[:, 0] * conics[:, 2] - conics[:, 1]**2
-    det_cov2d = 1.0 / torch.clamp(denom, min=eps)  # = 1/det(conic)
+    denom = conics[:, 0] * conics[:, 2] - conics[:, 1] ** 2
+    det_cov2d = 1.0 / torch.clamp(denom, min=eps)          # ~ det(Sigma_2D)
+    footprint = torch.sqrt(torch.clamp(det_cov2d, min=eps)) # sqrt(det(Sigma_2D))
 
-    # Pixel ids
+    # Pixel ids (you said you render one training cam at a time)
     pixel_x = means2d[:, 0].long().clamp(0, width - 1)
     pixel_y = means2d[:, 1].long().clamp(0, height - 1)
-    pix = pixel_y * width + pixel_x  # [nnz] in [0, H*W)
-
-    # If you have multiple cameras in this call, avoid mixing pixels across cameras:
+    pix = pixel_y * width + pixel_x  # [nnz]
     HW = width * height
-    group_id = camera_ids.long() * HW + pix  # [nnz] unique per (camera, pixel)
-    num_groups = int(group_id.max().item()) + 1  # safe upper bound for scatter buffers
 
-    # Flatten depth/var (assume depth_image/variance_image are [C,H,W] or [H,W] compatible)
-    depth_flat = depth_image.reshape(-1)       # must align with per-camera layout if C>1
+    depth_flat = depth_image.reshape(-1)       # [HW] (or [C*HW] if batched cameras)
     var_flat   = variance_image.reshape(-1)
 
-    # If depth_image includes cameras, you likely want per-camera indexing too:
-    # depth_flat should be shaped [C*H*W]. If depth_image is [C,H,W], this works.
-    depth_mu = depth_flat[camera_ids.long() * HW + pix]
-    var = torch.clamp(var_flat[camera_ids.long() * HW + pix], min=1e-8)
+    mu_depth = depth_flat[pix]
+    var = torch.clamp(var_flat[pix], min=1e-8)
 
-    # ---- Softmax logits (log of your old "pdf^2 * sqrt(det_cov2d)" up to constants) ----
-    # old weight was: exp(-(d-mu)^2/var) / (2*pi*var) * sqrt(det_cov2d)
-    # logit = -(d-mu)^2/var - log(var) + 0.5*log(det_cov2d)  (dropping constant -log(2*pi))
-    diff = depths - depth_mu
+    # ---- primitive rendering weights via segment-softmax over each pixel ----
+    # logit ~ log N(depths | mu_depth, var) up to constants (no footprint here!)
+    diff = depths - mu_depth
     logits = -(diff * diff) / var
-    logits = logits - torch.log(var) + 0.5 * torch.log(torch.clamp(det_cov2d, min=eps))
+    # logits = logits - torch.log(var)  # optional but usually helps (matches your old 1/var factor)
 
-    # ---- Segment softmax over group_id ----
+    # segment softmax (stable)
     neg_inf = torch.tensor(-float("inf"), device=device, dtype=logits.dtype)
-    max_per = torch.full((num_groups,), neg_inf, device=device, dtype=logits.dtype)
-    max_per.scatter_reduce_(0, group_id, logits, reduce="amax", include_self=True)
+    max_per_pix = torch.full((HW,), neg_inf, device=device, dtype=logits.dtype)
+    max_per_pix.scatter_reduce_(0, pix, logits, reduce="amax", include_self=True)
 
-    exp_logits = torch.exp(logits - max_per[group_id])
-    sumexp = torch.zeros((num_groups,), device=device, dtype=logits.dtype)
-    sumexp.scatter_add_(0, group_id, exp_logits)
+    exp_logits = torch.exp(logits - max_per_pix[pix])
+    sumexp = torch.zeros((HW,), device=device, dtype=logits.dtype)
+    sumexp.scatter_add_(0, pix, exp_logits)
 
-    probs = exp_logits / (sumexp[group_id] + 1e-12)  # in [0,1], sums to 1 per (camera,pixel)
+    w_prim = exp_logits / (sumexp[pix] + 1e-12)  # in [0,1], sums to 1 per pixel
 
-    # Optional: scale so sums match per-pixel opacity if you have it
     if alpha_image is not None:
         alpha_flat = alpha_image.reshape(-1)
-        alpha = alpha_flat[camera_ids.long() * HW + pix].clamp(0.0, 1.0)
-        weights = alpha * probs
-    else:
-        weights = probs
+        alpha = alpha_flat[pix].clamp(0.0, 1.0)
+        w_prim = w_prim * alpha
 
-    weights = weights**2 # * torch.sqrt(det_cov2d)
+    # ---- your desired stored quantity: (primitive weight)^2 * footprint ----
+    contrib = (w_prim * w_prim) # * footprint      # may exceed 1; that's OK by your definition
 
-    # Update the accumulated transmittance
-    visibility_list.append(weights)    # [C, N]
-    # num_hits.index_put_((camera_id.repeat(gs_ids.shape[0]), gs_ids), torch.sqrt(det_cov2d), accumulate=False)    # [C, N]
+    visibility.append(contrib)   # [nnz]
+    gaussian_ids.append(gs_ids)
 
-    # Store camera ids and gaussian ids into list of tensors
-    gaussian_ids_list.append(gaussian_ids)
-
-    pointer_length.scatter_add_(0, gaussian_ids, torch.ones_like(gaussian_ids, dtype=pointer_length.dtype))
+    pointer_length.scatter_add_(0, gs_ids, torch.ones_like(gs_ids, dtype=pointer_length.dtype))
 
     cam_pos = torch.inverse(viewmats)[..., :3, 3].squeeze()
     train_cam_pos_list.append(cam_pos)

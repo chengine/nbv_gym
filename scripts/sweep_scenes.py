@@ -38,7 +38,7 @@ METHODS = [
     "view_fig_diag",
     "coverage",
     # "fisher_info",
-    # "fig_color_field",
+    "fig_color_field",
     "random",
     "all"
 ]
