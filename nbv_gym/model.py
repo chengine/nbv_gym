@@ -87,7 +87,7 @@ class NBVSplatModelConfig(SplatfactoModelConfig):
 
     n_sphere_bins: int = 128
     """Number of bins on the unit sphere for coverage computation."""
-    concentration: float = 3.0
+    concentration: float = 5.0
     """Concentration parameter for the spherical gaussian kernel."""
 
 class NBVSplatModel(SplatfactoModel):
@@ -126,7 +126,7 @@ class NBVSplatModel(SplatfactoModel):
             # None: Dummy variables (not used)
             # fig: The running sum of rendering weights over camera views per-Gaussian
             # fig_diag: Is the same object as fig. Only difference is when we render the fig_diag, we take the reciprocal.
-            self.view_attributes = torch.nn.Parameter(torch.zeros((self.means.shape[0], 1), device="cuda"))
+            self.view_attributes = torch.nn.Parameter(torch.zeros((self.means.shape[0]), device="cuda"))
 
         elif view_metric in ["coverage", "view_fig", "view_fig_diag"]:
             # coverage: The running counts of the hits on a Gaussian per patch of the unit viewing direction sphere
@@ -259,6 +259,7 @@ class NBVSplatModel(SplatfactoModel):
                         near_plane=0.01,
                         far_plane=1e10,
                         radius_clip=3.0,
+                        alpha_image=alphas.squeeze(0).squeeze(-1),
                     )
                 elif self.view_metric in ["view_fig", "view_fig_diag"]:
                     update_view_fig_for_frustum(
@@ -279,6 +280,7 @@ class NBVSplatModel(SplatfactoModel):
                         far_plane=1e10,
                         radius_clip=3.0,
                         concentration=self.config.concentration,
+                        alpha_image=alphas.squeeze(0).squeeze(-1),
                     )
                 elif self.view_metric == "fig_color_field":
                     update_fig_color_field_for_frustum(
@@ -291,8 +293,8 @@ class NBVSplatModel(SplatfactoModel):
                         height=H,
                         depth_image=depth_image,
                         variance_image=variance_image,
-                        visibility=visibility_list,
-                        gaussian_ids=gaussian_ids_list, 
+                        visibility_list=visibility_list,
+                        gaussian_ids_list=gaussian_ids_list, 
                         pointer_length=self.view_attributes[:, 1],
                         train_cam_pos_list=train_cam_pos_list,
                         camera_model=camera_model,
@@ -300,6 +302,7 @@ class NBVSplatModel(SplatfactoModel):
                         near_plane=0.01,
                         far_plane=1e10,
                         radius_clip=3.0,
+                        alpha_image=alphas.squeeze(0).squeeze(-1),
                     )
 
         # Only do this for fig_color_field
