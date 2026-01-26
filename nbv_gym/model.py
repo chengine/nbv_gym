@@ -546,12 +546,10 @@ class NBVSplatModel(SplatfactoModel):
             self.opacities.shape[0], device=self.opacities.device, dtype=self.opacities.dtype
         )
 
-        camera_scale_fac = self._get_downscale_factor()
-
         # Go through provided training cameras
+        # Note: _compute_diag_H_rgb_depth -> _prepare_fisher_rasterizer handles camera rescaling internally
         for train_cam in train_cameras:
             train_cam = train_cam.to(self.device)
-            train_cam.rescale_output_resolution(1 / camera_scale_fac)
 
             # Get RGB uncertainty
             H_info_rgb = self._compute_diag_H_rgb_depth(train_cam, compute_rgb_H=True)
@@ -563,14 +561,12 @@ class NBVSplatModel(SplatfactoModel):
             H_info_depth["H"] = [p * depth_weight for p in H_info_depth["H"]]
             H_per_gaussian += sum([reduce(p, "n ... -> n", "sum") for p in H_info_depth["H"]])
 
-            train_cam.rescale_output_resolution(camera_scale_fac)
-
         hessian_color = repeat(H_per_gaussian.detach(), "n -> n c", c=3)
         uncern_maps = []
 
+        # Note: _prepare_fisher_rasterizer handles camera rescaling internally
         for test_cam in test_cameras:
             test_cam = test_cam.to(self.device)
-            test_cam.rescale_output_resolution(1 / camera_scale_fac)
 
             rasterizer, params = self._prepare_fisher_rasterizer(test_cam)
             means3D, shs, opacities, scales, rotations = params
@@ -601,8 +597,6 @@ class NBVSplatModel(SplatfactoModel):
                 cov3D_precomp=None,
             )
             uncern_maps.append(rendered_image[0])
-
-            test_cam.rescale_output_resolution(camera_scale_fac)
 
         return uncern_maps
 
