@@ -14,7 +14,7 @@ from nerfstudio.pipelines.base_pipeline import (
 from nerfstudio.utils import profiler
 
 from nbv_gym.datamanager import ViewSelectionDataManagerConfig
-from nbv_gym.model import NBVSplatModelConfig
+from nbv_gym.model import NBVSplatModelConfig, FisherSplatModelConfig
 from nbv_gym.view_selector import create_view_selector
 
 @dataclass
@@ -61,6 +61,11 @@ class ViewSelectionPipeline(VanillaPipeline):
         config.datamanager.start_num_views = config.start_num_views
         config.datamanager.initial_view_seed = config.initial_view_seed
 
+        # Conditionally select model config based on view_metric
+        # For fisher_rf, use FisherSplatModel which has working Fisher-RF uncertainty computation
+        if config.view_metric == "fisher_rf" and config.view_selector == "basic":
+            config.model = FisherSplatModelConfig()
+
         super().__init__(
             config=config,
             device=device,
@@ -81,8 +86,12 @@ class ViewSelectionPipeline(VanillaPipeline):
                     intrinsics_scale=config.view_selection_intrinsics_scale,
                     use_kdtree_filter=config.view_selection_use_kdtree_filter,
                 )
-                self._model.setup_view_metric(config.view_metric)
-                self.model.setup_view_metric(config.view_metric)
+                # Only call setup_view_metric for NBVSplatModel (not FisherSplatModel)
+                # FisherSplatModel handles fisher_rf internally and doesn't need view_metric setup
+                if hasattr(self._model, "setup_view_metric"):
+                    self._model.setup_view_metric(config.view_metric)
+                if hasattr(self.model, "setup_view_metric"):
+                    self.model.setup_view_metric(config.view_metric)
             else:
                 # Pass KD-tree parameters for other selectors (random, all, etc.)
                 view_selector = create_view_selector(
