@@ -223,24 +223,6 @@ class NBVSplatModel(SplatfactoModel):
                 radius_clip=3.0,
                 )
 
-            elif self.view_metric == "fisher_rf":
-                # Compute diagonal Hessian for this camera and accumulate
-                H_info_rgb = self._compute_diag_H_rgb_depth(camera, compute_rgb_H=True)
-                H_info_depth = self._compute_diag_H_rgb_depth(camera, compute_rgb_H=False)
-
-                # Sum Hessian contributions across all parameter groups for each Gaussian
-                rgb_weight = self.config.fisher_rf_rgb_weight
-                depth_weight = self.config.fisher_rf_depth_weight
-
-                for H_param in H_info_rgb["H"]:
-                    # Reduce to per-Gaussian scalar by summing over parameter dimensions
-                    H_reduced = H_param.abs().reshape(H_param.shape[0], -1).sum(dim=-1)
-                    self.view_attributes.data += rgb_weight * H_reduced
-
-                for H_param in H_info_depth["H"]:
-                    H_reduced = H_param.abs().reshape(H_param.shape[0], -1).sum(dim=-1)
-                    self.view_attributes.data += depth_weight * H_reduced
-
             elif self.view_metric in ["fig", "fig_diag", "view_fig", "view_fig_diag", "fig_color_field"]:
 
                 # View metrics requiring rendering weights require the rasterization of the rendering weights.
@@ -795,20 +777,9 @@ class NBVSplatModel(SplatfactoModel):
 
         if self.view_metric is not None and self.view_attributes_fn is not None:
             render_view_attributes_fn = partial(self.view_attributes_fn, view_attributes=self.view_attributes.detach())
-        elif self.view_metric == "fisher_rf":
-            # For Fisher-RF, create a function that returns uncertainty (inverse of accumulated Hessian)
-            # Higher Hessian = more information = lower uncertainty
-            # We render uncertainty so that lower values = more certain = better covered
-            def fisher_rf_uncertainty_fn(viewdirs, gaussian_ids, view_attributes):
-                # view_attributes contains accumulated Hessian per Gaussian
-                hessian_values = view_attributes[gaussian_ids]
-                # Return uncertainty: 1 / (1 + hessian) so it's bounded [0, 1]
-                # Lower uncertainty = higher Hessian = more training info = better covered
-                uncertainty = 1.0 / (1.0 + hessian_values)
-                return uncertainty
-
-            render_view_attributes_fn = partial(fisher_rf_uncertainty_fn, view_attributes=self.view_attributes.detach())
         else:
+            # For fisher_rf and other cases where view_attributes_fn is None, render_view_attributes_fn is None
+            # Fisher-RF uses _render_fisher_uncertainty separately in view_selector
             render_view_attributes_fn = None
 
         if self.view_metric == "fig_color_field" and render_view_attributes_fn is not None:

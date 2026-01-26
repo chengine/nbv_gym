@@ -206,33 +206,51 @@ class VanillaViewSelector(BaseViewSelector):
 
         # TODO: Unify FisherSplat and CoverageSplat models into one.
         if isinstance(model, NBVSplatModel):
-            # Feed the "training cameras" to the model to update coverage/view metrics.
-            # TODO: Need to add a flag to choose a subset of the training cameras to use, or maybe just a sliding window.
-            if self.view_metric in ["coverage", "fig", "view_fig", "fig_diag", "view_fig_diag", "fig_color_field", "fisher_rf"]:
-                if len(active_indices) > 0:
-                    training_cameras = [all_cameras[idx : idx + 1] for idx in active_indices]
-                    model.update_view_attributes(training_cameras)
-                else:
-                    # If there are no active views, we don't need to do anything
-                    pass
+            # Fisher-RF uses a separate rendering path with _render_fisher_uncertainty
+            if self.view_metric == "fisher_rf":
+                # Get training and candidate cameras
+                training_cameras = [all_cameras[idx : idx + 1] for idx in active_indices]
+                candidate_cameras = [all_cameras[idx : idx + 1] for idx in candidate_indices]
 
-            # Score each candidate camera using coverage
-            scores = []
-            for cam_idx in candidate_indices:
-                # Access camera using slice notation (Cameras expects tuple/slice, not list)
-                camera = all_cameras[cam_idx : cam_idx + 1].to(model.device)
-                score = model.view_metric_score_for_camera(
-                    camera,
-                    intrinsics_scale=self.intrinsics_scale,
+                # Render uncertainty maps for all candidate cameras
+                uncertainty_maps = model._render_fisher_uncertainty(
+                    train_cameras=training_cameras,
+                    test_cameras=candidate_cameras,
+                    rgb_weight=model.config.fisher_rf_rgb_weight,
+                    depth_weight=model.config.fisher_rf_depth_weight,
                 )
-                scores.append((cam_idx, score.item()))
 
-        # elif isinstance(model, FisherSplatModel):
-        #     training_cameras = [all_cameras[idx : idx + 1] for idx in active_indices]
-        #     candidate_cameras = [all_cameras[idx : idx + 1] for idx in candidate_indices]
-        #     scores = model.coverage_score_for_camera(training_cameras, candidate_cameras)
+                # Score each candidate: higher uncertainty = more novel = lower score (we negate)
+                scores = []
+                for idx, unc_map in enumerate(uncertainty_maps):
+                    cam_idx = candidate_indices[idx]
+                    valid_mask = unc_map > 0
+                    # Negate so that higher uncertainty gives lower score (lower = better for selection)
+                    score = -((unc_map * valid_mask).sum() / valid_mask.sum().clamp(min=1)).item()
+                    scores.append((cam_idx, score))
 
-        #     scores = [(candidate_indices[idx], score.item()) for idx, score in enumerate(scores)]
+            else:
+                # Feed the "training cameras" to the model to update coverage/view metrics.
+                # TODO: Need to add a flag to choose a subset of the training cameras to use, or maybe just a sliding window.
+                if self.view_metric in ["coverage", "fig", "view_fig", "fig_diag", "view_fig_diag", "fig_color_field"]:
+                    if len(active_indices) > 0:
+                        training_cameras = [all_cameras[idx : idx + 1] for idx in active_indices]
+                        model.update_view_attributes(training_cameras)
+                    else:
+                        # If there are no active views, we don't need to do anything
+                        pass
+
+                # Score each candidate camera using view metric
+                scores = []
+                for cam_idx in candidate_indices:
+                    # Access camera using slice notation (Cameras expects tuple/slice, not list)
+                    camera = all_cameras[cam_idx : cam_idx + 1].to(model.device)
+                    score = model.view_metric_score_for_camera(
+                        camera,
+                        intrinsics_scale=self.intrinsics_scale,
+                    )
+                    scores.append((cam_idx, score.item()))
+
         else:
             raise ValueError(f"Invalid model type: {type(model)}")
 
