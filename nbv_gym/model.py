@@ -439,7 +439,7 @@ class NBVSplatModel(SplatfactoModel):
                 self.step // self.config.sh_degree_interval, self.config.sh_degree
             )
         else:
-            sh_degree_to_use = 0  # Use 0 instead of None for the rasterizer
+            sh_degree_to_use = None
 
         raster_settings = GaussianRasterizationSettings(
             image_height=int(camera.height),
@@ -464,7 +464,7 @@ class NBVSplatModel(SplatfactoModel):
         opacities = opacities.clone().requires_grad_(True)
         scales = torch.exp(scales_crop.clone()).requires_grad_(True)
         rotations = quats_crop / quats_crop.norm(dim=-1, keepdim=True)
-        rotations = rotations.clone().requires_grad_(True)
+        rotations.requires_grad_(True)
 
         params = [means3D, shs, opacities, scales, rotations]
 
