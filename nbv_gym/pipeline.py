@@ -72,7 +72,7 @@ class ViewSelectionPipeline(VanillaPipeline):
 
         # Create and set view selector if specified
         if hasattr(self.datamanager, "view_selector"):
-            # Pass optics-specific config if using optics selector
+            # Pass KD-tree and view metric config based on selector mode
             if config.view_selector == "basic":
                 view_selector = create_view_selector(
                     mode=config.view_selector,
@@ -84,7 +84,12 @@ class ViewSelectionPipeline(VanillaPipeline):
                 self._model.setup_view_metric(config.view_metric)
                 self.model.setup_view_metric(config.view_metric)
             else:
-                view_selector = create_view_selector(config.view_selector)
+                # Pass KD-tree parameters for other selectors (random, all, etc.)
+                view_selector = create_view_selector(
+                    mode=config.view_selector,
+                    use_kdtree_filter=config.view_selection_use_kdtree_filter,
+                    num_nearest_neighbors=config.view_selection_num_nearest_neighbors,
+                )
                 self._model.setup_view_metric(None)
                 self.model.setup_view_metric(None)
 
