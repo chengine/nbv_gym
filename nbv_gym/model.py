@@ -425,8 +425,8 @@ class NBVSplatModel(SplatfactoModel):
 
         fovx = 2 * torch.atan(camera.width / (2 * camera.fx))
         fovy = 2 * torch.atan(camera.height / (2 * camera.fy))
-        tanfovx = math.tan(fovx * 0.5)
-        tanfovy = math.tan(fovy * 0.5)
+        tanfovx = math.tan((fovx * 0.5).item())
+        tanfovy = math.tan((fovy * 0.5).item())
         bg_color = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32, device="cuda")
         scaling_modifier = 1.0
         projmat = projection_matrix(0.01, 100.0, fovx, fovy, device="cuda").cuda()
@@ -436,7 +436,7 @@ class NBVSplatModel(SplatfactoModel):
                 self.step // self.config.sh_degree_interval, self.config.sh_degree
             )
         else:
-            sh_degree_to_use = None
+            sh_degree_to_use = 0  # Use 0 instead of None for the rasterizer
 
         raster_settings = GaussianRasterizationSettings(
             image_height=int(camera.height),
@@ -467,7 +467,6 @@ class NBVSplatModel(SplatfactoModel):
 
         return rasterizer, params
 
-    @torch.no_grad()
     def _compute_diag_H_rgb_depth(self, camera: Cameras, compute_rgb_H: bool = False) -> Dict[str, Any]:
         """Compute diagonal Hessian on RGB or depth.
 
@@ -509,7 +508,13 @@ class NBVSplatModel(SplatfactoModel):
             else:
                 rendered_depth.backward(gradient=torch.ones_like(rendered_depth))
 
-        cur_H = [p.grad.detach().clone() for p in params]
+        # Collect gradients, using zeros if gradient is None
+        cur_H = []
+        for p in params:
+            if p.grad is not None:
+                cur_H.append(p.grad.detach().clone())
+            else:
+                cur_H.append(torch.zeros_like(p))
 
         rgb = rearrange(rendered_image, "c h w -> h w c")
 
