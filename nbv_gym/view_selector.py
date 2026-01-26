@@ -116,7 +116,7 @@ class VanillaViewSelector(BaseViewSelector):
 
     def __init__(
         self,
-        view_metric: Literal["coverage", "fig", "view_fig", "fig_diag", "view_fig_diag", "fig_color_field"] = "coverage",
+        view_metric: Literal["coverage", "fig", "view_fig", "fig_diag", "view_fig_diag", "fig_color_field", "fisher_rf"] = "coverage",
         num_nearest_neighbors: int = 5,
         intrinsics_scale: float = 1.0,
         use_kdtree_filter: bool = True,
@@ -206,10 +206,9 @@ class VanillaViewSelector(BaseViewSelector):
 
         # TODO: Unify FisherSplat and CoverageSplat models into one.
         if isinstance(model, NBVSplatModel):
-            # Feed the "training cameras" to the model to update coverage metrics.
-            # Fisher-RF has its own way to use "training cameras".
+            # Feed the "training cameras" to the model to update coverage/view metrics.
             # TODO: Need to add a flag to choose a subset of the training cameras to use, or maybe just a sliding window.
-            if self.view_metric in ["coverage", "fig", "view_fig", "fig_diag", "view_fig_diag", "fig_color_field"]:
+            if self.view_metric in ["coverage", "fig", "view_fig", "fig_diag", "view_fig_diag", "fig_color_field", "fisher_rf"]:
                 if len(active_indices) > 0:
                     training_cameras = [all_cameras[idx : idx + 1] for idx in active_indices]
                     model.update_view_attributes(training_cameras)

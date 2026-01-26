@@ -38,7 +38,7 @@ class ViewSelectionPipelineConfig(VanillaPipelineConfig):
     """Random seed for initial view selection. If None, uses a random seed. Set to a value to get reproducible initial views per scene."""
 
     # View selector configuration
-    view_metric: Literal["coverage", "fig", "view_fig", "fig_diag", "view_fig_diag", "fig_color_field"] = "coverage"
+    view_metric: Literal["coverage", "fig", "view_fig", "fig_diag", "view_fig_diag", "fig_color_field", "fisher_rf"] = "coverage"
     """view selection metric to use."""
     view_selection_intrinsics_scale: float = 1.0
     """Scale factor for camera intrinsics during view metric scoring (for efficiency). Values < 1.0 downscale."""

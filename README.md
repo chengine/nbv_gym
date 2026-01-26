@@ -79,6 +79,7 @@ When using `--pipeline.view-selector basic`, specify the metric for scoring cand
 | `fig_diag` | Diagonal approximation of FIG |
 | `view_fig_diag` | View-weighted diagonal FIG |
 | `fig_color_field` | FIG with color field consideration |
+| `fisher_rf` | Fisher-RF uncertainty (requires modified rasterizer) |
 
 #### KD-Tree Filtering
 
@@ -133,7 +134,16 @@ ns-train nbv-splat --data ./data/scene \
 
 ### Fisher-RF
 
-> **Coming Soon:** Fisher-RF baseline will be implemented in a future release.
+Fisher-RF uncertainty is available as a view metric (`--pipeline.view-metric fisher_rf`). This requires installing the modified Gaussian rasterizer:
+
+```bash
+# Clone and install the modified rasterizer (use gcc/g++ 11)
+git clone --recursive https://github.com/JiangWenPL/modified-diff-gaussian-rasterization-w-depth
+cd modified-diff-gaussian-rasterization-w-depth
+pip install -e . --no-build-isolation
+```
+
+> **Note:** A standalone Fisher-RF model with full training support will be added in a future release.
 
 ---
 

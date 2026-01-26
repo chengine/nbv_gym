@@ -19,9 +19,10 @@ Contains model classes for Coverage Splatting and Fisher-RF Splatting.
 
 from __future__ import annotations
 import os
+import math
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional, Tuple, Type, Union, Any
+from typing import Dict, Iterable, List, Literal, Optional, Tuple, Type, Union, Any
 from functools import partial
 import torch
 from torch.nn import Parameter
@@ -90,6 +91,12 @@ class NBVSplatModelConfig(SplatfactoModelConfig):
     concentration: float = 5.0
     """Concentration parameter for the spherical gaussian kernel."""
 
+    # Fisher-RF uncertainty settings
+    fisher_rf_depth_weight: float = 1.0
+    """Weight of depth uncertainty in Fisher-RF Hessian computation."""
+    fisher_rf_rgb_weight: float = 1.0
+    """Weight of RGB uncertainty in Fisher-RF Hessian computation."""
+
 class NBVSplatModel(SplatfactoModel):
     """Nerfstudio's implementation of Shadow Splatting
 
@@ -115,8 +122,8 @@ class NBVSplatModel(SplatfactoModel):
         self.bin_dirs = fibonacci_sphere(n_bins=self.config.n_sphere_bins, device="cuda")
 
     def setup_view_metric(
-        self, 
-        view_metric: Literal["coverage", "fig", "view_fig", "fig_diag", "view_fig_diag", "fig_color_field", None]):
+        self,
+        view_metric: Literal["coverage", "fig", "view_fig", "fig_diag", "view_fig_diag", "fig_color_field", "fisher_rf", None]):
 
         self.view_metric = view_metric
 
@@ -135,9 +142,13 @@ class NBVSplatModel(SplatfactoModel):
             self.view_attributes = torch.nn.Parameter(torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda"))
 
         elif view_metric in ["fig_color_field"]:
-            # fig_color_field: Column 0 is the start index of the camera_ids tensor. Column 1 is the length after the start index. 
+            # fig_color_field: Column 0 is the start index of the camera_ids tensor. Column 1 is the length after the start index.
             # This information allows us to implicitly compute visible gaussian_ids for all training cameras, while the camera_ids is already stored.
             self.view_attributes = torch.nn.Parameter(torch.zeros((self.means.shape[0], 2), device="cuda"))
+
+        elif view_metric in ["fisher_rf"]:
+            # fisher_rf: Per-Gaussian accumulated Hessian from training cameras (Fisher information)
+            self.view_attributes = torch.nn.Parameter(torch.zeros((self.means.shape[0]), device="cuda"))
 
         else:
             raise ValueError(f"Unknown view metric: {view_metric}")
@@ -163,6 +174,10 @@ class NBVSplatModel(SplatfactoModel):
 
         elif view_metric == "fig_color_field":
             self.view_attributes_fn = None
+
+        elif view_metric == "fisher_rf":
+            # Fisher-RF uses per-Gaussian Hessian; rendering uses reciprocal as uncertainty
+            self.view_attributes_fn = None  # Handled specially in get_outputs
 
     @torch.no_grad()
     # Initialize the update_view_attributes function
@@ -207,6 +222,24 @@ class NBVSplatModel(SplatfactoModel):
                 far_plane=1e10,
                 radius_clip=3.0,
                 )
+
+            elif self.view_metric == "fisher_rf":
+                # Compute diagonal Hessian for this camera and accumulate
+                H_info_rgb = self._compute_diag_H_rgb_depth(camera, compute_rgb_H=True)
+                H_info_depth = self._compute_diag_H_rgb_depth(camera, compute_rgb_H=False)
+
+                # Sum Hessian contributions across all parameter groups for each Gaussian
+                rgb_weight = self.config.fisher_rf_rgb_weight
+                depth_weight = self.config.fisher_rf_depth_weight
+
+                for H_param in H_info_rgb["H"]:
+                    # Reduce to per-Gaussian scalar by summing over parameter dimensions
+                    H_reduced = H_param.abs().reshape(H_param.shape[0], -1).sum(dim=-1)
+                    self.view_attributes.data += rgb_weight * H_reduced
+
+                for H_param in H_info_depth["H"]:
+                    H_reduced = H_param.abs().reshape(H_param.shape[0], -1).sum(dim=-1)
+                    self.view_attributes.data += depth_weight * H_reduced
 
             elif self.view_metric in ["fig", "fig_diag", "view_fig", "view_fig_diag", "fig_color_field"]:
 
@@ -352,6 +385,236 @@ class NBVSplatModel(SplatfactoModel):
     def reset_view_attributes(self):
         self.view_attributes.zero_()
         self.gauss_params["view_attributes"].zero_()
+
+    @torch.no_grad()
+    def _prepare_fisher_rasterizer(
+        self, camera: Cameras
+    ) -> Tuple["ModifiedGaussianRasterizer", List[torch.Tensor]]:
+        """Prepare the modified Gaussian rasterizer for Fisher-RF uncertainty computation.
+
+        Args:
+            camera: Camera to render from
+
+        Returns:
+            Tuple of (rasterizer, params) where params is [means3D, shs, opacities, scales, rotations]
+        """
+        if not isinstance(camera, Cameras):
+            raise ValueError("Called _prepare_fisher_rasterizer with not a camera")
+
+        optimized_camera_to_world = camera.camera_to_worlds
+
+        # Move to the GPU
+        camera = camera.to(self.device)
+        camera_downscale = self._get_downscale_factor()
+        camera.rescale_output_resolution(1 / camera_downscale)
+
+        # Shift the camera to center of scene looking at center
+        optimized_camera_to_world = optimized_camera_to_world.squeeze()
+        R = optimized_camera_to_world[:3, :3]  # 3 x 3
+        T = optimized_camera_to_world[:3, 3:4]  # 3 x 1
+
+        # Flip the z and y axes to align with gsplat conventions
+        R_edit = torch.diag(torch.tensor([1, -1, -1], device=self.device, dtype=R.dtype))
+        R = R @ R_edit
+
+        # Analytic matrix inverse to get world2camera matrix
+        R_inv = R.T
+        T_inv = -R_inv @ T
+        viewmat = torch.eye(4, device=R.device, dtype=R.dtype)
+        viewmat[:3, :3] = R_inv
+        viewmat[:3, 3:4] = T_inv
+
+        W, H = int(camera.width.item()), int(camera.height.item())
+        self.last_size = (H, W)
+
+        opacities_crop = self.opacities
+        means_crop = self.means
+        features_dc_crop = self.features_dc
+        features_rest_crop = self.features_rest
+        scales_crop = self.scales
+        quats_crop = self.quats
+
+        colors_crop = torch.cat((features_dc_crop[:, None, :], features_rest_crop), dim=1)
+
+        # Rescale the camera back to original dimensions before returning
+        camera.rescale_output_resolution(camera_downscale)
+
+        opacities = torch.sigmoid(opacities_crop)
+
+        fovx = 2 * torch.atan(camera.width / (2 * camera.fx))
+        fovy = 2 * torch.atan(camera.height / (2 * camera.fy))
+        tanfovx = math.tan(fovx * 0.5)
+        tanfovy = math.tan(fovy * 0.5)
+        bg_color = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32, device="cuda")
+        scaling_modifier = 1.0
+        projmat = projection_matrix(0.01, 100.0, fovx, fovy, device="cuda").cuda()
+
+        if self.config.sh_degree > 0:
+            sh_degree_to_use = min(
+                self.step // self.config.sh_degree_interval, self.config.sh_degree
+            )
+        else:
+            sh_degree_to_use = None
+
+        raster_settings = GaussianRasterizationSettings(
+            image_height=int(camera.height),
+            image_width=int(camera.width),
+            tanfovx=tanfovx,
+            tanfovy=tanfovy,
+            bg=bg_color,
+            scale_modifier=scaling_modifier,
+            viewmatrix=viewmat.t(),
+            projmatrix=viewmat.t() @ projmat.t(),
+            sh_degree=sh_degree_to_use,
+            campos=viewmat.inverse()[:3, 3],
+            prefiltered=False,
+            debug=False,
+        )
+        rasterizer = ModifiedGaussianRasterizer(raster_settings=raster_settings)
+
+        # Create temporary variables to avoid side effects of the backward engine
+        # This also addresses the issues of normalization for quaternions
+        means3D = means_crop.clone().requires_grad_(True)
+        shs = colors_crop.clone().requires_grad_(True)
+        opacities = opacities.clone().requires_grad_(True)
+        scales = torch.exp(scales_crop.clone()).requires_grad_(True)
+        rotations = quats_crop / quats_crop.norm(dim=-1, keepdim=True)
+        rotations = rotations.clone().requires_grad_(True)
+
+        params = [means3D, shs, opacities, scales, rotations]
+
+        return rasterizer, params
+
+    @torch.no_grad()
+    def _compute_diag_H_rgb_depth(self, camera: Cameras, compute_rgb_H: bool = False) -> Dict[str, Any]:
+        """Compute diagonal Hessian on RGB or depth.
+
+        Args:
+            camera: Camera to render from
+            compute_rgb_H: If True, compute Hessian w.r.t. RGB. If False, compute w.r.t. depth.
+
+        Returns:
+            Dict with keys:
+                - 'rgb': Rendered RGB image (H, W, C)
+                - 'depth': Depth map (H, W)
+                - 'H': List of diagonal Hessians for [means3D, shs, opacities, scales, rotations]
+        """
+        rasterizer, params = self._prepare_fisher_rasterizer(camera)
+        means3D, shs, opacities, scales, rotations = params
+
+        # Create zero tensor for screen-space points gradients
+        screenspace_points = (
+            torch.zeros_like(means3D, dtype=means3D.dtype, requires_grad=True, device="cuda") + 0
+        )
+        try:
+            screenspace_points.retain_grad()
+        except Exception:
+            pass
+
+        with torch.enable_grad():
+            rendered_image, rendered_depth, radii = rasterizer(
+                means3D=means3D,
+                means2D=screenspace_points,
+                shs=shs,
+                colors_precomp=None,
+                opacities=opacities,
+                scales=scales,
+                rotations=rotations,
+                cov3D_precomp=None,
+            )
+            if compute_rgb_H:
+                rendered_image.backward(gradient=torch.ones_like(rendered_image))
+            else:
+                rendered_depth.backward(gradient=torch.ones_like(rendered_depth))
+
+        cur_H = [p.grad.detach().clone() for p in params]
+
+        rgb = rearrange(rendered_image, "c h w -> h w c")
+
+        return {"rgb": rgb, "H": cur_H, "depth": rendered_depth}
+
+    @torch.no_grad()
+    def _render_fisher_uncertainty(
+        self,
+        train_cameras: Iterable[Cameras],
+        test_cameras: Iterable[Cameras],
+        rgb_weight: float = 1.0,
+        depth_weight: float = 1.0,
+    ) -> List[torch.Tensor]:
+        """Render uncertainty maps using Fisher-RF method.
+
+        Args:
+            train_cameras: Training cameras to compute Hessian from
+            test_cameras: Test cameras to render uncertainty for
+            rgb_weight: Weight for RGB Hessian
+            depth_weight: Weight for depth Hessian
+
+        Returns:
+            List of uncertainty maps, one per test camera
+        """
+        H_per_gaussian = torch.zeros(
+            self.opacities.shape[0], device=self.opacities.device, dtype=self.opacities.dtype
+        )
+
+        camera_scale_fac = self._get_downscale_factor()
+
+        # Go through provided training cameras
+        for train_cam in train_cameras:
+            train_cam = train_cam.to(self.device)
+            train_cam.rescale_output_resolution(1 / camera_scale_fac)
+
+            # Get RGB uncertainty
+            H_info_rgb = self._compute_diag_H_rgb_depth(train_cam, compute_rgb_H=True)
+            H_info_rgb["H"] = [p * rgb_weight for p in H_info_rgb["H"]]
+            H_per_gaussian += sum([reduce(p, "n ... -> n", "sum") for p in H_info_rgb["H"]])
+
+            # Get depth uncertainty
+            H_info_depth = self._compute_diag_H_rgb_depth(train_cam, compute_rgb_H=False)
+            H_info_depth["H"] = [p * depth_weight for p in H_info_depth["H"]]
+            H_per_gaussian += sum([reduce(p, "n ... -> n", "sum") for p in H_info_depth["H"]])
+
+            train_cam.rescale_output_resolution(camera_scale_fac)
+
+        hessian_color = repeat(H_per_gaussian.detach(), "n -> n c", c=3)
+        uncern_maps = []
+
+        for test_cam in test_cameras:
+            test_cam = test_cam.to(self.device)
+            test_cam.rescale_output_resolution(1 / camera_scale_fac)
+
+            rasterizer, params = self._prepare_fisher_rasterizer(test_cam)
+            means3D, shs, opacities, scales, rotations = params
+
+            # Create zero tensor for screen-space points
+            screenspace_points = (
+                torch.zeros_like(means3D, dtype=means3D.dtype, requires_grad=True, device="cuda") + 0
+            )
+            try:
+                screenspace_points.retain_grad()
+            except Exception:
+                pass
+
+            # Compute depth-weighted Hessian color
+            pts3d_homo = to_homo(means3D)
+            pts3d_cam = pts3d_homo @ rasterizer.raster_settings.viewmatrix
+            gaussian_depths = pts3d_cam[:, 2, None]
+
+            cur_hessian_color = hessian_color * gaussian_depths.clamp(min=0)
+            rendered_image, rendered_depth, radii = rasterizer(
+                means3D=means3D,
+                means2D=screenspace_points,
+                shs=None,
+                colors_precomp=cur_hessian_color,
+                opacities=opacities,
+                scales=scales,
+                rotations=rotations,
+                cov3D_precomp=None,
+            )
+            uncern_maps.append(rendered_image[0])
+
+            test_cam.rescale_output_resolution(camera_scale_fac)
+
+        return uncern_maps
 
     def load_state_dict(self, dict, **kwargs):  # type: ignore
         # resize the parameters to match the new number of points
@@ -532,6 +795,19 @@ class NBVSplatModel(SplatfactoModel):
 
         if self.view_metric is not None and self.view_attributes_fn is not None:
             render_view_attributes_fn = partial(self.view_attributes_fn, view_attributes=self.view_attributes.detach())
+        elif self.view_metric == "fisher_rf":
+            # For Fisher-RF, create a function that returns uncertainty (inverse of accumulated Hessian)
+            # Higher Hessian = more information = lower uncertainty
+            # We render uncertainty so that lower values = more certain = better covered
+            def fisher_rf_uncertainty_fn(viewdirs, gaussian_ids, view_attributes):
+                # view_attributes contains accumulated Hessian per Gaussian
+                hessian_values = view_attributes[gaussian_ids]
+                # Return uncertainty: 1 / (1 + hessian) so it's bounded [0, 1]
+                # Lower uncertainty = higher Hessian = more training info = better covered
+                uncertainty = 1.0 / (1.0 + hessian_values)
+                return uncertainty
+
+            render_view_attributes_fn = partial(fisher_rf_uncertainty_fn, view_attributes=self.view_attributes.detach())
         else:
             render_view_attributes_fn = None
 
