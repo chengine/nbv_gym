@@ -21,6 +21,9 @@ from __future__ import annotations
 import os
 import math
 
+# Enable CUDA synchronous execution for better error reporting
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Literal, Optional, Tuple, Type, Union, Any
 from functools import partial
