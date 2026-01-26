@@ -885,8 +885,8 @@ def update_fig_color_field_for_frustum(
     means: Tensor, quats: Tensor, scales: Tensor,
     viewmats: Tensor, Ks: Tensor, width: int, height: int,
     depth_image: Tensor, variance_image: Tensor,
-    visibility: List[Tensor],
-    gaussian_ids: List[Tensor],
+    visibility_list: List[Tensor],
+    gaussian_ids_list: List[Tensor],
     pointer_length: Tensor,
     train_cam_pos_list: List[Tensor],
     camera_model: str = "pinhole",
@@ -955,8 +955,8 @@ def update_fig_color_field_for_frustum(
     # ---- your desired stored quantity: (primitive weight)^2 * footprint ----
     contrib = (w_prim * w_prim) # * footprint      # may exceed 1; that's OK by your definition
 
-    visibility.append(contrib)   # [nnz]
-    gaussian_ids.append(gs_ids)
+    visibility_list.append(contrib)   # [nnz]
+    gaussian_ids_list.append(gs_ids)
 
     pointer_length.scatter_add_(0, gs_ids, torch.ones_like(gs_ids, dtype=pointer_length.dtype))
 

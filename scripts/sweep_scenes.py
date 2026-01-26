@@ -32,15 +32,15 @@ DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 # Methods / information gain metrics to compare.
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
-    "fig",
-    "view_fig",
-    "fig_diag",
-    "view_fig_diag",
     "coverage",
+    # "fig_color_field",
     # "fisher_info",
-    "fig_color_field",
     "random",
-    "all"
+    "all",
+    # "fig",
+    # "view_fig",
+    # "fig_diag",
+    # "view_fig_diag",
 ]
 
 # Visualization backends. Example: "viewer+wandb" or just "wandb"
