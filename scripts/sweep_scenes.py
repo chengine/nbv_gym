@@ -6,7 +6,7 @@ from datetime import datetime
 # -----------------------------
 # Batch experiment configuration
 # -----------------------------
-PROJECT_NAME = "next-best-view-updated"
+PROJECT_NAME = "next-best-view-rebuttal"
 
 # Datasets to sweep
 BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
@@ -52,9 +52,11 @@ QUIT_VIEWER_ON_DONE = True
 # Biased dataset
 BIASED = False
 
-MAX_ITERATIONS = 30000
+MAX_ITERATIONS = 30001
 
 SEED = 0
+
+KDTREE_FILTER = True
 
 # -----------------------------
 # Internal helpers
@@ -116,6 +118,8 @@ def build_cmd(dataset: str, method: str) -> list[str]:
             str(0),
             "--viewer.quit-on-train-completion",
             str(QUIT_VIEWER_ON_DONE),
+            "--pipeline.view-selection-use-kdtree-filter",
+            str(KDTREE_FILTER),
             # "shadow-splat-data",
             "--data",
             dataset,
