@@ -9,55 +9,55 @@ from datetime import datetime
 PROJECT_NAME = "next-best-view-rebuttal"
 
 # Datasets to sweep
-# BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
-# SCENES = [
-#     "caterpillar",
-#     "train",
-#     "ignatius",
-#     "shiny_statue_6pm",
-#     "space_laces_4pm",
-#     "chair_3pm",
-#     "mipnerf360/bicycle",
-#     "mipnerf360/bonsai",
-#     "mipnerf360/counter",
-#     "mipnerf360/flowers",
-#     "mipnerf360/garden",
-#     "mipnerf360/kitchen",
-#     "mipnerf360/room",
-#     "mipnerf360/stump",
-#     "mipnerf360/treehill",
-# ]
-BASE_DATA_DIR = pathlib.Path("data_nerfstudio")
+BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
 SCENES = [
-    "ShadowSplat/tandt/caterpillar",
-    "ShadowSplat/tandt/train",
-    "ShadowSplat/tandt/ignatius",
-    "ShadowSplat/captures/shiny_statue_6pm",
-    "ShadowSplat/captures/space_laces_4pm",
-    "ShadowSplat/captures/chair_3pm",
-    "Mip-NeRF360/bicycle",
-    "Mip-NeRF360/bonsai",
-    "Mip-NeRF360/counter",
-    "Mip-NeRF360/flowers",
-    "Mip-NeRF360/garden",
-    "Mip-NeRF360/kitchen",
-    "Mip-NeRF360/room",
-    "Mip-NeRF360/stump",
-    "Mip-NeRF360/treehill",
+    "caterpillar",
+    "train",
+    "ignatius",
+    "shiny_statue_6pm",
+    "space_laces_4pm",
+    "chair_3pm",
+    "mipnerf360/bicycle",
+    "mipnerf360/bonsai",
+    "mipnerf360/counter",
+    "mipnerf360/flowers",
+    "mipnerf360/garden",
+    "mipnerf360/kitchen",
+    "mipnerf360/room",
+    "mipnerf360/stump",
+    "mipnerf360/treehill",
 ]
+# BASE_DATA_DIR = pathlib.Path("data_nerfstudio")
+# SCENES = [
+#     "ShadowSplat/tandt/caterpillar",
+#     "ShadowSplat/tandt/train",
+#     "ShadowSplat/tandt/ignatius",
+#     "ShadowSplat/captures/shiny_statue_6pm",
+#     "ShadowSplat/captures/space_laces_4pm",
+#     "ShadowSplat/captures/chair_3pm",
+#     "Mip-NeRF360/bicycle",
+#     "Mip-NeRF360/bonsai",
+#     "Mip-NeRF360/counter",
+#     "Mip-NeRF360/flowers",
+#     "Mip-NeRF360/garden",
+#     "Mip-NeRF360/kitchen",
+#     "Mip-NeRF360/room",
+#     "Mip-NeRF360/stump",
+#     "Mip-NeRF360/treehill",
+# ]
 DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 
 # Methods / information gain metrics to compare.
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
-    # "coverage",
-    "fisher_rf",
+    #"coverage",
+    # "fisher_rf",
     # "fig_color_field",
     # "fisher_info",
     # "random",
     # "all",
     # "fig",
-    # "view_fig",
+    "view_fig",
     # "fig_diag",
     # "view_fig_diag",
 ]
@@ -77,7 +77,7 @@ SEED = 0
 
 KDTREE_FILTER = True
 
-NUM_INITIAL_VIEWS = 10
+NUM_INITIAL_VIEWS = 1
 
 LOAD_3D_POINTS = True
 
