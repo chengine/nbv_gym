@@ -137,6 +137,56 @@ class NBVViewer(Viewer):
         except Exception:
             return set()
 
+    def _add_synthetic_camera_frustum(self, synthetic_idx: int, camera: Cameras) -> None:
+        """Add a camera frustum for a synthetic view.
+
+        Args:
+            synthetic_idx: Negative index for the synthetic view (-1, -2, etc.)
+            camera: The camera object for the synthetic view
+        """
+        if not hasattr(self, "camera_handles") or self.camera_handles is None:
+            return
+
+        # Skip if already exists
+        if synthetic_idx in self.camera_handles:
+            return
+
+        # Extract camera parameters
+        c2w = camera.camera_to_worlds[0].cpu().numpy()  # [3, 4]
+        # Add homogeneous row to make it 4x4
+        c2w_4x4 = np.eye(4)
+        c2w_4x4[:3, :] = c2w
+
+        # Convert to position and quaternion
+        position = c2w[:3, 3] * VISER_NERFSTUDIO_SCALE_RATIO
+        R = c2w[:3, :3]
+        # viser uses wxyz quaternion format
+        # Apply OpenCV to OpenGL convention (180° X-axis rotation) like parent class does
+        R_so3 = tf.SO3.from_matrix(R)
+        R_so3 = R_so3 @ tf.SO3.from_x_radians(np.pi)
+        wxyz = R_so3.wxyz
+
+        # Get FOV from camera intrinsics
+        fx = float(camera.fx[0].cpu())
+        fy = float(camera.fy[0].cpu())
+        width = int(camera.width[0].cpu())
+        height = int(camera.height[0].cpu())
+        fov = 2 * np.arctan(height / (2 * fy))
+        aspect = width / height
+
+        # Create camera frustum (green for active synthetic view)
+        camera_handle = self.viser_server.scene.add_camera_frustum(
+            name=f"/cameras/synthetic_{-synthetic_idx}",
+            fov=fov,
+            aspect=aspect,
+            scale=0.3,
+            wxyz=wxyz,
+            position=position,
+            color=(0.0, 1.0, 0.0),  # Green for active
+            line_width=3.0,
+        )
+        self.camera_handles[synthetic_idx] = camera_handle
+
     def _update_train_camera_visibility(self, force: bool = False) -> None:
         """Highlight active cameras in green and hide/show candidate (inactive) cameras based on checkbox.
 
@@ -145,10 +195,20 @@ class NBVViewer(Viewer):
         When unchecked, all cameras are visible.
 
         Operates only on already-created frustums (Viewer limits number displayed).
+        Also creates frustums for synthetic views (negative indices) if needed.
         """
         if not hasattr(self, "camera_handles") or self.camera_handles is None:
             return
         active = self._get_active_indices()
+
+        # Check for new synthetic views (negative indices) and create frustums for them
+        dm = self.pipeline.datamanager
+        if hasattr(dm, "synthetic_cameras"):
+            for i, camera in enumerate(dm.synthetic_cameras):
+                synthetic_idx = -(i + 1)  # -1, -2, -3, etc.
+                if synthetic_idx not in self.camera_handles:
+                    self._add_synthetic_camera_frustum(synthetic_idx, camera)
+
         # Only skip update if indices haven't changed, hiding is off, and not forcing update
         if not force and active == self._last_active_indices:
             # If indices haven't changed and hiding is off, we can skip
@@ -182,3 +242,23 @@ class NBVViewer(Viewer):
             else:
                 # For inactive cameras, hide/show based on checkbox
                 handle.visible = not self._hide_candidates
+
+    def update_camera_poses(self):
+        """Override to skip synthetic views (negative indices) which aren't in original_c2w.
+
+        The parent class iterates over all camera_handles keys and looks them up in
+        original_c2w. Synthetic views have negative indices and aren't in original_c2w,
+        causing a KeyError. We temporarily filter them out before calling the parent.
+        """
+        if not hasattr(self, "camera_handles") or self.camera_handles is None:
+            return
+
+        # Filter out synthetic views (negative indices) before calling parent
+        original_handles = self.camera_handles
+        self.camera_handles = {k: v for k, v in original_handles.items() if k >= 0}
+
+        try:
+            super().update_camera_poses()
+        finally:
+            # Restore all handles (including synthetic views)
+            self.camera_handles = original_handles

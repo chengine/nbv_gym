@@ -2,6 +2,7 @@
 
 import torch
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal, Type, Optional
 
 from torch.cuda.amp.grad_scaler import GradScaler
@@ -28,8 +29,8 @@ class ViewSelectionPipelineConfig(VanillaPipelineConfig):
     # Progressive view selection controls
     add_every_n_steps: int = 1000
     add_num_views: int = 1
-    view_selector: Literal["random", "all", "basic"] = "all"
-    """View selection mode: 'random', 'all', 'basic'."""
+    view_selector: Literal["random", "all", "basic", "gradient_descent"] = "all"
+    """View selection mode: 'random', 'all', 'basic', 'gradient_descent'."""
 
     # Initial view selection
     start_num_views: int = 10
@@ -46,6 +47,16 @@ class ViewSelectionPipelineConfig(VanillaPipelineConfig):
     """Whether to use KD-tree filtering to reduce candidate pool for view selection."""
     view_selection_num_nearest_neighbors: int = 5
     """Number of nearest neighbors to consider when using KD-tree filtering for view selection."""
+
+    # Gradient descent view selector configuration
+    external_3dgs_config_path: Optional[Path] = None
+    """Path to external 'all views' 3DGS config.yml for RGB rendering (required for gradient_descent selector)."""
+    gd_num_gradient_steps: int = 1
+    """Number of gradient descent steps for pose optimization."""
+    gd_learning_rate_position: float = 0.001
+    """Learning rate for camera position optimization."""
+    gd_learning_rate_rotation: float = 0.001
+    """Learning rate for camera rotation optimization."""
 
 class ViewSelectionPipeline(VanillaPipeline):
     def __init__(
@@ -92,6 +103,24 @@ class ViewSelectionPipeline(VanillaPipeline):
                     self._model.setup_view_metric(config.view_metric)
                 if hasattr(self.model, "setup_view_metric"):
                     self.model.setup_view_metric(config.view_metric)
+            elif config.view_selector == "gradient_descent":
+                # Gradient descent view selector with external 3DGS rendering
+                view_selector = create_view_selector(
+                    mode=config.view_selector,
+                    view_metric=config.view_metric,
+                    num_nearest_neighbors=config.view_selection_num_nearest_neighbors,
+                    intrinsics_scale=config.view_selection_intrinsics_scale,
+                    use_kdtree_filter=config.view_selection_use_kdtree_filter,
+                    external_3dgs_config_path=config.external_3dgs_config_path,
+                    gd_num_gradient_steps=config.gd_num_gradient_steps,
+                    gd_learning_rate_position=config.gd_learning_rate_position,
+                    gd_learning_rate_rotation=config.gd_learning_rate_rotation,
+                )
+                # Setup view metric for the model
+                if hasattr(self._model, "setup_view_metric"):
+                    self._model.setup_view_metric(config.view_metric)
+                if hasattr(self.model, "setup_view_metric"):
+                    self.model.setup_view_metric(config.view_metric)
             else:
                 # Pass KD-tree parameters for other selectors (random, all, etc.)
                 view_selector = create_view_selector(
@@ -99,8 +128,11 @@ class ViewSelectionPipeline(VanillaPipeline):
                     use_kdtree_filter=config.view_selection_use_kdtree_filter,
                     num_nearest_neighbors=config.view_selection_num_nearest_neighbors,
                 )
-                self._model.setup_view_metric(None)
-                self.model.setup_view_metric(None)
+                # Setup view metric for the model (use configured view_metric, not None)
+                if hasattr(self._model, "setup_view_metric"):
+                    self._model.setup_view_metric(config.view_metric)
+                if hasattr(self.model, "setup_view_metric"):
+                    self.model.setup_view_metric(config.view_metric)
 
             self.datamanager.view_selector = view_selector
             self._view_selector = view_selector

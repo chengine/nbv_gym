@@ -9,49 +9,68 @@ from datetime import datetime
 PROJECT_NAME = "next-best-view-rebuttal"
 
 # Datasets to sweep
-# BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
-# SCENES = [
-#     "caterpillar",
-#     "train",
-#     "ignatius",
-#     "shiny_statue_6pm",
-#     "space_laces_4pm",
-#     "chair_3pm",
-#     "mipnerf360/bicycle",
-#     "mipnerf360/bonsai",
-#     "mipnerf360/counter",
-#     "mipnerf360/flowers",
-#     "mipnerf360/garden",
-#     "mipnerf360/kitchen",
-#     "mipnerf360/room",
-#     "mipnerf360/stump",
-#     "mipnerf360/treehill",
-# ]
-BASE_DATA_DIR = pathlib.Path("data_nerfstudio")
+BASE_DATA_DIR = pathlib.Path("/home/chengine/Research/data")
 SCENES = [
-    "ShadowSplat/tandt/caterpillar",
-    "ShadowSplat/tandt/train",
-    "ShadowSplat/tandt/ignatius",
-    "ShadowSplat/captures/shiny_statue_6pm",
-    "ShadowSplat/captures/space_laces_4pm",
-    "ShadowSplat/captures/chair_3pm",
-    "Mip-NeRF360/bicycle",
-    "Mip-NeRF360/bonsai",
-    "Mip-NeRF360/counter",
-    "Mip-NeRF360/flowers",
-    "Mip-NeRF360/garden",
-    "Mip-NeRF360/kitchen",
-    "Mip-NeRF360/room",
-    "Mip-NeRF360/stump",
-    "Mip-NeRF360/treehill",
+    "caterpillar",
+    "train",
+    "ignatius",
+    "shiny_statue_6pm",
+    "space_laces_4pm",
+    "chair_3pm",
+    "mipnerf360/bicycle",
+    "mipnerf360/bonsai",
+    "mipnerf360/counter",
+    "mipnerf360/flowers",
+    "mipnerf360/garden",
+    "mipnerf360/kitchen",
+    "mipnerf360/room",
+    "mipnerf360/stump",
+    "mipnerf360/treehill",
 ]
+
+PRETRAINED_3DGS_PATH = {
+    "caterpillar": "/home/chengine/Research/shadow_splat/outputs/caterpillar__all__20260129-1335/nbv-splat/2026-01-29_133604/config.yml",
+    "train": "/home/chengine/Research/shadow_splat/outputs/train__all__20260129-1342/nbv-splat/2026-01-29_134215/config.yml",
+    "ignatius": "/home/chengine/Research/shadow_splat/outputs/ignatius__all__20260129-1348/nbv-splat/2026-01-29_134846/config.yml",
+    "shiny_statue_6pm": "/home/chengine/Research/shadow_splat/outputs/shiny_statue_6pm__all__20260129-1355/nbv-splat/2026-01-29_135526/config.yml",
+    "space_laces_4pm": "/home/chengine/Research/shadow_splat/outputs/space_laces_4pm__all__20260129-1406/nbv-splat/2026-01-29_140634/config.yml",
+    "chair_3pm": "/home/chengine/Research/shadow_splat/outputs/chair_3pm__all__20260129-1416/nbv-splat/2026-01-29_141628/config.yml",
+    "mipnerf360/bicycle": "/home/chengine/Research/shadow_splat/outputs/bicycle__all__20260129-1426/nbv-splat/2026-01-29_142642/config.yml",
+    "mipnerf360/bonsai": "/home/chengine/Research/shadow_splat/outputs/bonsai__all__20260129-1438/nbv-splat/2026-01-29_143827/config.yml",
+    "mipnerf360/counter": "/home/chengine/Research/shadow_splat/outputs/counter__all__20260129-1446/nbv-splat/2026-01-29_144703/config.yml",
+    "mipnerf360/flowers": "/home/chengine/Research/shadow_splat/outputs/flowers__all__20260129-1455/nbv-splat/2026-01-29_145524/config.yml",
+    "mipnerf360/garden": "/home/chengine/Research/shadow_splat/outputs/garden__all__20260129-1505/nbv-splat/2026-01-29_150523/config.yml",
+    "mipnerf360/kitchen": "/home/chengine/Research/shadow_splat/outputs/kitchen__all__20260129-1514/nbv-splat/2026-01-29_151419/config.yml",
+    "mipnerf360/room": "/home/chengine/Research/shadow_splat/outputs/room__all__20260129-1523/nbv-splat/2026-01-29_152321/config.yml",
+    "mipnerf360/stump": "/home/chengine/Research/shadow_splat/outputs/stump__all__20260129-1532/nbv-splat/2026-01-29_153224/config.yml",
+    "mipnerf360/treehill": "/home/chengine/Research/shadow_splat/outputs/treehill__all__20260129-1543/nbv-splat/2026-01-29_154334/config.yml",
+}
+
+# BASE_DATA_DIR = pathlib.Path("data_nerfstudio")
+# SCENES = [
+#     "ShadowSplat/tandt/caterpillar",
+#     "ShadowSplat/tandt/train",
+#     "ShadowSplat/tandt/ignatius",
+#     "ShadowSplat/captures/shiny_statue_6pm",
+#     "ShadowSplat/captures/space_laces_4pm",
+#     "ShadowSplat/captures/chair_3pm",
+#     "Mip-NeRF360/bicycle",
+#     "Mip-NeRF360/bonsai",
+#     "Mip-NeRF360/counter",
+#     "Mip-NeRF360/flowers",
+#     "Mip-NeRF360/garden",
+#     "Mip-NeRF360/kitchen",
+#     "Mip-NeRF360/room",
+#     "Mip-NeRF360/stump",
+#     "Mip-NeRF360/treehill",
+# ]
 DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
 
 # Methods / information gain metrics to compare.
 # Valid entries: "coverage", "fig", "view_fig", "fisher_info", "random"
 METHODS = [
-    # "coverage",
-    "fisher_rf",
+    "coverage",
+    # "fisher_rf",
     # "fig_color_field",
     # "fisher_info",
     # "random",
@@ -77,13 +96,25 @@ SEED = 0
 
 KDTREE_FILTER = True
 
-NUM_INITIAL_VIEWS = 10
+GRADIENT_DESCENT = False  # Use gradient descent view selector for metric-based methods
+
+NUM_INITIAL_VIEWS = 1
 
 LOAD_3D_POINTS = True
 
 # -----------------------------
 # Internal helpers
 # -----------------------------
+
+
+def _get_scene_key(dataset: str) -> str:
+    """Get the scene key for PRETRAINED_3DGS_PATH lookup."""
+    # Try to match against SCENES list
+    for scene in SCENES:
+        if dataset.endswith(scene) or dataset.endswith(scene.rstrip("/")):
+            return scene
+    # Fallback: use just the dataset name
+    return pathlib.Path(dataset.rstrip("/\\")).name
 
 
 def build_cmd(dataset: str, method: str) -> list[str]:
@@ -96,6 +127,10 @@ def build_cmd(dataset: str, method: str) -> list[str]:
         and set --pipeline.optics-coverage-metric=fisher_info.
       - random: model=shadow-splat, view-selector=random, no metric flag.
     """
+    # Validation for gradient descent
+    if GRADIENT_DESCENT and not KDTREE_FILTER:
+        raise ValueError("GRADIENT_DESCENT=True requires KDTREE_FILTER=True")
+
     dataset_name = pathlib.Path(dataset.rstrip("/\\")).name
     ts = datetime.now().strftime("%Y%m%d-%H%M")
 
@@ -114,9 +149,21 @@ def build_cmd(dataset: str, method: str) -> list[str]:
         "fisher_rf",
     }:
         model = "nbv-splat"
-        view_selector = "basic"
-        extra_metric_args = ["--pipeline.view-metric", method]
-        exp_suffix = f"{dataset_name}__{method}"
+        if GRADIENT_DESCENT:
+            view_selector = "gradient_descent"
+            # Find scene key in PRETRAINED_3DGS_PATH
+            scene_key = _get_scene_key(dataset)
+            if scene_key not in PRETRAINED_3DGS_PATH:
+                raise ValueError(f"No pretrained model path for scene: {scene_key}")
+            extra_metric_args = [
+                "--pipeline.view-metric", method,
+                "--pipeline.external-3dgs-config-path", PRETRAINED_3DGS_PATH[scene_key],
+            ]
+            exp_suffix = f"{dataset_name}__{method}__gd"
+        else:
+            view_selector = "basic"
+            extra_metric_args = ["--pipeline.view-metric", method]
+            exp_suffix = f"{dataset_name}__{method}"
     elif method == "all":
         model = "nbv-splat"
         view_selector = "all"

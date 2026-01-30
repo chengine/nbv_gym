@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import random
 from dataclasses import dataclass, field
-from typing import Dict, Literal, Tuple, Type, Union, Optional
+from typing import Dict, List, Literal, Tuple, Type, Union, Optional
 import torch
 from copy import deepcopy
 
@@ -84,6 +84,10 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
 
         self.view_selector = view_selector
 
+        # Initialize synthetic view storage for gradient descent view selector
+        self.synthetic_cameras: List[Cameras] = []
+        self.synthetic_images: List[torch.Tensor] = []
+
         # Initialize active set
         num_train_images = len(self.train_dataset)
         self.all_train_indices = list(range(num_train_images))
@@ -117,11 +121,30 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         else:
             self.available_indices = self.all_train_indices
 
+    def add_synthetic_view(self, camera: Cameras, image: torch.Tensor) -> int:
+        """Add an optimized camera + rendered image to the training set.
+
+        Args:
+            camera: Optimized camera pose
+            image: Rendered RGB image from external model [H, W, 3]
+
+        Returns:
+            Negative index representing this synthetic view
+        """
+        self.synthetic_cameras.append(camera)
+        self.synthetic_images.append(image)
+        # Use negative indices to distinguish from dataset indices
+        # -1 = first synthetic, -2 = second synthetic, etc.
+        synthetic_idx = -len(self.synthetic_cameras)
+        return synthetic_idx
+
     def expand_active_set(self, k: int = 1, step: Optional[int] = None, **kwargs) -> None:
         """Expand the active set by adding up to k remaining indices using the view selector."""
         if not self.all_train_indices:
             return
-        remaining = list(set(self.available_indices) - set(self.active_train_indices))
+        # Filter out negative indices (synthetic views) when computing remaining
+        real_active_indices = [idx for idx in self.active_train_indices if idx >= 0]
+        remaining = list(set(self.available_indices) - set(real_active_indices))
         if not remaining:
             return
 
@@ -138,6 +161,12 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
         else:
             # Fallback to random selection
             add = random.sample(remaining, k=min(max(1, k), len(remaining)))
+
+        # Handle sentinel value [-1] from gradient descent selector
+        # This indicates synthetic view was already added via add_synthetic_view
+        if add == [-1]:
+            # Synthetic view already added, just log it
+            add = []  # Don't add anything else to active_train_indices
 
         self.active_train_indices.extend(add)
         # Make newly added indices available for immediate sampling
@@ -173,6 +202,8 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
 
         Returns a `Cameras` object instead of a ray bundle to match the existing
         Coverage Splatting pipeline/model interface.
+
+        Handles both positive indices (dataset views) and negative indices (synthetic views).
         """
         # print(f"Active train cameras: {len(self.active_train_indices)}")
         if not self.active_unseen_cameras:
@@ -183,6 +214,23 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
             random.randint(0, len(self.active_unseen_cameras) - 1)
         )
 
+        # Handle synthetic views (negative indices)
+        if image_idx < 0:
+            # Convert negative index: -1 -> 0, -2 -> 1, etc.
+            synthetic_idx = -image_idx - 1
+            if synthetic_idx >= len(self.synthetic_cameras):
+                raise IndexError(f"Synthetic view index {synthetic_idx} out of range. "
+                               f"Only {len(self.synthetic_cameras)} synthetic views available.")
+
+            cameras = self.synthetic_cameras[synthetic_idx].to(self.device)
+            if cameras.metadata is None:
+                cameras.metadata = {}
+            cameras.metadata["cam_idx"] = image_idx  # Keep negative index for tracking
+
+            data = {"image": self.synthetic_images[synthetic_idx].to(self.device)}
+            return cameras, data
+
+        # Handle regular dataset views (positive indices)
         # data = deepcopy(self.cached_train[image_idx])
         # Avoid deepcopy - just reference and move to device
         data = self.cached_train[image_idx]

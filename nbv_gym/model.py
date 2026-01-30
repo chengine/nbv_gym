@@ -127,32 +127,33 @@ class NBVSplatModel(SplatfactoModel):
         self.view_metric = view_metric
 
         # Initialize the view_attributes tensor to be correct shapes
+        # NOTE: We update gauss_params directly because view_attributes is a read-only property
 
         if view_metric in [None, "fig", "fig_diag"]:
             # None: Dummy variables (not used)
             # fig: The running sum of rendering weights over camera views per-Gaussian
             # fig_diag: Is the same object as fig. Only difference is when we render the fig_diag, we take the reciprocal.
-            self.view_attributes = torch.nn.Parameter(torch.zeros((self.means.shape[0]), device="cuda"))
+            new_view_attributes = torch.nn.Parameter(torch.zeros((self.means.shape[0]), device="cuda"))
 
         elif view_metric in ["coverage", "view_fig", "view_fig_diag"]:
             # coverage: The running counts of the hits on a Gaussian per patch of the unit viewing direction sphere
             # view_fig: The running sum of rendering weights of the color field per patch of the unit viewing direction sphere
             # view_fig_diag: Is the same object as view_fig. Only difference is when we render the view_fig_diag, we take the reciprocal.
-            self.view_attributes = torch.nn.Parameter(torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda"))
+            new_view_attributes = torch.nn.Parameter(torch.zeros((self.means.shape[0], self.config.n_sphere_bins), device="cuda"))
 
         elif view_metric in ["fig_color_field"]:
             # fig_color_field: Column 0 is the start index of the camera_ids tensor. Column 1 is the length after the start index.
             # This information allows us to implicitly compute visible gaussian_ids for all training cameras, while the camera_ids is already stored.
-            self.view_attributes = torch.nn.Parameter(torch.zeros((self.means.shape[0], 2), device="cuda"))
+            new_view_attributes = torch.nn.Parameter(torch.zeros((self.means.shape[0], 2), device="cuda"))
 
         elif view_metric in ["fisher_rf"]:
             # fisher_rf: Per-Gaussian accumulated Hessian from training cameras (Fisher information)
-            self.view_attributes = torch.nn.Parameter(torch.zeros((self.means.shape[0]), device="cuda"))
+            new_view_attributes = torch.nn.Parameter(torch.zeros((self.means.shape[0]), device="cuda"))
 
         else:
             raise ValueError(f"Unknown view metric: {view_metric}")
 
-        self.gauss_params["view_attributes"] = self.view_attributes
+        self.gauss_params["view_attributes"] = new_view_attributes
 
         # Initialize the per-Gaussian view attribute function
 
@@ -652,6 +653,50 @@ class NBVSplatModel(SplatfactoModel):
         # Sum all pixel values where alphas is > 0 to get total view metric score
         # Detach to avoid keeping references to the computation graph
         view_metric_score = ((view_metric * valid_mask).sum() / valid_mask.sum()).detach()
+
+        # Restore training state
+        if was_training:
+            self.train()
+
+        camera.rescale_output_resolution(camera_scale_fac)  # type: ignore
+        return view_metric_score
+
+    def view_metric_score_for_camera_differentiable(
+        self,
+        camera: Cameras,
+        intrinsics_scale: float = 1.0,
+    ) -> torch.Tensor:
+        """Compute coverage score for a candidate camera (differentiable version).
+
+        Same as view_metric_score_for_camera but allows gradients to flow through.
+        Required for gradient descent optimization of camera pose.
+
+        Args:
+            camera: Camera object to evaluate (with differentiable camera_to_worlds)
+            intrinsics_scale: Scale factor for camera intrinsics (for faster evaluation).
+                Values < 1.0 downscale the resolution.
+
+        Returns:
+            Scalar tensor with the total coverage score (sum of all coverage pixels).
+            Lower values indicate views that see poorly-covered areas.
+        """
+        # Save current training state
+        was_training = self.training
+
+        # Set to eval mode for inference
+        self.eval()
+
+        camera_scale_fac = self._get_downscale_factor()
+        camera.rescale_output_resolution(1 / camera_scale_fac)
+
+        # Render from camera - get_outputs will use render_mode="RGB+ED" which includes coverage
+        outputs = self.get_outputs(camera)
+        view_metric = outputs["view_metric"]
+        valid_mask = outputs["accumulation"] > 0
+
+        # Sum all pixel values where alphas is > 0 to get total view metric score
+        # Do NOT detach - allow gradients to flow
+        view_metric_score = (view_metric * valid_mask).sum() / valid_mask.sum().clamp(min=1)
 
         # Restore training state
         if was_training:
