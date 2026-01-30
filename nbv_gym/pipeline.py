@@ -51,12 +51,14 @@ class ViewSelectionPipelineConfig(VanillaPipelineConfig):
     # Gradient descent view selector configuration
     external_3dgs_config_path: Optional[Path] = None
     """Path to external 'all views' 3DGS config.yml for RGB rendering (required for gradient_descent selector)."""
-    gd_num_gradient_steps: int = 1
+    gd_num_gradient_steps: int = 50
     """Number of gradient descent steps for pose optimization."""
     gd_learning_rate_position: float = 0.001
     """Learning rate for camera position optimization."""
     gd_learning_rate_rotation: float = 0.001
     """Learning rate for camera rotation optimization."""
+    gd_include_neighbor_frame: bool = True
+    """Whether to include the original dataset neighbor frame in addition to the optimized frame."""
 
 class ViewSelectionPipeline(VanillaPipeline):
     def __init__(
@@ -115,6 +117,7 @@ class ViewSelectionPipeline(VanillaPipeline):
                     gd_num_gradient_steps=config.gd_num_gradient_steps,
                     gd_learning_rate_position=config.gd_learning_rate_position,
                     gd_learning_rate_rotation=config.gd_learning_rate_rotation,
+                    gd_include_neighbor_frame=config.gd_include_neighbor_frame,
                 )
                 # Setup view metric for the model
                 if hasattr(self._model, "setup_view_metric"):

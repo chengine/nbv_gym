@@ -193,8 +193,12 @@ class ViewSelectionDataManager(FullImageDatamanager):  # pylint: disable=abstrac
             #     newly_added_indices=add,
             # )
 
+        num_synthetic = sum(1 for idx in self.active_train_indices if idx < 0)
+        num_real = len(self.active_train_indices) - num_synthetic
+
         print(
-            f"Expanded active set to {len(self.active_train_indices)} views (added {len(add)} views)"
+            f"Expanded active set to {len(self.active_train_indices)} views "
+            f"({num_real} real + {num_synthetic} synthetic) (added {len(add)} dataset views)"
         )
 
     def next_train(self, step: int) -> Tuple[Cameras, Dict]:

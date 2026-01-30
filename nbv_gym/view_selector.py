@@ -278,6 +278,7 @@ class GradientDescentViewSelectorConfig:
     view_metric: str = "coverage"
     max_position_delta: float = 0.01  # Maximum position movement from initial pose (epsilon ball)
     max_rotation_delta: float = 0.01  # Maximum rotation movement from initial pose (epsilon ball on axis-angle)
+    include_neighbor_frame: bool = True  # Whether to also add the original dataset frame used as GD starting point
 
 
 class GradientDescentViewSelector(BaseViewSelector):
@@ -442,6 +443,10 @@ class GradientDescentViewSelector(BaseViewSelector):
         # Store initial score for comparison
         initial_score = None
 
+        # Track best score and pose during optimization
+        best_score = float('inf')
+        best_c2w = None
+
         # Gradient descent optimization
         for step in range(self.config.num_gradient_steps):
             optimizer.zero_grad()
@@ -471,6 +476,13 @@ class GradientDescentViewSelector(BaseViewSelector):
             if initial_score is None:
                 initial_score = score.item()
 
+            # Track best score and pose
+            with torch.no_grad():
+                current_score = score.item()
+                if current_score < best_score:
+                    best_score = current_score
+                    best_c2w = diff_pose.get_camera_to_world().detach().clone()
+
             # Backward pass (minimize coverage score = find poorly-covered areas)
             score.backward()
 
@@ -497,21 +509,40 @@ class GradientDescentViewSelector(BaseViewSelector):
                     )
 
             if step % 10 == 0:
-                print(f"  GD step {step}: score = {score.item():.6f}")
+                with torch.no_grad():
+                    pos_delta_norm = (diff_pose.position - initial_position).norm().item()
+                    rot_delta_norm = (diff_pose.axis_angle - initial_axis_angle).norm().item()
+                print(f"  GD step {step}: score={score.item():.6f}, pos_delta={pos_delta_norm:.6f}, rot_delta={rot_delta_norm:.6f}")
 
-        # Get final optimized pose
-        with torch.no_grad():
-            final_c2w = diff_pose.get_camera_to_world()
+        # Use best pose found during optimization (not final step)
+        if best_c2w is None:
+            # Fallback to final pose if no improvement was ever found
+            with torch.no_grad():
+                best_c2w = diff_pose.get_camera_to_world()
+            best_score = score.item()
 
         final_score = score.item()
-        print(f"  Optimization complete: {initial_score:.6f} -> {final_score:.6f}")
 
-        if final_score >= initial_score:
+        # Compute pose deltas for logging
+        with torch.no_grad():
+            # Final pose delta (from last GD step)
+            final_pos_delta = (diff_pose.position - initial_position).norm().item()
+            final_rot_delta = (diff_pose.axis_angle - initial_axis_angle).norm().item()
+
+            # Best pose delta (from best_c2w)
+            best_position = best_c2w[0, :3, 3]
+            initial_pos = initial_c2w[0, :3, 3]
+            best_pos_delta = (best_position - initial_pos).norm().item()
+
+        print(f"  Optimization complete: initial={initial_score:.6f}, best={best_score:.6f}, final={final_score:.6f}")
+        print(f"  Pose deltas: final_pos={final_pos_delta:.6f}, final_rot={final_rot_delta:.6f}, best_pos={best_pos_delta:.6f}")
+
+        if best_score >= initial_score:
             print("  Warning: Gradient descent did not improve coverage score")
 
-        # Create final optimized camera
+        # Create optimized camera using BEST pose
         optimized_camera = Cameras(
-            camera_to_worlds=final_c2w.detach(),
+            camera_to_worlds=best_c2w.detach(),
             fx=initial_camera.fx.clone(),
             fy=initial_camera.fy.clone(),
             cx=initial_camera.cx.clone(),
@@ -617,11 +648,15 @@ class GradientDescentViewSelector(BaseViewSelector):
         print(f"Added synthetic view with index {synthetic_idx}")
         print(f"Total optimized cameras: {len(self.optimized_cameras)}")
 
-        # Return the dataset pose used as starting point so it gets consumed from remaining_indices
-        # The synthetic view was already added to active_train_indices above (line 614)
-        # By returning best_idx, the datamanager will also add it to active_train_indices,
-        # which removes it from remaining_indices so it won't be reused as a starting point
-        return [best_idx]
+        # Return the dataset pose used as starting point if include_neighbor_frame is True
+        # This adds the original frame to training AND removes it from remaining_indices
+        # If False, only return empty list (the synthetic view was already added above)
+        if self.config.include_neighbor_frame:
+            print(f"  Also adding neighbor frame {best_idx} to training")
+            return [best_idx]
+        else:
+            print(f"  Skipping neighbor frame (only synthetic view added)")
+            return []
 
 
 def create_view_selector(
@@ -634,6 +669,7 @@ def create_view_selector(
     gd_num_gradient_steps: Optional[int] = None,
     gd_learning_rate_position: Optional[float] = None,
     gd_learning_rate_rotation: Optional[float] = None,
+    gd_include_neighbor_frame: Optional[bool] = None,
 ) -> BaseViewSelector:
     """
     Factory function to create a BaseViewSelector based on mode string.
@@ -648,6 +684,7 @@ def create_view_selector(
         gd_num_gradient_steps: Number of gradient descent steps (optional, for gradient_descent mode)
         gd_learning_rate_position: Learning rate for position (optional, for gradient_descent mode)
         gd_learning_rate_rotation: Learning rate for rotation (optional, for gradient_descent mode)
+        gd_include_neighbor_frame: Whether to include the original dataset neighbor frame in addition to optimized frame (optional, for gradient_descent mode)
 
     Returns:
         BaseViewSelector instance
@@ -690,6 +727,7 @@ def create_view_selector(
             num_nearest_neighbors=num_nearest_neighbors if num_nearest_neighbors is not None else 5,
             intrinsics_scale=intrinsics_scale if intrinsics_scale is not None else 1.0,
             view_metric=view_metric if view_metric is not None else "coverage",
+            include_neighbor_frame=gd_include_neighbor_frame if gd_include_neighbor_frame is not None else True,
         )
         return GradientDescentViewSelector(config)
     else:

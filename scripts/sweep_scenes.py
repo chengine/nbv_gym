@@ -96,7 +96,9 @@ SEED = 0
 
 KDTREE_FILTER = True
 
-GRADIENT_DESCENT = False  # Use gradient descent view selector for metric-based methods
+GRADIENT_DESCENT = True  # Use gradient descent view selector for metric-based methods
+
+GD_INCLUDE_NEIGHBOR_FRAME = True  # Whether to include original dataset frame alongside optimized frame
 
 NUM_INITIAL_VIEWS = 1
 
@@ -105,7 +107,6 @@ LOAD_3D_POINTS = True
 # -----------------------------
 # Internal helpers
 # -----------------------------
-
 
 def _get_scene_key(dataset: str) -> str:
     """Get the scene key for PRETRAINED_3DGS_PATH lookup."""
@@ -158,6 +159,7 @@ def build_cmd(dataset: str, method: str) -> list[str]:
             extra_metric_args = [
                 "--pipeline.view-metric", method,
                 "--pipeline.external-3dgs-config-path", PRETRAINED_3DGS_PATH[scene_key],
+                "--pipeline.gd-include-neighbor-frame", str(GD_INCLUDE_NEIGHBOR_FRAME),
             ]
             exp_suffix = f"{dataset_name}__{method}__gd"
         else:

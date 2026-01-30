@@ -381,14 +381,36 @@ class NBVSplatModel(SplatfactoModel):
                 "features_dc",
                 "features_rest",
                 "opacities",
-                "view_attributes",
             ]:
                 dict[f"gauss_params.{p}"] = dict[p]
+            # Don't remap view_attributes - they may have different shapes
+
+        # Remove view_attributes from checkpoint if shape doesn't match
+        # (view_attributes are not needed for RGB rendering)
+        if "gauss_params.view_attributes" in dict:
+            checkpoint_shape = dict["gauss_params.view_attributes"].shape
+            model_shape = self.gauss_params["view_attributes"].shape
+            if len(checkpoint_shape) != len(model_shape) or checkpoint_shape[1:] != model_shape[1:]:
+                del dict["gauss_params.view_attributes"]
+        if "view_attributes" in dict:
+            del dict["view_attributes"]
+
         newp = dict["gauss_params.means"].shape[0]
         for name, param in self.gauss_params.items():
+            if name == "view_attributes":
+                continue  # Skip view_attributes - keep model's initialized shape
             old_shape = param.shape
             new_shape = (newp,) + old_shape[1:]
             self.gauss_params[name] = torch.nn.Parameter(torch.zeros(new_shape, device=self.device))
+
+        # Resize view_attributes to match the new number of Gaussians
+        # but keep the model's expected shape for the remaining dimensions
+        view_attr_shape = self.gauss_params["view_attributes"].shape
+        new_view_attr_shape = (newp,) + view_attr_shape[1:]
+        self.gauss_params["view_attributes"] = torch.nn.Parameter(
+            torch.zeros(new_view_attr_shape, device=self.device)
+        )
+
         super().load_state_dict(dict, **kwargs)
 
     def step_post_backward(self, step):
