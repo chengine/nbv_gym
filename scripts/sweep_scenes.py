@@ -6,6 +6,10 @@ from datetime import datetime
 import random
 import numpy as np
 
+# Set which GPU to use (0 or 1). Both are L40S GPUs with 46GB VRAM each
+# GPU 0 is the default, GPU 1 is currently idle
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
 seed = 42
 random.seed(seed)
 np.random.seed(seed)
@@ -38,12 +42,12 @@ PROJECT_NAME = "next-best-view"
 # Datasets to sweep
 BASE_DATA_DIR = pathlib.Path("/home/madang/data/StanfordMSL/coverage_view_selection/data")
 SCENES = [
-# "caterpillar",
-# "train",
-# "ignatius",
-# "shiny_statue_6pm",
-# "space_laces_4pm",
-# "chair_3pm",
+"caterpillar",
+"train",
+"ignatius",
+"shiny_statue_6pm",
+"space_laces_4pm",
+"chair_3pm",
 # "master_chief_cycles"
 "bicycle",
 # "counter",
