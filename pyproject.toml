@@ -3,6 +3,12 @@ name = "nbv-gym"
 description = "Next Best View Selection Techniques for Radiance Fields"
 version = "0.1.0"
 
+dependencies = [
+    "gsplat==1.5.3",
+    "numpy<2.0",
+    "Pillow<11",
+]
+
 [tool.setuptools.packages.find]
 include = ["nbv_gym*"]
 

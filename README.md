@@ -9,29 +9,51 @@ A framework for optimizing camera view selection in 3D Gaussian Splatting using 
 | Dependency | Version |
 |------------|---------|
 | Python | 3.10 |
-| gsplat | 1.5.3 |
 | Nerfstudio | From source (as of 11/21/2025) |
-
-> **Note:** You may need to overwrite the `gsplat` library included in Nerfstudio with the required version. If you encounter issues, try downgrading `numpy` to below 2.0.
+| PyTorch | 2.5.1+cu124 |
+| gsplat | 1.5.3 |
+| Pillow | < 11 |
+| numpy | < 2.0 |
 
 ---
 
 ## Installation
 
-### 1. Clone the repository
+### 1. Create a conda environment
+
+```bash
+conda create -n nbv_gym python=3.10 -y
+conda activate nbv_gym
+```
+
+### 2. Install Nerfstudio from source
+
+```bash
+git clone https://github.com/nerfstudio-project/nerfstudio.git
+cd nerfstudio
+pip install -e .
+cd ..
+```
+
+### 3. Clone and install NBV-Gym
 
 ```bash
 git clone <repository-url>
 cd nbv-gym
-```
-
-### 2. Install as a Python package
-
-```bash
+pip install -r requirements.txt
 pip install -e .
 ```
 
-### 3. Register with Nerfstudio
+`requirements.txt` fixes dependency versions that Nerfstudio installs incorrectly:
+
+- **PyTorch**: Downgraded to 2.5.1+cu124 (Nerfstudio's default ships CUDA 13.0 which requires a very recent NVIDIA driver)
+- **gsplat**: Upgraded to 1.5.3 (Nerfstudio pins 1.4.0)
+- **Pillow**: Pinned below 11 (11+ breaks nerfstudio's `pil_to_numpy`)
+- **numpy**: Pinned below 2.0
+
+> **Note:** If your NVIDIA driver supports a different CUDA version than 12.4, edit `requirements.txt` to use the appropriate PyTorch index URL (see [PyTorch installation](https://pytorch.org/get-started/locally/)).
+
+### 5. Register with Nerfstudio
 
 ```bash
 ns-install-cli
