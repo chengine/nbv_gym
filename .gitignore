@@ -23,6 +23,10 @@ pyrightconfig.json
 *.pdf
 *.html
 
+# README assets — keep these tracked
+!assets/teaser.png
+!assets/COVER_logo.svg
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

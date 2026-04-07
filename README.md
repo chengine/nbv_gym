@@ -1,6 +1,51 @@
-# NBV-Gym: Next Best View Selection for Gaussian Splatting
+<h1>
+  <img src="assets/COVER_logo.svg" alt="COVER logo" height="48" align="left" style="margin-right: 12px;">
+  NBV-Gym: A Plugin Framework for Next Best View Selection
+</h1>
 
-A framework for optimizing camera view selection in 3D Gaussian Splatting using coverage-based metrics.
+<br>
+
+### [Project Website](https://chengine.github.io/nbv_gym/) &nbsp;|&nbsp; [Paper](https://chengine.github.io/nbv_gym/assets/COVER.pdf)
+
+**[Timothy Chen](https://msl.stanford.edu/people/timchen)\*, [Adam Dai](https://scholar.google.com/citations?user=PVl3j4cAAAAJ&hl=en)\*, [Maximilian Adang](https://msl.stanford.edu/people/maximilianadang), [Grace Gao](https://profiles.stanford.edu/gracegao), [Mac Schwager](https://profiles.stanford.edu/mac-schwager)**
+
+**Stanford University**
+
+🎉 **Accepted to CVPR 2026** 🎉
+
+<sub>\*Equal contribution</sub>
+
+---
+
+**NBV-Gym** is a [Nerfstudio](https://github.com/nerfstudio-project/nerfstudio) plugin that turns *Next Best View (NBV) selection* into a reproducible benchmarking problem. It progressively expands the training set during 3D Gaussian Splatting optimization by querying a pluggable view-selection metric — allowing researchers to easily implement, ablate, and compare their own active view selection strategies under a common training pipeline.
+
+> The repo ships with our published metric **COVER** (*Coverage Optimization for Camera View Selection*, CVPR 2026), but the framework is designed to host **any** view metric. NBV-Gym is the **gym**: bring your own metric, train, and compare against the baselines.
+
+---
+
+## Pipeline
+
+![NBV-Gym pipeline](assets/teaser.png)
+
+NBV-Gym wraps the standard Nerfstudio training loop with an **active view selection loop**. Every `N` gradient steps, the framework does the following:
+
+1. **Score candidate views** &mdash; the active `view_metric` is queried against the current 3DGS state, returning a scalar score for each unused training camera.
+2. **Select the next best view(s)** &mdash; the active `view_selector` (e.g. random, top-K, KD-tree filtered) picks one or more views from the ranked candidates.
+3. **Expand the active set** &mdash; chosen views are moved from the candidate pool into the active training set, and incremental optimization continues.
+
+All of this is orchestrated by `ViewSelectionPipeline` (`nbv_gym/pipeline.py`) and `ViewSelectionDataManager` (`nbv_gym/datamanager.py`). As an implementer of a new metric, **you only need to define how to score a view** &mdash; everything else (candidate sampling, scheduling, training, evaluation hooks) is handled for you.
+
+---
+
+## Implementing Your Own View Metric
+
+NBV-Gym uses a factory pattern (`create_view_selector` / `setup_view_metric`) so adding a new metric is just a few lines:
+
+1. **Write a scoring function** in `nbv_gym/util/coverage.py` (or a new module). It receives the current Gaussian model and a batch of candidate cameras and returns per-camera scores.
+2. **Register the metric** by adding a branch in `nbv_gym/model.py:setup_view_metric()`.
+3. **Run training** with `--pipeline.view-metric <your-metric>`.
+
+Built-in metrics already include `coverage`, `fig`, `view_fig`, `fig_diag`, `view_fig_diag`, `fig_color_field`, and `fisher_rf` &mdash; use them as templates.
 
 ---
 
@@ -38,8 +83,8 @@ cd ..
 ### 3. Clone and install NBV-Gym
 
 ```bash
-git clone <repository-url>
-cd nbv-gym
+git clone https://github.com/chengine/nbv_gym.git
+cd nbv_gym
 pip install -r requirements.txt
 pip install -e .
 ```
@@ -53,7 +98,7 @@ pip install -e .
 
 > **Note:** If your NVIDIA driver supports a different CUDA version than 12.4, edit `requirements.txt` to use the appropriate PyTorch index URL (see [PyTorch installation](https://pytorch.org/get-started/locally/)).
 
-### 5. Register with Nerfstudio
+### 4. Register with Nerfstudio
 
 ```bash
 ns-install-cli
@@ -95,7 +140,7 @@ When using `--pipeline.view-selector basic`, specify the metric for scoring cand
 
 | Metric | Description |
 |--------|-------------|
-| `coverage` | Basic coverage metric |
+| `coverage` | COVER &mdash; coverage-based metric (ours) |
 | `fig` | Fisher Information Gain |
 | `view_fig` | View-weighted Fisher Information Gain |
 | `fig_diag` | Diagonal approximation of FIG |
@@ -166,6 +211,21 @@ pip install -e . --no-build-isolation
 ```
 
 > **Note:** A standalone Fisher-RF model with full training support will be added in a future release.
+
+---
+
+## Citation
+
+If you use NBV-Gym or COVER in your research, please cite:
+
+```bibtex
+@inproceedings{chen2026cover,
+  author    = {Timothy Chen and Adam Dai and Maximilian Adang and Grace Gao and Mac Schwager},
+  title     = {Coverage Optimization for Camera View Selection},
+  booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year      = {2026}
+}
+```
 
 ---
 
