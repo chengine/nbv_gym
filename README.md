@@ -30,7 +30,7 @@
 NBV-Gym wraps the standard Nerfstudio training loop with an **active view selection loop**. Every `N` gradient steps, the framework does the following:
 
 1. **Score candidate views** &mdash; the active `view_metric` is queried against the current 3DGS state, returning a scalar score for each unused training camera.
-2. **Select the next best view(s)** &mdash; the active `view_selector` (e.g. random, top-K, KD-tree filtered) picks one or more views from the ranked candidates.
+2. **Select the next best view(s)** &mdash; view selection is formulated as a **minimization** problem: the active `view_selector` (e.g. random, top-K, KD-tree filtered) picks the candidate views with the **lowest** metric values. If you implement your own metric, make sure lower scores correspond to *more informative* views (negate your score if needed).
 3. **Expand the active set** &mdash; chosen views are moved from the candidate pool into the active training set, and incremental optimization continues.
 
 All of this is orchestrated by `ViewSelectionPipeline` (`nbv_gym/pipeline.py`) and `ViewSelectionDataManager` (`nbv_gym/datamanager.py`). As an implementer of a new metric, **you only need to define how to score a view** &mdash; everything else (candidate sampling, scheduling, training, evaluation hooks) is handled for you.
@@ -216,7 +216,7 @@ pip install -e . --no-build-isolation
 
 ## Citation
 
-If you use NBV-Gym or COVER in your research, please cite:
+If you use NBV-Gym or COVER in your research, we would greatly appreciate you citing:
 
 ```bibtex
 @inproceedings{chen2026cover,
