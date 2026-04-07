@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <!-- Meta tags for social media banners, these should be filled in appropriatly as they are your "business card" -->
+  <!-- Replace the content tag with appropriate information -->
+  <meta name="description" content="Coverage Optimization for Camera View Selection">
+  <meta property="og:title" content="Coverage Optimization for Camera View Selection" />
+  <meta property="og:description" content="" />
+  <meta property="og:url" content="https://chengine.github.io/lac.github.io/" />
+  <!-- Path to banner image, should be in the path listed below. Optimal dimenssions are 1200X630-->
+  <meta property="og:image" content="static/image/your_banner_image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+
+
+  <meta name="twitter:title" content="Coverage Optimization for Camera View Selection">
+  <meta name="twitter:description" content="">
+  <!-- Path to banner image, should be in the path listed below. Optimal dimenssions are 1200X600-->
+  <meta name="twitter:image" content="static/images/your_twitter_banner_image.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <!-- Keywords for your paper to be indexed by-->
+  <meta name="keywords" content="KEYWORDS SHOULD BE PLACED HERE">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+
+  <title>Coverage Optimization for Camera View Selection</title>
+  <!-- <link rel="icon" type="image/x-icon" href="static/images/favicon.ico"> -->
+  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro" rel="stylesheet">
+
+  <link rel="stylesheet" href="static/css/bulma.min.css">
+  <link rel="stylesheet" href="static/css/bulma-slider.min.css">
+  <link rel="stylesheet" href="static/css/fontawesome.all.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  <link rel="stylesheet" href="static/css/index.css">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script defer src="static/js/fontawesome.all.min.js"></script>
+  <script src="static/js/bulma-slider.min.js"></script>
+  <script src="static/js/index.js"></script>
+</head>
+
+
+<body>
+
+
+  <section class="hero">
+    <div class="hero-body">
+      <div class="container is-max-desktop">
+        <div class="columns is-centered">
+          <div class="column has-text-centered">
+            <h1 class="title is-1 publication-title">
+              <img src="assets/COVER_logo.svg" alt="COVER logo" class="publication-logo">
+              Coverage Optimization for Camera View Selection
+            </h1>
+            <div class="is-size-4 publication-authors">
+              <span class="author-block">
+                <a href="https://msl.stanford.edu/people/timchen" target="_blank">Timothy Chen</a>*,</span>
+              <span class="author-block">
+                <a href="https://scholar.google.com/citations?user=PVl3j4cAAAAJ&hl=en" target="_blank">Adam Dai</a>*,</span>
+              <span class="author-block">
+                <a href="https://msl.stanford.edu/people/maximilianadang" target="_blank">Maximilian Adang</a>,</span>
+              <span class="author-block">
+                <a href="https://profiles.stanford.edu/gracegao" target="_blank">Grace Gao</a>,</span>
+              <span class="author-block">
+                <a href="https://profiles.stanford.edu/mac-schwager" target="_blank">Mac Schwager</a>
+              </span>
+            </div>
+
+            <div class="is-size-5 publication-authors">
+              <span class="author-block" style="color: #8C1515;">Stanford University</span>
+              <br>
+              <span class="publication-venue">🎉 Accepted to CVPR 2026 🎉</span>
+              <span class="eql-cntrb"><small><br><sup>*</sup>Equal Contribution</small></span>
+            </div>
+
+            <div class="column has-text-centered">
+              <div class="publication-links">
+                <!-- Paper PDF link -->
+                <span class="link-block">
+                  <a href="assets/COVER.pdf" target="_blank"
+                    class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon">
+                      <i class="fas fa-file-pdf"></i>
+                    </span>
+                    <span>Paper</span>
+                  </a>
+                </span>
+
+                <!-- Github link -->
+                <span class="link-block">
+                  <a href="https://github.com/chengine/nbv_gym" target="_blank"
+                    class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon">
+                      <i class="fab fa-github"></i>
+                    </span>
+                    <span>Code</span>
+                  </a>
+                </span>
+
+                <!-- ArXiv abstract Link -->
+                <!-- <span class="link-block">
+                  <a href="https://arxiv.org/abs/<ARXIV PAPER ID>" target="_blank"
+                    class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon">
+                      <i class="ai ai-arxiv"></i>
+                    </span>
+                    <span>arXiv</span>
+                  </a>
+                </span> -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- Teaser video -->
+  <section class="hero teaser">
+    <div class="container is-max-desktop">
+      <div class="hero-body">
+        <!-- Video coming soon -->
+      </div>
+    </div>
+  </section>
+  <!-- End Teaser video -->
+
+  <!-- Paper abstract -->
+  <section class="section hero is-light">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered has-text-centered">
+        <div class="column is-four-fifths">
+          <h2 class="title is-3">Abstract</h2>
+          <div class="content has-text-justified">
+            <p>
+              What makes a good viewpoint?
+              The quality of the data used to learn 3D reconstructions is crucial for enabling efficient and accurate
+              scene modeling.
+              We study the active view selection problem and develop a principled analysis that yields a simple and
+              interpretable criterion for selecting informative camera poses.
+              Our key insight is that informative views can be obtained by minimizing a tractable approximation of the
+              Fisher Information Gain, which reduces to favoring viewpoints that cover geometry that has been
+              insufficiently observed by past cameras.
+              This leads to a lightweight coverage-based view selection metric that avoids expensive transmittance
+              estimation, is robust to noise and training dynamics, and can be rendered at 85 FPS. We call our pipeline COVER
+              (Camera Optimization for View Exploration and Reconstruction).
+              We integrate our method into the Nerfstudio framework and evaluate it on real datasets within fixed
+              and embodied data acquisition scenarios.
+              Across multiple datasets and radiance-field baselines, our method consistently improves
+              reconstruction quality compared to state-of-the-art active view selection methods.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- End paper abstract -->
+
+  <!-- Questions -->
+  <section class="section" id="questions">
+    <div class="container is-max-desktop">
+      <h2 class="title is-3 has-text-centered">Key Questions</h2>
+      <div class="columns is-multiline">
+        <div class="column is-6">
+          <div class="box question-box">
+            <span class="tag question-tag">Q1</span>
+            <h3 class="title is-5" style="margin: 0.5rem 0 0.25rem;">Is there a natural interpretation of information gain?</h3>
+            <p>Humans naturally collect sequential image datasets that facilitate 3D reconstruction. This observation suggests that there exists a natural interpretation to the information gain problem. We make this explicit by showing close connections between Fisher Information Gain and coverage.</p>
+          </div>
+        </div>
+        <div class="column is-6">
+          <div class="box question-box">
+            <span class="tag question-tag">Q2</span>
+            <h3 class="title is-5" style="margin: 0.5rem 0 0.25rem;">Does coverage outperform information-theoretic baselines?</h3>
+            <p>COVER consistently outperforms FisherRF and random selection across 15 real scenes in PSNR, SSIM, and LPIPS&mdash;both on human-captured datasets that already have good natural coverage, <i>and</i> in embodied scenarios where the camera can only move within a limited vicinity under a fixed time budget.</p>
+          </div>
+        </div>
+        <div class="column is-6">
+          <div class="box question-box">
+            <span class="tag question-tag">Q3</span>
+            <h3 class="title is-5" style="margin: 0.5rem 0 0.25rem;">Can we avoid expensive transmittance computation?</h3>
+            <p>Yes. COVER abstracts away transmittance effects, relying only on Gaussian projection onto the image plane&mdash;no rasterization required.</p>
+          </div>
+        </div>
+        <div class="column is-6">
+          <div class="box question-box">
+            <span class="tag question-tag">Q4</span>
+            <h3 class="title is-5" style="margin: 0.5rem 0 0.25rem;">Is the metric fast enough for real-time use?</h3>
+            <p>The coverage metric renders at 85 FPS (including color), enabling real-time visualization. Under a fixed time budget, this speed facilitates more comprehensive search and scalable view selection.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- End Questions -->
+
+  <!-- Pipeline -->
+  <section class="hero is-small">
+    <div class="hero-body">
+      <div class="container is-max-desktop">
+        <h2 class="title is-3 has-text-centered">Pipeline</h2>
+        <figure class="image figure-pop">
+          <img src="assets/teaser.png" alt="COVER pipeline overview">
+        </figure>
+        <div class="content has-text-justified" style="margin-top: 0;">
+          <p><b>COVER</b> operates in three stages:</p>
+          <ol>
+            <li>
+              <b>Coverage View Metric:</b> For each Gaussian primitive, we compute a lightweight coverage score
+              measuring how well it has been observed by existing training cameras. Derived from a tractable
+              approximation of the Fisher Information Gain, this metric stores a discrete grid over the unit sphere
+              for each Gaussian, recording the frequency of observation from different viewing directions incident
+              on that primitive from training cameras. Although we iterate through the entire training dataset to
+              compute these frequencies, the process does not require rasterization&mdash;only projection of
+              Gaussians onto the 2D image plane, which is very inexpensive and allows COVER to scale to large
+              scenes. This also means the metric is non-myopic, as it accounts for all previously selected
+              views when scoring candidates. The metric can be rendered as an image at 85 FPS (including color rendering) for
+              real-time visualization.
+            </li>
+            <li>
+              <b>Next Best View Selection:</b> Candidate viewpoints are ranked by how much under-covered geometry
+              they observe. Views that cover large regions of the scene insufficiently seen by past cameras are
+              selected and added to the training set.
+            </li>
+            <li>
+              <b>Incremental Training:</b> The 3D Gaussian Splatting model is incrementally trained with the
+              newly added views, progressively improving reconstruction quality.
+            </li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- End Pipeline -->
+
+
+  <!-- Results -->
+  <section class="hero is-small">
+    <div class="hero-body">
+      <div class="container is-max-widescreen">
+        <h2 class="title is-3 has-text-centered">Results</h2>
+        <div class="container is-max-desktop" style="margin-bottom: 1.5rem;">
+          <div class="content has-text-justified">
+            <p>
+              We benchmark COVER against FisherRF
+              and a random baseline across 15 real scenes from the Tanks and Temples, MipNeRF360, and custom
+              captured datasets. Each scene is seeded with 10 initial views, and a new view is selected every
+              200 gradient steps during training. COVER consistently outperforms all feasible baselines in
+              PSNR, SSIM, and LPIPS, and in some scenes approaches the performance of Splatfacto
+              trained with all views. Use the sliders below to compare renders from evaluation viewpoints
+              not seen during training.
+            </p>
+          </div>
+        </div>
+        <div class="has-text-centered" style="margin-bottom: 1.5rem;">
+          <div class="select is-small">
+            <select id="scene-selector">
+              <option value="bonsai">Bonsai</option>
+              <option value="chair">Chair</option>
+              <option value="counter">Counter</option>
+              <option value="room">Room</option>
+              <option value="space">Space</option>
+              <option value="train">Train</option>
+              <option value="treehill">Treehill</option>
+            </select>
+          </div>
+        </div>
+        <div class="columns is-centered">
+          <div class="column is-one-third">
+            <p class="has-text-centered has-text-weight-semibold" style="margin-bottom: 0.5rem;">COVER vs Ground Truth</p>
+            <div id="slider-coverage" class="bal-container" data-method="coverage">
+              <div class="bal-after">
+                <img class="img-gt" src="assets/bonsai/ground_truth.png">
+                <div class="bal-afterPosition afterLabel">Ground Truth</div>
+              </div>
+              <div class="bal-before">
+                <div class="bal-before-inset">
+                  <img class="img-method" src="assets/bonsai/coverage.png">
+                  <div class="bal-beforePosition beforeLabel">COVER</div>
+                </div>
+              </div>
+              <div class="bal-handle">
+                <span class="handle-left-arrow"></span>
+                <span class="handle-right-arrow"></span>
+              </div>
+            </div>
+          </div>
+          <div class="column is-one-third">
+            <p class="has-text-centered has-text-weight-semibold" style="margin-bottom: 0.5rem;">FisherRF vs Ground Truth</p>
+            <div id="slider-fisher" class="bal-container" data-method="fisher">
+              <div class="bal-after">
+                <img class="img-gt" src="assets/bonsai/ground_truth.png">
+                <div class="bal-afterPosition afterLabel">Ground Truth</div>
+              </div>
+              <div class="bal-before">
+                <div class="bal-before-inset">
+                  <img class="img-method" src="assets/bonsai/fisher.png">
+                  <div class="bal-beforePosition beforeLabel">FisherRF</div>
+                </div>
+              </div>
+              <div class="bal-handle">
+                <span class="handle-left-arrow"></span>
+                <span class="handle-right-arrow"></span>
+              </div>
+            </div>
+          </div>
+          <div class="column is-one-third">
+            <p class="has-text-centered has-text-weight-semibold" style="margin-bottom: 0.5rem;">Random vs Ground Truth</p>
+            <div id="slider-random" class="bal-container" data-method="random">
+              <div class="bal-after">
+                <img class="img-gt" src="assets/bonsai/ground_truth.png">
+                <div class="bal-afterPosition afterLabel">Ground Truth</div>
+              </div>
+              <div class="bal-before">
+                <div class="bal-before-inset">
+                  <img class="img-method" src="assets/bonsai/random.png">
+                  <div class="bal-beforePosition beforeLabel">Random</div>
+                </div>
+              </div>
+              <div class="bal-handle">
+                <span class="handle-left-arrow"></span>
+                <span class="handle-right-arrow"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- End Results -->
+
+
+
+  <!--BibTex citation -->
+  <section class="section" id="BibTeX">
+    <div class="container is-max-desktop content">
+      <div class="bibtex-header">
+        <h2 class="title">BibTeX</h2>
+        <button class="copy-bibtex-btn" onclick="copyBibTeX()" title="Copy BibTeX to clipboard">
+          <i class="fas fa-copy"></i>
+          <span class="copy-text">Copy</span>
+        </button>
+      </div>
+      <pre id="bibtex-code"><code>@inproceedings{chen2026cover,
+  author    = {Timothy Chen and Adam Dai and Maximilian Adang and Grace Gao and Mac Schwager},
+  title     = {Coverage Optimization for Camera View Selection},
+  booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year      = {2026}
+}</code></pre>
+    </div>
+  </section>
+  <!--End BibTex citation -->
+
+
+  <footer class="footer">
+    <div class="container">
+      <div class="columns is-centered">
+        <div class="column is-8">
+          <div class="content">
+
+            <p>
+              This page was built using the <a href="https://github.com/eliahuhorwitz/Academic-project-page-template"
+                target="_blank">Academic Project Page Template</a> which was adopted from the <a
+                href="https://nerfies.github.io" target="_blank">Nerfies</a> project page.
+              You are free to borrow the source code of this website, we just ask that you link back to this page in the
+              footer. <br> This website is licensed under a <a rel="license"
+                href="http://creativecommons.org/licenses/by-sa/4.0/" target="_blank">Creative
+                Commons Attribution-ShareAlike 4.0 International License</a>.
+            </p>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+
+</body>
+
+</html>

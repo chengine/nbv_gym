@@ -1,0 +1,48 @@
+# =====================================================================
+# .gitignore for the `website` branch
+# Only files actually used by the GitHub Pages site are tracked.
+# =====================================================================
+
+# --- Python source / packaging (lives on master branch) ---
+nbv_gym/
+nbv_gym.egg-info/
+nerfstudio/
+outputs/
+scripts/
+tests/
+pyproject.toml
+requirements.txt
+*.egg-info/
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+env/
+
+# --- Project docs not needed by the site ---
+CLAUDE.md
+
+# --- Unused viser viewer client (no longer embedded in the site) ---
+viser-client/
+
+# --- Unused static assets ---
+static/pdfs/
+static/videos/
+static/images/
+static/css/bulma-carousel.min.css
+static/css/bulma-carousel.css
+static/css/bulma.css.map.txt
+static/js/bulma-carousel.js
+static/js/bulma-carousel.min.js
+static/js/bulma-slider.js
+
+# --- Editor / OS / tooling ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.claude/
