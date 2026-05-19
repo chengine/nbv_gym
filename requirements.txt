@@ -1,0 +1,6 @@
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.5.1
+torchvision==0.20.1
+gsplat==1.5.3
+numpy<2.0
+Pillow<11

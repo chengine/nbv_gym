@@ -208,6 +208,10 @@ Fisher-RF uncertainty is available as a view metric (`--pipeline.view-metric fis
 git clone --recursive https://github.com/JiangWenPL/modified-diff-gaussian-rasterization-w-depth
 cd modified-diff-gaussian-rasterization-w-depth
 pip install -e . --no-build-isolation
+cd ..
+
+# einops is also required by the Fisher-RF code path
+pip install einops
 ```
 
 > **Note:** A standalone Fisher-RF model with full training support will be added in a future release.

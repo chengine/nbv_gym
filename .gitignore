@@ -27,6 +27,9 @@ pyrightconfig.json
 !assets/teaser.png
 !assets/COVER_logo.svg
 
+# Dependency manifest — keep tracked despite *.txt rule above
+!requirements.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
