@@ -1,0 +1,219 @@
+diff --git a/nerfstudio/models/nerfacto.py b/nerfstudio/models/nerfacto.py
+index bfccfd87..8f4ecc45 100644
+--- a/nerfstudio/models/nerfacto.py
++++ b/nerfstudio/models/nerfacto.py
+@@ -390,6 +390,214 @@ class NerfactoModel(Model):
+             self.camera_optimizer.get_loss_dict(loss_dict)
+         return loss_dict
+ 
++    # def uncertainty_score_for_camera(
++    #     self,
++    #     camera: "Cameras",
++    #     hessian: torch.Tensor,
++    #     reduce_mode: str = "mean",
++    #     lod: int = 8,
++    #     return_uncertainty_map: bool = False,
++    #     downscale_factor: float = 4.0,
++    # ) -> torch.Tensor:
++    #     """
++    #     Score a candidate camera by rendering it and computing BayesRays uncertainty.
++
++    #     Uses the pre-computed Hessian to generate an uncertainty map during
++    #     rendering, then aggregates to a single scalar score. Higher scores indicate
++    #     that this camera view would see high-uncertainty regions.
++
++    #     Uses nerfstudio's eval-style downsampling for speed (4x default).
++
++    #     Args:
++    #         camera: Single camera to evaluate (Cameras object with size=1)
++    #         hessian: Pre-computed Hessian uncertainty grid [((2^lod)+1)^3]
++    #         reduce_mode: "mean" or "sum" for aggregating per-pixel uncertainty
++    #         lod: Level of detail (log2 of grid resolution)
++    #         return_uncertainty_map: If True, also return the full uncertainty map
++    #         downscale_factor: Resolution downscaling factor for faster evaluation (default 4.0 = 1/4 resolution)
++
++    #     Returns:
++    #         If return_uncertainty_map=False: Scalar tensor with uncertainty score
++    #         If return_uncertainty_map=True: Tuple of (score, uncertainty_map [H, W])
++    #     """
++    #     import types
++    #     from copy import deepcopy
++    #     try:
++    #         from bayesrays.scripts.output_uncertainty import get_uncertainty, get_output_fn
++    #     except ImportError:
++    #         raise ImportError(
++    #             "BayesRays uncertainty scoring requires bayesrays library. "
++    #             "Install with: pip install bayesrays"
++    #         )
++
++    #     # Save original state
++    #     was_training = self.training
++    #     original_get_outputs = None
++    #     if hasattr(self, "get_outputs"):
++    #         original_get_outputs = self.get_outputs
++
++    #     self.eval()
++
++    #     try:
++    #         # Inject Hessian and uncertainty computation into model
++    #         self.filter_out = False
++    #         self.filter_thresh = 0.5
++    #         self.hessian = hessian
++    #         self.lod = lod
++    #         self.get_uncertainty = types.MethodType(get_uncertainty, self)
++    #         self.white_bg = False
++    #         self.black_bg = False
++    #         self.N = 4096 * 1000  # approx ray dataset size
++
++    #         # Compute inverse Hessian (uncertainty = 1/Hessian)
++    #         reg_lambda = 1e-4 / ((2 ** lod) ** 3)
++    #         H = hessian / self.N + reg_lambda
++    #         self.un = 1 / H  # Uncertainty grid (inverse of regularized Hessian)
++
++    #         with torch.no_grad():
++    #             # Use eval-style downsampling like nerfstudio does
++    #             # This makes uncertainty evaluation MUCH faster
++    #             # print(f"[DEBUG uncertainty_score_for_camera] Input camera resolution: {camera.height.item() if hasattr(camera.height, 'item') else camera.height}x{camera.width.item() if hasattr(camera.width, 'item') else camera.width}")
++    #             camera_eval = deepcopy(camera)
++    #             if downscale_factor > 1.0:
++    #                 # print(f"[DEBUG uncertainty_score_for_camera] Applying {downscale_factor}x downsampling")
++    #                 camera_eval.rescale_output_resolution(scaling_factor=1.0 / downscale_factor)
++    #             # print(f"[DEBUG uncertainty_score_for_camera] Eval camera resolution: {camera_eval.height.item() if hasattr(camera_eval.height, 'item') else camera_eval.height}x{camera_eval.width.item() if hasattr(camera_eval.width, 'item') else camera_eval.width}")
++
++    #             # Generate rays from downscaled camera
++    #             ray_bundle = camera_eval.generate_rays(
++    #                 camera_indices=torch.arange(camera_eval.size, device=self.device, dtype=torch.long)
++    #             )
++
++    #             # Use the same batch size as eval (4096 rays per chunk)
++    #             eval_batch_size = getattr(self.config, "eval_num_rays_per_batch", 4096)
++
++    #             # Flatten the rays if they're in image format [H, W, ...]
++    #             if ray_bundle.origins.dim() == 3:
++    #                 H_eval, W_eval = ray_bundle.origins.shape[0], ray_bundle.origins.shape[1]
++    #                 num_rays_total = H_eval * W_eval
++
++    #                 # Reshape ray_bundle by indexing all rays
++    #                 h_indices, w_indices = torch.meshgrid(
++    #                     torch.arange(H_eval, device=self.device),
++    #                     torch.arange(W_eval, device=self.device),
++    #                     indexing='ij'
++    #                 )
++    #                 flat_indices = (h_indices.flatten(), w_indices.flatten())
++    #                 ray_bundle = ray_bundle[flat_indices]  # Use indexing to preserve all attributes
++    #             else:
++    #                 num_rays_total = ray_bundle.origins.shape[0]
++    #                 H_eval, W_eval = None, None
++
++    #             accumulated_uncertainty_per_ray = []
++    #             min_uncertainty = -3.0
++    #             max_uncertainty = 6.0
++
++    #             # Process rays in batches (like pipeline's get_eval_image_metrics_and_images)
++    #             for batch_start in range(0, num_rays_total, eval_batch_size):
++    #                 batch_end = min(batch_start + eval_batch_size, num_rays_total)
++    #                 batch_size = batch_end - batch_start
++
++    #                 # Get batch of rays
++    #                 batch_rays = ray_bundle[batch_start:batch_end]
++
++    #                 # Ensure nears and fars are set (required by proposal sampler)
++    #                 if batch_rays.nears is None:
++    #                     if self.collider is not None:
++    #                         batch_rays = self.collider(batch_rays)
++    #                     else:
++    #                         near_plane = getattr(self.config, 'near_plane', 0.05)
++    #                         far_plane = getattr(self.config, 'far_plane', 1000.0)
++    #                         batch_rays.nears = torch.full((batch_size, 1), near_plane, device=self.device)
++    #                         batch_rays.fars = torch.full((batch_size, 1), far_plane, device=self.device)
++
++    #                 # Get ray samples using the proposal sampler (standard forward pass)
++    #                 ray_samples, weights_list, ray_samples_list = self.proposal_sampler(
++    #                     batch_rays, density_fns=self.density_fns
++    #                 )
++
++    #                 # Get field outputs
++    #                 field_outputs = self.field(ray_samples, compute_normals=self.config.predict_normals)
++    #                 points = ray_samples.frustums.get_positions()
++
++    #                 # Look up uncertainty at each sample point using the Hessian
++    #                 un_points = self.get_uncertainty(points)
++
++    #                 # Get density and weights
++    #                 density = field_outputs[FieldHeadNames.DENSITY]
++    #                 weights = ray_samples.get_weights(density)
++
++    #                 # Accumulate uncertainty along rays (volumetric rendering style)
++    #                 batch_uncertainty_per_ray = torch.sum(weights * un_points, dim=-2)
++
++    #                 # Alpha blending: add minimum uncertainty for unaccounted areas
++    #                 batch_uncertainty_per_ray += (1 - torch.sum(weights, dim=-2)) * min_uncertainty
++
++    #                 # Normalize to reasonable range
++    #                 batch_uncertainty_per_ray = torch.clip(batch_uncertainty_per_ray, min_uncertainty, max_uncertainty)
++    #                 batch_uncertainty_per_ray = (batch_uncertainty_per_ray - min_uncertainty) / (max_uncertainty - min_uncertainty)
++
++    #                 accumulated_uncertainty_per_ray.append(batch_uncertainty_per_ray)
++
++    #             # Concatenate all batches
++    #             uncertainty_per_ray = torch.cat(accumulated_uncertainty_per_ray, dim=0)
++
++    #             # Aggregate uncertainty to scalar score
++    #             if reduce_mode.lower() == "mean":
++    #                 uncertainty_score = uncertainty_per_ray.mean()
++    #             elif reduce_mode.lower() == "sum":
++    #                 uncertainty_score = uncertainty_per_ray.sum()
++    #             else:
++    #                 raise ValueError(f"reduce_mode must be 'mean' or 'sum', got {reduce_mode}")
++
++    #             # Optionally reshape and return the full uncertainty map
++    #             if return_uncertainty_map:
++    #                 if H_eval is not None and W_eval is not None:
++    #                     # Reshape from [num_rays] to [H, W]
++    #                     uncertainty_map = uncertainty_per_ray.reshape(H_eval, W_eval)
++    #                     # print(f"[DEBUG uncertainty_score_for_camera] Returning tuple: score={uncertainty_score.item()}, map shape={uncertainty_map.shape}")
++    #                     return uncertainty_score, uncertainty_map
++    #                 else:
++    #                     # print(f"[DEBUG uncertainty_score_for_camera] Returning tuple (flat): score={uncertainty_score.item()}, per_ray shape={uncertainty_per_ray.shape}")
++    #                     return uncertainty_score, uncertainty_per_ray
++    #             else:
++    #                 # print(f"[DEBUG uncertainty_score_for_camera] Returning scalar: {uncertainty_score.item()}")
++    #                 return uncertainty_score
++
++    #     except Exception as e:
++    #         import traceback
++    #         import sys
++    #         print(f"\n[ERROR] uncertainty_score_for_camera failed with exception:")
++    #         print(f"[ERROR] Exception type: {type(e).__name__}")
++    #         print(f"[ERROR] Exception message: {e}")
++    #         print(f"[ERROR] Full traceback:")
++    #         traceback.print_exc(file=sys.stdout)
++    #         raise e
++
++    #     finally:
++    #         # Restore original state
++    #         if was_training:
++    #             self.train()
++
++    #         # Restore original get_outputs method
++    #         if original_get_outputs is not None:
++    #             self.get_outputs = original_get_outputs
++
++    #         # Clean up injected attributes
++    #         for attr in [
++    #             "filter_out",
++    #             "filter_thresh",
++    #             "hessian",
++    #             "lod",
++    #             "get_uncertainty",
++    #             "white_bg",
++    #             "black_bg",
++    #             "N",
++    #             "un",
++    #         ]:
++    #             if hasattr(self, attr):
++    #                 delattr(self, attr)
++
+     def get_image_metrics_and_images(
+         self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
+     ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:

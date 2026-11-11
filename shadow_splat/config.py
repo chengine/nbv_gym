@@ -192,7 +192,7 @@ bayes_rays = MethodSpecification(
                 dataparser=NerfstudioDataParserConfig(),
                 train_num_rays_per_batch=4096,  # Standard nerfacto setting
                 eval_num_rays_per_batch=32768,
-                start_num_views=15,  # Start with 10 views (warm start), expand via BayesRays
+                start_num_views=10,  # Start with 10 views (warm start), expand via BayesRays
             ),
             model=NerfactoModelWithUncertaintyConfig(
                 eval_num_rays_per_chunk=32768,

@@ -38,21 +38,21 @@ PROJECT_NAME = "next-best-view"
 # Datasets to sweep
 BASE_DATA_DIR = pathlib.Path("/home/admin/StanfordMSL/shadow_splat/data")
 SCENES = [
-"caterpillar",
-"train",
-"ignatius",
-"shiny_statue_6pm",
-"space_laces_4pm",
-"chair_3pm",
-# "master_chief_cycles"
-"bicycle",
-"counter",
-"flowers",
-"garden",
-"stump",
-"treehill",
+# "caterpillar",
+# "train",
+# "ignatius",
+# "shiny_statue_6pm",
+# "space_laces_4pm",
+# "chair_3pm",
+# # "master_chief_cycles"
+# "bicycle",
+# "counter",
+# "flowers",
+# "garden",
+# "stump",
+# "treehill",
 # "kitchen",
-# "bonsai",
+"bonsai",
 # "room",
 ]
 DATASETS = [str(BASE_DATA_DIR / s) for s in SCENES]
