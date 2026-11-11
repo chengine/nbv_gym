@@ -1,0 +1,35 @@
+[
+  {
+    "root": "outputs",
+    "archive": "shadow_splat__outputs.tar.zst",
+    "sha256": "5d5e1bacfe98cc5b14c7e2dc5d38130e91c565035a19186a875cefc4b56d449f",
+    "md5": "34342cb6a44cd9211cf40790bf24d8e6",
+    "archive_bytes": 3728516423,
+    "source_bytes": 5308794921,
+    "source_allocated_bytes": 5309681664,
+    "files": 349,
+    "cloud_verified_and_local_files_removed": false
+  },
+  {
+    "root": "scripts/outputs",
+    "archive": "shadow_splat__scripts__outputs.tar.zst",
+    "sha256": "54730f08290ab350056fd2a3be8794c1c37e2b3670ac4a0063d8597b4c2952e6",
+    "md5": "4dad9a41f68c66d3595e31417a10a69a",
+    "archive_bytes": 15381012857,
+    "source_bytes": 18267661952,
+    "source_allocated_bytes": 18278641664,
+    "files": 5023,
+    "cloud_verified_and_local_files_removed": false
+  },
+  {
+    "root": "uncertainty_maps",
+    "archive": "shadow_splat__uncertainty_maps.tar.zst",
+    "sha256": "5c67d26a885333993d41c6fed528122f0fc2319c17dfd894d163b1b24f6f6456",
+    "md5": "c213e29c1f6872a382671b962f1fabcf",
+    "archive_bytes": 7179473,
+    "source_bytes": 7124664,
+    "source_allocated_bytes": 7430144,
+    "files": 151,
+    "cloud_verified_and_local_files_removed": false
+  }
+]
