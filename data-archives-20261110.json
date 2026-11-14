@@ -8,7 +8,9 @@
     "source_bytes": 5308794921,
     "source_allocated_bytes": 5309681664,
     "files": 349,
-    "cloud_verified_and_local_files_removed": false
+    "cloud_verified_and_local_files_removed": true,
+    "drive_file_id": "1RBtkv5HbSadcYG2JS4VZnicfKHVywuoq",
+    "remote": "stanford-gdrive:root-offload-20261110-three-projects/shadow_splat/shadow_splat__outputs.tar.zst"
   },
   {
     "root": "scripts/outputs",
@@ -19,7 +21,9 @@
     "source_bytes": 18267661952,
     "source_allocated_bytes": 18278641664,
     "files": 5023,
-    "cloud_verified_and_local_files_removed": false
+    "cloud_verified_and_local_files_removed": true,
+    "drive_file_id": "1a_BDOj4Dj1SnTXwa1ZpDpkj4lyDNx-on",
+    "remote": "stanford-gdrive:root-offload-20261110-three-projects/shadow_splat/shadow_splat__scripts__outputs.tar.zst"
   },
   {
     "root": "uncertainty_maps",
@@ -30,6 +34,8 @@
     "source_bytes": 7124664,
     "source_allocated_bytes": 7430144,
     "files": 151,
-    "cloud_verified_and_local_files_removed": false
+    "cloud_verified_and_local_files_removed": true,
+    "drive_file_id": "1Q_l8u-JiAhuJlbypFenThHJAizfbVc1O",
+    "remote": "stanford-gdrive:root-offload-20261110-three-projects/shadow_splat/shadow_splat__uncertainty_maps.tar.zst"
   }
 ]

@@ -8,13 +8,13 @@ Data archive preparation started on November 10, 2026 to recover space on the ro
 - Temporary local archives and verification records: `/media/admin/data/.offload-staging/root-offload-20261110-three-projects`
 - Selected data: `outputs`, `scripts/outputs`, `uncertainty_maps`.
 
-**Status:** Google Drive confirmation is pending because its shared rclone API client is rate-limited. A local `*.prepared.json` record confirms an archive was compared against its source. A `*.completed.json` record is written only after Drive size/MD5 verification and removal of the corresponding local regular data files. Preparation alone does not mean a cloud backup has completed.
+**Status:** All selected archives are uploaded to Google Drive and verified by size and MD5, after local archive-to-source content comparison. Their archived untracked regular files and temporary archive copies have been removed locally. Source files, tracked data, and existing symlinks to other media-drive datasets are retained.
 
 `data` already links to `/media/admin/data/StanfordMSL/shadow_splat/data`; that dataset is outside this root offload. Local Nerfstudio source edits are preserved in `patches/nerfstudio-local.patch`.
 
 ## Archive inventory
 
-All selected archives have passed local content comparison. `data-archives-20261110.json` records their sizes and checksums; `data-archives-20261110.sha256` verifies downloaded archives independently of the staging drive. Cloud completion is still pending.
+All selected archives have passed local content comparison. `data-archives-20261110.json` records their sizes and checksums; `data-archives-20261110.sha256` verifies downloaded archives independently of the staging drive. Cloud verification and cleanup are complete for the recorded snapshot.
 
 ## Verify and restore
 
